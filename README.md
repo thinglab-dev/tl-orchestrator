@@ -1,18 +1,20 @@
 # tl-orchestrator
 
-Um método documental para planejar, implementar e revisar mudanças com Orquestrador, Planner, Maker e Checker. Usa agentes e portões já disponíveis no projeto consumidor. A distribuição contém somente Markdown e schema JSON; não precisa de linguagem de programação, runtime próprio ou instalação do projeto de origem.
+Um método documental para planejar, implementar e revisar mudanças com Orquestrador, Planner, Maker e Checker. Usa agentes e portões já disponíveis no projeto consumidor. A distribuição contém documentos Markdown, schema JSON e licença; não precisa de linguagem de programação, runtime próprio ou instalação do projeto de origem.
+
+Criado por **Albertiano**. Distribuído sob a [licença MIT](LICENSE), que permite uso, modificação e distribuição, inclusive comercial, com preservação do aviso de copyright e da licença nas cópias ou partes substanciais do material.
 
 Comece por [SKILL.md](SKILL.md). A [configuração do projeto](docs/PROJECT_CONFIGURATION.md) explica como descobrir regras e portões sem impor estrutura ao consumidor. BMAD, quando utilizado, permanece oficial e instalado separadamente.
 
-## Exportar os dez arquivos
+## Exportar os onze arquivos
 
-Em um terminal com ferramentas padrão POSIX, entre na raiz do pacote (pasta deste README). O bloco abaixo cria uma pasta temporária nova fora do projeto e nomeia exatamente os dez arquivos distribuídos. Usa `/tmp` para que uma configuração local de `TMPDIR` não leve a exportação para dentro do projeto. A pasta de origem deve estar fora de `/tmp` ou deve-se conferir que o destino não está dentro dela.
+Em um terminal com ferramentas padrão POSIX, entre na raiz do pacote (pasta deste README). O bloco abaixo cria uma pasta temporária nova fora do projeto e nomeia exatamente os onze arquivos distribuídos. Usa `/tmp` para que uma configuração local de `TMPDIR` não leve a exportação para dentro do projeto. A pasta de origem deve estar fora de `/tmp` ou deve-se conferir que o destino não está dentro dela.
 
 ```sh
 set -eu
 export_dir=$(mktemp -d /tmp/tl-orchestrator.XXXXXX)
 mkdir "$export_dir/prompts" "$export_dir/schemas" "$export_dir/docs"
-cp README.md SKILL.md "$export_dir/"
+cp README.md SKILL.md LICENSE "$export_dir/"
 cp prompts/orchestrator.md \
    prompts/orchestrator-perfis.md \
    prompts/orchestrator-playbook.md \
@@ -27,10 +29,10 @@ printf '%s\n' "$export_dir"
 
 Copiam-se apenas os caminhos explícitos, todos arquivos regulares. Outros arquivos da origem, inclusive histórico, configurações locais e backlog, não entram. Não use cópia recursiva da origem para exportar. A exportação não publica nem instala nada.
 
-Para conferir os dez arquivos, execute a partir da mesma raiz:
+Para conferir os onze arquivos, execute a partir da mesma raiz:
 
 ```sh
-shasum -a 256 README.md SKILL.md \
+shasum -a 256 README.md SKILL.md LICENSE \
   prompts/orchestrator.md prompts/orchestrator-perfis.md \
   prompts/orchestrator-playbook.md prompts/planner.md \
   prompts/maker.md prompts/checker-report-only.md \

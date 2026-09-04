@@ -24,4 +24,11 @@ Para verificação necessária que não pode executar, use um item `intent_gap` 
 
 O [schema JSON](../schemas/review-result.schema.json) é a única fonte da estrutura, dos campos e dos valores permitidos. Leia-o a partir do pacote entregue. A semântica do parecer é: `approved` exige ausência de ações necessárias; `changes_requested` identifica ao menos uma ação concreta. Nunca aprove pela ausência de informação.
 
-Responda exclusivamente com um documento JSON, sem delimitadores Markdown nem texto ao redor. Escreva a prosa no idioma pedido pelo usuário ou adotado pelo projeto; campos e enums mantêm a grafia do schema. O parecer não altera status nem ratifica a entrega por conta própria.
+Use o formato de ID definido no schema, como `R1`, `R2` e `R10`, para os `action_items`.
+Os [exemplos de parecer](../docs/PROJECT_CONFIGURATION.md#exemplos-de-parecer) ilustram o
+preenchimento; não substituem a inspeção nem a validação contra o schema.
+
+Responda exclusivamente com um objeto JSON, sem delimitadores Markdown nem texto ao redor.
+Não concatene pareceres nem acrescente metadados do harness ao objeto. Escreva a prosa no idioma
+pedido pelo usuário ou adotado pelo projeto; campos e enums mantêm a grafia do schema. O parecer
+não altera status nem ratifica a entrega por conta própria.

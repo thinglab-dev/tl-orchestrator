@@ -46,3 +46,49 @@ Os valores são descobertos, não executados a partir desta tabela. Preferência
 ## BMAD e outros métodos
 
 O pacote funciona com uma story em Markdown, um ticket ou outro contrato verificável. Quando BMAD existir, leia sua instalação oficial e as políticas locais aplicáveis. Use os artefatos do projeto correto e customizações suportadas; não altere upstream para acomodar o método. Não invente instruções de instalação: consulte a documentação oficial atual se essa for uma tarefa autorizada.
+
+## Exemplos de parecer
+
+Estes exemplos são fictícios e ilustram o [schema canônico](../schemas/review-result.schema.json).
+O schema prevalece; nenhum exemplo representa uma revisão executada. Os blocos Markdown existem
+apenas para leitura desta documentação: a resposta real do Checker contém somente o objeto JSON.
+
+`approved`, depois de inspecionar a entrega e não encontrar ações necessárias:
+
+```json
+{
+  "schema_version": 1,
+  "verdict": "approved",
+  "action_items": [],
+  "deferred": [],
+  "rejected": []
+}
+```
+
+`changes_requested`, quando há uma correção concreta no escopo:
+
+```json
+{
+  "schema_version": 1,
+  "verdict": "changes_requested",
+  "action_items": [
+    {
+      "id": "R1",
+      "severity": "high",
+      "category": "patch",
+      "target_role": "maker",
+      "location": "src/export.go:42",
+      "problem": "A exportação informa sucesso quando a escrita do destino falha.",
+      "evidence": "O retorno de Write é descartado e a função devolve nil; isso viola o AC de propagação de erros.",
+      "required_action": "Propagar o erro de escrita e verificar o caso de destino indisponível."
+    }
+  ],
+  "deferred": [],
+  "rejected": []
+}
+```
+
+Para registrar problemas preexistentes fora do escopo em `deferred` ou hipóteses investigadas e
+descartadas em `rejected`, use os campos de finding definidos pelo schema e evidência concreta.
+Essas listas podem ficar vazias; não invente achados para preenchê-las. O recebimento e a
+validação do parecer seguem o [playbook](../prompts/orchestrator-playbook.md#revisão-externa).

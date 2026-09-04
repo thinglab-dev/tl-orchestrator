@@ -6,6 +6,30 @@ Criado por **Albertiano**. Distribuído sob a [licença MIT](LICENSE), que permi
 
 Comece por [SKILL.md](SKILL.md). A [configuração do projeto](docs/PROJECT_CONFIGURATION.md) explica como descobrir regras e portões sem impor estrutura ao consumidor. BMAD, quando utilizado, permanece oficial e instalado separadamente.
 
+## Como os papéis trabalham
+
+O fluxo abaixo descreve uma mudança com implementação autorizada. Um pedido limitado a análise
+ou planejamento termina nessa etapa. Decisões reservadas ao usuário voltam a ele.
+
+```mermaid
+flowchart TD
+    U["Usuário"] -->|Define objetivo e autoriza escopo| O["Orquestrador"]
+    O -->|Quando precisa de auditoria ou spec| P["Planner"]
+    P -->|Propõe spec e corte| R["Orquestrador ratifica o corte"]
+    O -->|Spec já executável| R
+    R -->|Despacha implementação autorizada| M["Maker"]
+    M -->|Diff e evidências| V["Orquestrador confere e verifica"]
+    V -->|Correção necessária no escopo| M
+    V -->|Nova sessão e família distinta do Maker| C["Checker report-only"]
+    C -->|Parecer| J["Orquestrador valida o parecer"]
+    J -->|Parecer inválido: solicitar nova resposta| C
+    J -->|Correção de implementação| M
+    J -->|Spec inconsistente| P
+    J -->|Decisão de intenção| U
+    J -->|Sem ações pendentes e com autorização| I["Orquestrador integra e confere"]
+    I -->|Entrega e evidências| U
+```
+
 ## Exportar os onze arquivos
 
 Em um terminal com ferramentas padrão POSIX, entre na raiz do pacote (pasta deste README). O bloco abaixo cria uma pasta temporária nova fora do projeto e nomeia exatamente os onze arquivos distribuídos. Usa `/tmp` para que uma configuração local de `TMPDIR` não leve a exportação para dentro do projeto. A pasta de origem deve estar fora de `/tmp` ou deve-se conferir que o destino não está dentro dela.
@@ -27,20 +51,25 @@ printf '%s\n' "$export_dir"
 (cd "$export_dir" && find . -type f -print | LC_ALL=C sort)
 ```
 
-Copiam-se apenas os caminhos explícitos, todos arquivos regulares. Outros arquivos da origem, inclusive histórico, configurações locais e backlog, não entram. Não use cópia recursiva da origem para exportar. A exportação não publica nem instala nada.
+Copiam-se apenas os caminhos explícitos, todos arquivos regulares. Outros arquivos da origem, inclusive `.gitignore`, histórico, configurações locais e backlog, não entram. Não use cópia recursiva da origem para exportar. A exportação não publica nem instala nada.
 
 Para conferir os onze arquivos, execute a partir da mesma raiz:
 
 ```sh
+checksum_file=$(mktemp /tmp/tl-orchestrator-sha256.XXXXXX) &&
 shasum -a 256 README.md SKILL.md LICENSE \
   prompts/orchestrator.md prompts/orchestrator-perfis.md \
   prompts/orchestrator-playbook.md prompts/planner.md \
   prompts/maker.md prompts/checker-report-only.md \
   schemas/review-result.schema.json docs/PROJECT_CONFIGURATION.md \
-  | (cd "$export_dir" && shasum -a 256 -c -)
+  > "$checksum_file" &&
+(cd "${export_dir:?Execute primeiro o bloco de exportação}" && shasum -a 256 -c "$checksum_file")
 ```
 
-`sha256sum` pode substituir `shasum -a 256` se for a ferramenta disponível. A comparação executada é evidência pontual, não certificação automática do método.
+O manifesto fica fora do pacote exportado. O encadeamento com `&&` só inicia a conferência se
+todos os hashes de origem forem gerados com sucesso; arquivo ausente, cópia alterada ou erro de
+leitura retorna falha. `sha256sum` pode substituir `shasum -a 256` se for a ferramenta disponível.
+A comparação executada é evidência pontual, não certificação automática do método.
 
 ## Instalar e ativar
 

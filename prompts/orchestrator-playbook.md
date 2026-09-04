@@ -30,7 +30,22 @@ Antes de chamar um vermelho de regressão, leia o teste e investigue o caminho c
 
 Entregue ao Checker o contrato, a intenção congelada, base, diff completo e evidências pertinentes. Não dirija sua primeira leitura para uma conclusão; memórias e relatos antigos entram apenas depois da inspeção independente das fontes atuais.
 
-Receba o JSON e confira estrutura contra o [schema canônico](../schemas/review-result.schema.json) com ferramenta existente, se disponível; sem validador, declare a conferência manual e sua limitação. Sintaxe JSON não prova conformidade ao schema, e conformidade não prova correção do produto. Parecer ausente, ilegível ou inconsistente exige correção do parecer, nunca aprovação presumida.
+Preserve a resposta original do harness junto à evidência da tarefa. Se ele envolver o parecer
+em um envelope de transporte, identifique seu campo final pela documentação ou pelo contrato
+verificado do harness e registre o campo extraído. Metadados do envelope ficam fora do parecer.
+Não procure um trecho que pareça aprovação no texto ou escolha um objeto entre vários por
+conveniência.
+
+O conteúdo extraído deve ser exatamente um objeto JSON. Blocos Markdown, texto adicional,
+objetos concatenados (mesmo idênticos) ou múltiplas respostas finais sem uma fonte canônica
+inequívoca exigem nova resposta do Checker. Não remova delimitadores, descarte campos, renomeie
+IDs ou combine objetos para tornar válido um parecer inválido.
+
+Confira a estrutura contra o [schema canônico](../schemas/review-result.schema.json) com
+ferramenta existente, se disponível; sem validador, declare a conferência manual e sua limitação.
+Sintaxe JSON não prova conformidade ao schema, e conformidade não prova correção do produto.
+Campos extras e inconsistência entre `verdict` e `action_items` também exigem correção pelo
+Checker. Enquanto o parecer estiver ausente, inválido ou ambíguo, não o trate como aprovação.
 
 Atribua os achados: correção no escopo ao Maker, spec inconsistente ao Planner, decisão de intenção ao usuário. Registre trabalho fora do escopo sem corrigi-lo silenciosamente. Depois de mudança material, renove as provas afetadas e obtenha nova revisão independente da árvore final.
 

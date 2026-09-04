@@ -1,0 +1,7 @@
+# Resíduos locais do sistema e dos editores; não fazem parte da distribuição.
+.DS_Store
+/.idea/
+/.vscode/
+*~
+*.swp
+*.swo

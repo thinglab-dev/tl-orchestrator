@@ -6,6 +6,58 @@ Criado por **Albertiano**. Distribuído sob a [licença MIT](LICENSE), que permi
 
 Comece por [SKILL.md](SKILL.md). A [configuração do projeto](docs/PROJECT_CONFIGURATION.md) explica como descobrir regras e portões sem impor estrutura ao consumidor. BMAD, quando utilizado, permanece oficial e instalado separadamente.
 
+## Instalação assistida por IA
+
+Copie o prompt abaixo para seu agente. Ele orienta a instalação e a descoberta de capacidades;
+o suporte a skills, as permissões e o isolamento dependem das ferramentas do seu ambiente.
+Para instalar manualmente, siga [a exportação](#exportar-os-onze-arquivos) e
+[a instalação](#instalar-e-ativar).
+
+```text
+Instale o tl-orchestrator no meu ambiente e configure seu uso no projeto indicado,
+respeitando as instruções locais e minhas preferências já declaradas.
+
+Fonte: https://github.com/thinglab-dev/tl-orchestrator
+
+1. Obtenha o pacote e registre o commit escolhido. Leia o README, o SKILL.md e
+   os contratos referenciados antes de instalar. Separe a raiz do pacote da raiz
+   do projeto consumidor; todos os arquivos instalados devem vir do mesmo commit.
+
+2. Descubra como este agente carrega skills ou instruções, consultando a ajuda,
+   configuração e documentação oficial pertinentes. Use o escopo global ou local
+   já escolhido; se essa decisão estiver em aberto, pergunte. Não presuma suporte
+   nem caminhos de outro agente. Se não houver mecanismo compatível, explique a
+   limitação e proponha uma alternativa antes de alterar a configuração.
+
+3. Instale somente os onze arquivos da distribuição listados no README, mantendo
+   os subdiretórios e a licença, em uma pasta dedicada tl-orchestrator. Se já existir
+   uma instalação, compare conteúdo e revisão e preserve modificações locais;
+   conflitos exigem uma decisão antes de sobrescrever. Confira a cópia instalada
+   contra a revisão obtida.
+
+4. Verifique ferramentas de despacho, CLIs, modelos configurados e estado de
+   autenticação disponíveis, sem exibir credenciais nem fazer chamadas pagas
+   apenas para sondagem. Diferencie capacidade verificada de disponibilidade
+   ainda não confirmada; não instale outras ferramentas por conta própria.
+
+5. Proponha o mapeamento de ferramentas e modelos para os quatro papéis conforme
+   os contratos: Orquestrador (coordenação e conferência), Planner (auditoria e
+   spec), Maker (implementação e testes) e Checker (revisão report-only).
+   O Checker exige sessão independente e família de modelos distinta do Maker;
+   CLIs diferentes não comprovam essa distinção. Verifique as permissões de cada
+   papel: instruções de somente leitura não garantem bloqueio técnico de escrita.
+   Registre capacidades ausentes e limites sem declarar uma revisão viável quando
+   sua independência não puder ser atendida.
+
+6. Aproveite minhas preferências existentes e pergunte apenas pelas decisões
+   materiais ainda abertas. Registre origem, commit, destino da instalação e
+   escolhas no local já adotado pela sessão ou pelo projeto, fora do pacote
+   reutilizável, sem criar uma segunda configuração obrigatória. Apresente o que
+   foi conferido, o que falta e como ativar o método neste ambiente. Encerre após
+   instalar e configurar, sem iniciar planejamento, implementação ou revisões
+   do projeto.
+```
+
 ## Como os papéis trabalham
 
 O fluxo abaixo descreve uma mudança com implementação autorizada. Um pedido limitado a análise

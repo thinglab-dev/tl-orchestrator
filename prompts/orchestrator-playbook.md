@@ -2,6 +2,47 @@
 
 Complemento do [contrato do Orquestrador](orchestrator.md). As raízes e os portões vêm do [projeto consumidor](../docs/PROJECT_CONFIGURATION.md).
 
+## Fila sequencial de stories
+
+Este modo existe para executar stories em ordem sem transformar cada correção de revisão em uma
+nova pergunta ao usuário. Só começa quando o usuário escolhe explicitamente **Executar fila
+sequencial** ou quando uma tarefa agendada repete essa escolha em um perfil local já autorizado.
+**Implementar e revisar uma story** continua sendo um modo unitário e não avança para a próxima
+story.
+
+Antes de cada ativação, leia `_tl-orc/QUEUE.md` e as fontes autoritativas que ele aponta. A fila
+deve declarar o módulo ou escopo único, o board que define a ordem, uma árvore ou branch dedicada,
+o limite de correções e os efeitos locais autorizados. Sem esses dados, com árvore compartilhada
+ocupada, com alterações preexistentes fora da fila ou com fonte ambígua, pare e informe o ponto de
+retomada. Não varra todos os backlogs nem escolha uma story apenas pela data.
+
+Uma ativação processa **no máximo uma** story. Considere a primeira story não concluída na ordem
+declarada pelo board e prossiga somente se ela estiver pronta, com dependências satisfeitas e sem
+decisão humana pendente. Se ela estiver bloqueada ou ambígua, não pule para outra por conveniência:
+registre o motivo e aguarde a decisão ou a atualização do board. Quando BMAD reger o módulo,
+execute primeiro a sincronização exigida pela política local e use somente o sprint daquele módulo.
+
+Para a story escolhida, aplique o perfil-padrão salvo substituição registrada: **Planner Claude**
+audita ou esclarece a spec, **Maker Codex** implementa e prova, e **Checker Agy** revisa em nova
+sessão independente. Revalide harness, modelo, família e permissões em cada despacho. Falta de
+Claude, Codex ou Agy é bloqueio; não substitua em silêncio. Preserve a regra de um escritor por
+árvore.
+
+Se o Checker emitir um parecer válido com achados atribuídos somente ao Maker e todos estiverem no
+escopo congelado, consolide os IDs do mesmo parecer em um único briefing de correção ao Maker. Não
+pergunte novamente pelo despacho de R1–R4 ou equivalentes. Depois da correção, renove as provas
+afetadas e envie a árvore final a uma **nova** sessão do Checker Agy. O limite padrão é duas
+rodadas de correção após a primeira revisão, ou menor se `_tl-orc/QUEUE.md` o declarar. Ao atingir
+o limite, obter parecer inválido, encontrar achado de intenção/spec, exigir permissão adicional ou
+ver uma falha não atribuída, pare a fila e apresente a evidência e a próxima decisão necessária.
+
+Com `approved`, execute somente as ações locais expressamente autorizadas em `QUEUE.md`, como
+registrar evidência, atualizar o board e criar um commit na branch dedicada. Nunca faça push,
+publique, abra pull request, altere outro módulo ou acione um sistema externo por causa da fila.
+Depois de registrar a conclusão, encerre a ativação. Uma tarefa agendada pode despertar o método
+mais tarde para escolher a próxima story; o pacote não mantém um processo, heartbeat ou loop
+próprio.
+
 ## Debater
 
 Ofereça **Debater** no menu de ativação e ao apresentar uma decisão material pendente. O usuário

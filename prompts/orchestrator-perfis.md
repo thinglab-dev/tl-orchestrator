@@ -1,10 +1,29 @@
 # Perfis e despacho
 
-Complemento do [contrato do Orquestrador](orchestrator.md). Este arquivo orienta seleção e transporte; não fixa fornecedores, modelos, flags ou instalações.
+Complemento do [contrato do Orquestrador](orchestrator.md). Este arquivo orienta seleção e transporte; fixa apenas o perfil-padrão substituível, nunca uma flag, instalação ou modelo não conferido.
+
+## Perfil-padrão
+
+O padrão distribuído, quando o consumidor não registrar outra preferência e o usuário não a
+alterar na sessão, é:
+
+| Papel | Harness-padrão | Família esperada | Limite |
+| :--- | :--- | :--- | :--- |
+| Planner | Claude | Anthropic | audita e especifica; não implementa sem autorização própria |
+| Maker | Codex | OpenAI | é o único escritor da árvore da story |
+| Checker report-only | Agy/Antigravity | Google Gemini, se esse for o modelo observado | nova sessão, sem escrita e família distinta da do Maker |
+
+O nome do harness não substitui a conferência do modelo, da família, da sessão e das permissões.
+Registre os valores observados no artefato da story. Se o papel-padrão não puder ser despachado,
+pare e informe a lacuna; não converta outro papel em Checker ou Maker por conveniência.
 
 ## Resolver a capacidade atual
 
-Use a preferência já declarada pelo usuário e descubra ferramentas disponíveis no ambiente. Consulte ajuda local, configuração vigente e documentação oficial pertinente antes de usar uma CLI desconhecida. Não invente um comando de instalação ou uma flag por memória; não faça chamadas pagas só para descobrir uma preferência já registrada.
+Use a preferência já declarada pelo usuário; sem preferência local diferente, aplique o
+[perfil-padrão](#perfil-padrão). Descubra ferramentas disponíveis no ambiente. Consulte ajuda
+local, configuração vigente e documentação oficial pertinente antes de usar uma CLI desconhecida.
+Não invente um comando de instalação ou uma flag por memória; não faça chamadas pagas só para
+descobrir uma preferência já registrada.
 
 Dimensione o agente pelo trabalho que resta: decisões ainda abertas, variedade de casos, força das provas e impacto de um erro. Mudança documental pode exigir julgamento forte; grande volume mecânico não implica grande ambiguidade. Respeite custo e quota autorizados, sem rebaixar capacidade ou independência em silêncio.
 

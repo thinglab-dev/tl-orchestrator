@@ -2,6 +2,10 @@
 
 Um método documental para planejar, debater decisões, implementar e revisar mudanças com Orquestrador, Planner, Maker e Checker. Usa agentes e portões já disponíveis no projeto consumidor. A distribuição contém documentos Markdown, schema JSON e licença; não precisa de linguagem de programação, runtime próprio ou instalação do projeto de origem.
 
+O perfil-padrão publicado é **Planner Claude → Maker Codex → Checker Agy/Antigravity**. Cada
+despacho ainda confirma modelo, família, permissões e sessão; uma preferência registrada pelo
+consumidor ou uma instrução mais recente do usuário pode substituí-lo.
+
 Criado por **Albertiano**. Distribuído sob a [licença MIT](LICENSE), que permite uso, modificação e distribuição, inclusive comercial, com preservação do aviso de copyright e da licença nas cópias ou partes substanciais do material.
 
 Comece por [SKILL.md](SKILL.md). A [configuração do projeto](docs/PROJECT_CONFIGURATION.md) explica como descobrir regras e portões sem impor estrutura ao consumidor. BMAD, quando utilizado, permanece oficial e instalado separadamente.
@@ -48,6 +52,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    ├── package/          # os onze arquivos canônicos do commit escolhido
    ├── INSTALLATION.md   # origem, versão, referência, commit, hashes e destinos
    ├── PROJECT.md        # fontes, portões e preferências de papéis
+   ├── QUEUE.md          # opcional: limites da fila sequencial autorizada
    └── evidence/         # somente se o projeto não tiver artefato próprio para evidência
 
    Copie para `_tl-orc/package` somente estes onze caminhos da revisão escolhida, preservando os
@@ -92,8 +97,8 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    exibir credenciais nem fazer chamadas pagas apenas para sondagem. Não instale ferramentas
    adicionais por conta própria. Diferencie capacidade comprovada de disponibilidade incerta.
 
-6. Registre em `_tl-orc/PROJECT.md` estas preferências padrão de harness, salvo decisão vigente
-   diferente no projeto:
+6. Registre em `_tl-orc/PROJECT.md` o perfil-padrão publicado, salvo decisão vigente diferente no
+   projeto:
    - Orquestrador: o agente em que `tl-orchestrator` foi invocado;
    - Planner: Claude;
    - Maker: Codex;
@@ -101,8 +106,9 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 
    Registre separadamente o modelo e a família efetivamente usados em cada papel. O Checker exige
    sessão independente e família de modelos distinta do Maker; usar Agy não prova isso por si só.
-   Verifique as permissões de cada papel e registre limites sem tratar uma instrução de leitura
-   como bloqueio técnico de escrita.
+   Se um dos três harnesses estiver indisponível, registre o bloqueio, em vez de substituir o papel
+   sem autorização. Verifique as permissões de cada papel e registre limites sem tratar uma
+   instrução de leitura como bloqueio técnico de escrita.
 
 7. Preencha `INSTALLATION.md` e `PROJECT.md` somente com fatos conferidos e preferências já
    declaradas. Este passo deriva da seção "Conferir atualizações" do guia, que é sua fonte
@@ -161,9 +167,10 @@ Os caminhos acima seguem a documentação atual de [Claude Code](https://code.cl
 
 ## Como os papéis trabalham
 
-Depois de ativar a skill, você pode escolher **Planejar**, **Implementar e revisar**, **Debater**
-ou **Outra tarefa**. **Debater** também aparece quando o Orquestrador apresenta uma decisão
-material pendente. Basta responder a opção; a questão e o contexto atuais acompanham o pedido:
+Depois de ativar a skill, você pode escolher **Planejar**, **Implementar e revisar uma story**,
+**Executar fila sequencial**, **Debater** ou **Outra tarefa**. **Debater** também aparece quando o
+Orquestrador apresenta uma decisão material pendente. Basta responder a opção; a questão e o
+contexto atuais acompanham o pedido:
 
 > **Orquestrador:** Há duas alternativas para esta decisão. Você pode escolher uma ou **Debater**.
 >
@@ -180,13 +187,13 @@ ou planejamento termina nessa etapa. Decisões reservadas ao usuário voltam a e
 ```mermaid
 flowchart TD
     U["Usuário"] -->|Define objetivo e autoriza escopo| O["Orquestrador"]
-    O -->|Quando precisa de auditoria ou spec| P["Planner"]
+    O -->|Quando precisa de auditoria ou spec| P["Planner · Claude"]
     P -->|Propõe spec e corte| R["Orquestrador ratifica o corte"]
     O -->|Spec já executável| R
-    R -->|Despacha implementação autorizada| M["Maker"]
+    R -->|Despacha implementação autorizada| M["Maker · Codex"]
     M -->|Diff e evidências| V["Orquestrador confere e verifica"]
     V -->|Correção necessária no escopo| M
-    V -->|Nova sessão e família distinta do Maker| C["Checker report-only"]
+    V -->|Nova sessão e família distinta do Maker| C["Checker report-only · Agy"]
     C -->|Parecer| J["Orquestrador valida o parecer"]
     J -->|Parecer inválido: solicitar nova resposta| C
     J -->|Correção de implementação| M
@@ -195,6 +202,21 @@ flowchart TD
     J -->|Sem ações pendentes e com autorização| I["Orquestrador integra e confere"]
     I -->|Entrega e evidências| U
 ```
+
+### Fila sequencial
+
+**Implementar e revisar uma story** termina na story atual. Para avançar automaticamente em uma
+ordem de stories, escolha **Executar fila sequencial** depois de criar `_tl-orc/QUEUE.md` conforme
+o [guia de configuração](docs/PROJECT_CONFIGURATION.md#fila-sequencial-de-stories). Cada ativação
+processa uma única story pronta e, após um parecer aprovado, deixa o board e o commit local no
+estado declarado pela fila. Uma tarefa agendada do Codex ou de outro harness pode chamar esse modo
+mais tarde para processar a próxima.
+
+Dentro da mesma story, os achados em escopo atribuídos ao Maker voltam em um único briefing — por
+exemplo, R1–R4 — sem pedir uma autorização separada. O limite padrão são duas rodadas de correção;
+decisão humana, alteração de escopo, indisponibilidade de Claude/Codex/Agy, parecer inválido ou
+falha sem atribuição param a fila e apresentam o ponto de retomada. A fila não faz push nem abre
+pull request.
 
 ## Exportar os onze arquivos
 

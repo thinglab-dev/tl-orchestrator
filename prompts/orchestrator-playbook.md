@@ -10,6 +10,37 @@ frescor e limites de tempo, chamadas e resposta. Registre cobertura, lacunas e a
 ferramenta ou permissão fica explícita como parcial/bloqueada. O Searcher usa sessão separada e seu
 resumo é evidência orientadora, não prova única nem substituto de leitura obrigatória.
 
+## Evolução na ativação
+
+Quando existir perfil local, execute a [ordem normativa](../docs/EVOLUTION.md#ordem-na-ativação)
+antes da triagem da tarefa. Valide separadamente `update_check`, `update_policy`,
+`contribution_mode` e a autoridade documentada; omissão das duas políticas em perfil legado
+equivale a `notify` e `ask`. Um campo `auto_pr` ou `auto_safe` não prova autoridade.
+
+Compare primeiro pacote, baseline e hashes, registrando arquivos alterados, ausentes e adicionais.
+Se houver delta do método, preserve-o contra a baseline verificada e trate a contribuição antes
+do retorno por divergência. Faça isso fora do consumidor, em checkout fonte isolado, somente para
+a allowlist do pacote e depois de sanitizar conteúdo e metadados; nunca copie `_tl-orc/config`,
+logs, evidências, credenciais ou outro conteúdo privado. Dúvida de propriedade ou privacidade
+para. A contribuição não limpa a instalação e o delta continua bloqueando atualização.
+
+Em `ask`, apresente o patch e o plano. Em `auto_pr`, somente autoridade expressa para o mesmo
+projeto, ator, destino, escopo, commit, push e draft PR permite chegar aos efeitos externos.
+Conduza Maker, prova própria e Checker antes de buscar duplicata e publicar. Duplicata existente
+impede novo PR; não modifique trabalho de terceiro nem reabra rejeitado. Sem permissão comprovada,
+pare sem configurar fork. Nunca faça merge automático. Feature nova depende de intenção delimitada
+e aprovada; suspeita não autoriza desenvolvimento.
+
+Sem delta ou outro bloqueio, `notify` apenas relata. `auto_safe` considera somente release estável
+descendente, nunca mero avanço de `main`, e exige integridade total, precedência conferida, nenhuma
+migração ou decisão pendente e autoridade exata. Antes da escrita, crie e confira snapshot
+recuperável. Depois, aplique uma única revisão pelo Maker, repita hashes, cópias, links,
+precedência e descoberta, e obtenha Checker independente. Falha recupera o snapshot dentro da
+autoridade e interrompe; não deixa atualização parcial.
+
+Esse fluxo ocorre somente na ativação atual. Não crie daemon, agenda, heartbeat ou configuração
+de terceiros para executá-lo.
+
 ## Fila sequencial de stories
 
 Este modo existe para executar stories em ordem sem transformar cada correção de revisão em uma

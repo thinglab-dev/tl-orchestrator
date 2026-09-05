@@ -36,16 +36,23 @@ verificado do harness e registre o campo extraído. Metadados do envelope ficam 
 Não procure um trecho que pareça aprovação no texto ou escolha um objeto entre vários por
 conveniência.
 
-O conteúdo extraído deve ser exatamente um objeto JSON. Blocos Markdown, texto adicional,
-objetos concatenados (mesmo idênticos) ou múltiplas respostas finais sem uma fonte canônica
-inequívoca exigem nova resposta do Checker. Não remova delimitadores, descarte campos, renomeie
-IDs ou combine objetos para tornar válido um parecer inválido.
+O conteúdo extraído deve ser exatamente um objeto JSON. Tolere somente uma normalização de
+transporte adicional: se a resposta final inteira, depois de remover espaço externo, for um único
+bloco cuja linha de abertura seja formada por três crases seguidas de `json` e cuja linha de
+fechamento tenha somente três crases, sem texto antes ou depois, retire exatamente essas duas
+linhas e registre a normalização junto à resposta original. Não extraia blocos de prosa, não aceite
+outro tipo de cerca, blocos múltiplos, cercas aninhadas, objetos concatenados (mesmo idênticos) ou
+múltiplas respostas finais sem uma fonte canônica inequívoca. Não descarte campos, renomeie IDs ou
+combine objetos para tornar válido um parecer inválido.
 
 Confira a estrutura contra o [schema canônico](../schemas/review-result.schema.json) com
 ferramenta existente, se disponível; sem validador, declare a conferência manual e sua limitação.
 Sintaxe JSON não prova conformidade ao schema, e conformidade não prova correção do produto.
 Campos extras e inconsistência entre `verdict` e `action_items` também exigem correção pelo
 Checker. Enquanto o parecer estiver ausente, inválido ou ambíguo, não o trate como aprovação.
+Faça no máximo uma solicitação de correção de formato ao mesmo Checker, apontando os defeitos
+estruturais sem sugerir o veredito. Se a nova resposta também for inválida, encerre essa revisão
+como `parecer válido não obtido`; não repita até conseguir aprovação.
 
 Atribua os achados: correção no escopo ao Maker, spec inconsistente ao Planner, decisão de intenção ao usuário. Registre trabalho fora do escopo sem corrigi-lo silenciosamente. Depois de mudança material, renove as provas afetadas e obtenha nova revisão independente da árvore final.
 

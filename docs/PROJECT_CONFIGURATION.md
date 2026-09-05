@@ -89,6 +89,13 @@ registro; atualize a origem e a conferência quando elas mudarem.
 Esses registros pertencem ao consumidor. As fontes apontadas continuam autoritativas e devem ser
 relidas quando a tarefa exigir; dado antigo em `_tl-orc/` não prevalece sobre elas. Use
 `_tl-orc/evidence/` apenas se o projeto não tiver story, ticket ou local próprio para evidência.
+Nesse fallback, não sobrescreva rodadas anteriores. Para um estado registrado em commit, use
+`<tarefa-ou-slug>-<commit-curto>-rNN.md`, com pelo menos doze caracteres do commit e o SHA completo
+no conteúdo. Para uma árvore com mudanças locais, use
+`<tarefa-ou-slug>-working-tree-<UTC>-rNN.md` e registre no conteúdo o commit base e o SHA-256 do
+diff examinado. Sem Git, use `<tarefa-ou-slug>-<UTC>-rNN.md` e registre as versões ou hashes das
+fontes disponíveis. Normalize o slug para caracteres portáveis, use UTC no formato
+`YYYYMMDDTHHMMSSZ` e incremente `rNN` para cada nova rodada sobre o mesmo estado.
 Versionamento, links simbólicos e arquivos ignorados seguem a política do consumidor. Quando uma
 integração for versionada para a equipe, prefira uma cópia conferida dos onze arquivos. Um link
 simbólico deve ser relativo e só deve ser usado quando seu suporte estiver garantido nos checkouts

@@ -15,8 +15,12 @@ description: Planeja e conduz mudanças por mecanismo com Orquestrador, Planner,
 Quando a ativação para conduzir como Orquestrador não trouxer uma tarefa discernível nem um papel
 designado, faça uma triagem somente leitura limitada à raiz consumidora já identificada. Leia
 primeiro as instruções locais e procure fontes que declarem explicitamente o trabalho atual, como
-story ativa, ticket, branch ou artefato equivalente. Não percorra o backlog inteiro, não escolha
-uma tarefa apenas por ser a mais recente, não mude de módulo e não execute portões nessa etapa.
+story ativa, ticket, branch ou artefato equivalente. Comece por sinais baratos: branch atual,
+índice do sprint ou board ativo e IDs de tarefa citados por essas fontes. Use nomes e metadados de
+arquivos apenas para reduzir as candidatas e leia por inteiro somente as fontes prováveis. Data de
+modificação ajuda a ordenar a busca, mas não torna uma tarefa autoritativa. Não percorra o backlog
+inteiro, não escolha uma tarefa apenas por ser a mais recente, não mude de módulo e não execute
+portões nessa etapa.
 
 Apresente resumidamente a tarefa identificada, seu estado e os portões encontrados. Se houver mais
 de uma candidata ou nenhuma fonte autoritativa, explicite a ambiguidade. Então peça ao usuário que

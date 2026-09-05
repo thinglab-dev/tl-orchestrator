@@ -1,6 +1,6 @@
 # tl-orchestrator
 
-Um método documental para planejar, implementar e revisar mudanças com Orquestrador, Planner, Maker e Checker. Usa agentes e portões já disponíveis no projeto consumidor. A distribuição contém documentos Markdown, schema JSON e licença; não precisa de linguagem de programação, runtime próprio ou instalação do projeto de origem.
+Um método documental para planejar, debater decisões, implementar e revisar mudanças com Orquestrador, Planner, Maker e Checker. Usa agentes e portões já disponíveis no projeto consumidor. A distribuição contém documentos Markdown, schema JSON e licença; não precisa de linguagem de programação, runtime próprio ou instalação do projeto de origem.
 
 Criado por **Albertiano**. Distribuído sob a [licença MIT](LICENSE), que permite uso, modificação e distribuição, inclusive comercial, com preservação do aviso de copyright e da licença nas cópias ou partes substanciais do material.
 
@@ -160,6 +160,19 @@ Os caminhos acima seguem a documentação atual de [Claude Code](https://code.cl
 [Antigravity](https://antigravity.google/docs/skills); a instalação deve conferir a versão local.
 
 ## Como os papéis trabalham
+
+Depois de ativar a skill, você pode escolher **Planejar**, **Implementar e revisar**, **Debater**
+ou **Outra tarefa**. **Debater** também aparece quando o Orquestrador apresenta uma decisão
+material pendente. Basta responder a opção; a questão e o contexto atuais acompanham o pedido:
+
+> **Orquestrador:** Há duas alternativas para esta decisão. Você pode escolher uma ou **Debater**.
+>
+> **Você:** Debater
+
+Planner, Maker e Checker opinam primeiro de forma independente e podem responder às objeções em
+uma rodada de contraponto. O Orquestrador apresenta recomendação, divergências e evidências
+faltantes para você decidir. O [modo Debater](prompts/orchestrator-playbook.md#debater) usa sessões
+somente leitura e não implementa nem aprova uma entrega. Não exige IDs de story ou comando novo.
 
 O fluxo abaixo descreve uma mudança com implementação autorizada. Um pedido limitado a análise
 ou planejamento termina nessa etapa. Decisões reservadas ao usuário voltam a ele.

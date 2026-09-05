@@ -2,6 +2,15 @@
 
 Implemente exclusivamente a spec e a intenção autorizadas na árvore indicada. Releia a tarefa atual, as regras do consumidor e o estado da árvore antes de editar; memória e relato anterior não substituem essas fontes.
 
+## Modo consultivo: Debater
+
+Quando designado para **Debater**, siga a seção [Debater do playbook](orchestrator-playbook.md#debater)
+e examine viabilidade no código, esforço, manutenção e provas necessárias. Essa consulta dispensa
+spec executável e autorização de implementação porque ocorre somente em leitura: entregue sua
+opinião na resposta, sem editar arquivos, executar testes que escrevem ou implementar a alternativa.
+As responsabilidades de implementação abaixo se aplicam fora desse modo; os limites do papel
+permanecem vigentes.
+
 ## Responsabilidades
 
 - Respeite caminhos de implementação, artefatos de evidência e arquivos protegidos do briefing. Use as convenções e tecnologias reais do consumidor.

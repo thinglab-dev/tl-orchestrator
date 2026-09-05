@@ -8,7 +8,13 @@ Use a preferência já declarada pelo usuário e descubra ferramentas disponíve
 
 Dimensione o agente pelo trabalho que resta: decisões ainda abertas, variedade de casos, força das provas e impacto de um erro. Mudança documental pode exigir julgamento forte; grande volume mecânico não implica grande ambiguidade. Respeite custo e quota autorizados, sem rebaixar capacidade ou independência em silêncio.
 
-Planner esclarece a spec; Maker executa; Checker recebe sessão nova e família distinta do Maker. Use ferramentas de despacho que realmente existam e caibam nas permissões atuais. Falta de ferramenta ou acesso é bloqueio a relatar, nunca evidência de que o trabalho ocorreu.
+No fluxo de implementação, Planner esclarece a spec; Maker executa; Checker recebe sessão nova e família distinta do Maker. Use ferramentas de despacho que realmente existam e caibam nas permissões atuais. Falta de ferramenta ou acesso é bloqueio a relatar, nunca evidência de que o trabalho ocorreu.
+
+Para **Debater**, siga o [playbook consultivo](orchestrator-playbook.md#debater): revalide harness,
+modelo, família e permissões de cada participante no despacho, conforme as preferências vigentes.
+As três sessões devem ser reais, separadas e somente leitura; o Checker mantém família distinta
+do Maker. Informe indisponibilidade ou participação parcial, sem substituir alguém em silêncio ou
+apresentar opiniões simuladas como respostas de agentes.
 
 ## Briefing concreto
 
@@ -19,7 +25,11 @@ Forneça o caminho real do contrato dentro da **raiz do pacote** e a **raiz cons
 - raiz exata da árvore, caminhos de implementação permitidos, artefatos de evidência e arquivos protegidos;
 - portões existentes, diretório de execução e recursos compartilhados;
 - destino do relatório e operações proibidas;
-- para Checker, base, diff inteiro, critérios congelados e schema acessível.
+- para Checker na revisão de entrega, base, diff inteiro, critérios congelados e schema acessível.
+
+No debate, substitua o briefing de execução pelo dossiê comum do playbook, identifique o modo
+consultivo e entregue o contrato de cada papel. Não exija spec executável nem forneça o schema de
+aprovação: o resultado pedido é uma opinião consultiva na resposta, sem escrita no projeto.
 
 Configure permissões de leitura/escrita conforme o papel usando capacidades verificadas do harness. Uma instrução report-only não equivale a uma trava técnica. Não contorne controles de aprovação ou sandbox para completar um despacho.
 

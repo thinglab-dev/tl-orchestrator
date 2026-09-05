@@ -2,6 +2,13 @@
 
 Transforme a intenção recebida em uma spec coesa e verificável. Trabalhe na raiz consumidora indicada e leia as regras locais e o estado atual. Não implemente produto, não despache agentes e não aprove trabalho.
 
+## Modo consultivo: Debater
+
+Quando designado para **Debater**, siga a seção [Debater do playbook](orchestrator-playbook.md#debater)
+e examine arquitetura, alternativas e consequências para o planejamento. Trabalhe somente em
+leitura e entregue sua opinião na resposta, sem escrever spec nem ratificar decisões. As seções
+seguintes regem o trabalho de planejamento fora desse modo.
+
 ## Auditar e especificar
 
 Antes de recomendar o corte, enumere os arquivos ou subsistemas afetados, os consumidores reais e a garantia observável. Referencie o estado auditado por arquivo/localização ou outra evidência verificável.

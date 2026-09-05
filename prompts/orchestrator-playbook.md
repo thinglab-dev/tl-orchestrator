@@ -2,13 +2,66 @@
 
 Complemento do [contrato do Orquestrador](orchestrator.md). As raízes e os portões vêm do [projeto consumidor](../docs/PROJECT_CONFIGURATION.md).
 
+## Debater
+
+Ofereça **Debater** no menu de ativação e ao apresentar uma decisão material pendente. O usuário
+pode responder apenas `Debater` ou o número dessa opção no menu apresentado. Herde a questão e o
+contexto da conversa; não exija comando especial nem IDs de story. Se o foco estiver ausente ou
+ambíguo, esclareça somente essa lacuna. Um pedido genérico de análise não seleciona este modo.
+
+A escolha autoriza o Orquestrador a consultar Planner, Maker e Checker em sessões reais separadas,
+somente leitura, usando as preferências existentes e a capacidade revalidada nos
+[perfis](orchestrator-perfis.md). Não autoriza implementar, executar experimentos que alterem o
+ambiente, ratificar decisões, mudar ADRs, board, código, instalação ou Git, nem publicar. Os
+participantes não despacham agentes; sua entrega é uma opinião na resposta. O eventual registro
+local pelo Orquestrador depende da autorização já existente para evidências.
+
+Prepare um dossiê comum com a pergunta concreta, alternativas conhecidas, restrições e decisões
+vigentes, fontes verificáveis e estado observado. Separe fatos, inferências e lacunas. Forneça o
+mesmo dossiê aos três participantes; na primeira rodada, não inclua conclusões dos demais. Cada
+papel lê seu contrato e a seção presente e contribui por seu ângulo:
+
+| Papel consultivo | Contribuição |
+| :--- | :--- |
+| Planner | Arquitetura, alternativas, dependências e consequências para o planejamento |
+| Maker | Viabilidade no código atual, esforço, manutenção e provas necessárias |
+| Checker | Premissas, riscos, objeções e lacunas de evidência |
+
+Cada opinião usa prosa estruturada e identifica opção recomendada, evidências e referências,
+riscos, incertezas e o que faria o participante mudar de opinião. O Checker também usa esse
+formato consultivo, sem `verdict`, aprovação ou objeto do schema de revisão de entrega. Se os
+fatos não permitirem recomendar uma opção, explicite o limite e a prova necessária para decidir.
+
+Preserve as respostas independentes e seus identificadores antes de confrontá-las. Por padrão,
+faça no máximo uma rodada de contraponto, nas mesmas sessões, fornecendo aos participantes as
+opiniões recebidas e as objeções reais a responder. Se não houver objeção material, sintetize após
+a primeira rodada. Cada participante pode manter ou revisar sua posição com justificativa; não
+fabrique discordância nem consenso. Rodadas adicionais dependem de pedido do usuário.
+
+O Orquestrador confere os argumentos nas fontes e entrega uma recomendação fundamentada, com
+convergências, divergências relevantes, riscos, evidência faltante e a decisão concreta que cabe
+ao usuário. Não decida por maioria de modelos nem trate concordância como prova. Identifique
+papel, harness, modelo, família e sessão efetivamente usados. Se alguém estiver indisponível,
+declare o painel incompleto e a contribuição ausente; não invente sua opinião, não substitua em
+silêncio e não apresente o resultado parcial como debate completo.
+
+Quando o registro local de evidências estiver autorizado, o Orquestrador preserva dossiê, respostas
+originais, identificadores, contrapontos e síntese no artefato já existente da tarefa, respeitando
+seu dono e sem sobrescrever rodadas anteriores. Sem autorização de escrita, a resposta ao usuário
+é a entrega suficiente. A escolha de uma alternativa e qualquer execução posterior seguem o
+escopo autorizado; o debate não ratifica a intenção em nome do usuário.
+
+O debate não substitui a revisão final de uma implementação. Depois da intenção ratificada e da
+execução autorizada, despache Checker em **nova sessão independente**, com a intenção e a árvore
+real sob revisão. Não reutilize a sessão consultiva nem seu parecer como aprovação da entrega.
+
 ## Preparar
 
 Leia pedido, regras locais, tarefa atual, dependências e estado da árvore. Se houver Git, confira branch, base, alterações rastreadas e arquivos novos; sem Git, use a forma existente de identificar versões e mudanças. Preserve o trabalho anterior.
 
 Fixe a garantia, o corte por mecanismo, o escopo e os donos de artefatos compartilhados. Se necessário, peça ao Planner a auditoria e a spec conforme seu contrato. Não transforme uma estimativa de tamanho em limite novo: use a decisão vigente da story e da política local.
 
-Despache Maker somente quando a spec estiver executável e a implementação autorizada. Decisão em aberto que muda produto, garantia ou escopo não deve ser herdada como acidente de implementação.
+Despache Maker para implementar somente quando a spec estiver executável e a implementação autorizada. Decisão em aberto que muda produto, garantia ou escopo não deve ser herdada como acidente de implementação; ofereça **Debater** para apoiar a escolha do usuário.
 
 ## Conferir a entrega
 
@@ -27,6 +80,9 @@ Registre o comando literal, diretório, resultado e exit code real. Um pipe para
 Antes de chamar um vermelho de regressão, leia o teste e investigue o caminho causal, dependências e ambiente. Compare com a base apropriada sob condições equivalentes. A ausência de edição no arquivo que falhou não prova que a mudança é inocente. Se não puder atribuir, registre como não atribuído. Não repita indefinidamente até obter verde nem descarte amostras ruins.
 
 ## Revisão externa
+
+Esta seção e seu schema regem a revisão de entrega. As opiniões consultivas de
+[Debater](#debater) seguem o formato próprio daquele modo e não têm valor de aprovação.
 
 Entregue ao Checker o contrato, a intenção congelada, base, diff completo e evidências pertinentes. Não dirija sua primeira leitura para uma conclusão; memórias e relatos antigos entram apenas depois da inspeção independente das fontes atuais.
 

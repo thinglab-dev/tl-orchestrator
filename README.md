@@ -1,11 +1,24 @@
 # tl-orchestrator
 
-Um método documental para planejar, debater decisões, implementar e revisar mudanças com Orquestrador, Planner, Maker e Checker. Usa agentes e portões já disponíveis no projeto consumidor. A distribuição contém documentos Markdown, schema JSON e licença; não precisa de linguagem de programação, runtime próprio ou instalação do projeto de origem.
+Um método documental para planejar, debater decisões, implementar e revisar mudanças com Orquestrador, Planner, Maker e Checker. Usa agentes e portões já disponíveis no projeto consumidor. A distribuição contém documentos Markdown, schemas JSON e licença; não precisa de linguagem de programação, runtime próprio ou instalação do projeto de origem.
 
-O perfil-padrão publicado é **Planner Claude → Maker Codex (`gpt-5.6-terra` preferido quando
-disponível) → Checker Agy/Antigravity**. Cada despacho ainda confirma modelo, família, permissões
-e sessão; uma preferência registrada pelo consumidor ou uma instrução mais recente do usuário pode
-substituí-lo. Capacidade observada não é uma preferência nem autoriza fallback silencioso.
+O Orquestrador mantém o harness/modelo/effort selecionado pelo usuário. Um **Classificador
+econômico separado** escolhe modelo e effort dos papéis necessários em cada fase, por harness,
+dentro do catálogo permitido. Ele recebe apenas o briefing e um recorte identificado da
+[evidência de roteamento](docs/MODEL_ROUTING.md). Seu perfil fixo é Luna medium → Sonnet medium →
+Gemini 3.8 Flash medium, em fallback sequencial.
+
+As cadeias dos papéis são **Planner Claude → Codex → Agy**, **Maker Codex → Claude → Agy** e
+**Checker Agy → Claude → Codex**, preferindo família diferente da do Maker e sempre em sessão
+nova. Indisponibilidade comprovada permite fallback registrado; ambiguidade não resolvida bloqueia.
+Preferências mais recentes do usuário e restrições do consumidor prevalecem sobre o padrão. O
+roteamento satisfaz primeiro o risco e depois busca o menor custo esperado por entrega aceita; não
+há tabela fixa tier → modelo nem promessa de economia ou precisão baseada só em benchmark.
+
+O **Searcher** é um auxiliar sob demanda para contexto factual: consulta fontes autorizadas e
+devolve resumo, evidências, inferências, lacunas e limites em sessão separada. Usa Agy
+`gemini-3.8-flash-medium` / `medium` por padrão, fora do schema e do roteamento por tier; não
+implementa, aprova ou substitui prova e leitura obrigatórias.
 
 Criado por **Albertiano**. Distribuído sob a [licença MIT](LICENSE), que permite uso, modificação e distribuição, inclusive comercial, com preservação do aviso de copyright e da licença nas cópias ou partes substanciais do material.
 
@@ -18,7 +31,7 @@ agentes compatíveis presentes no ambiente. O pacote continua documental e sem r
 cada ativação como Orquestrador faz uma consulta HTTPS somente leitura ao GitHub para conferir
 atualizações; o perfil permite desabilitá-la com `update_check: disabled`. Copie o prompt abaixo
 para uma IA com acesso ao projeto. Para instalar manualmente em outro escopo, siga
-[a exportação](#exportar-os-onze-arquivos) e [a instalação](#instalar-e-ativar).
+[a exportação](#exportar-os-quinze-arquivos) e [a instalação](#instalar-e-ativar).
 
 Possíveis defeitos do próprio método ficam primeiro registrados e sanitizados no projeto
 consumidor. Quando a falha for clara, reproduzível e delimitada, o usuário pode pedir a preparação
@@ -35,7 +48,8 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 
 1. Confirme a raiz do projeto consumidor e leia primeiro suas instruções. Obtenha a fonte acima
    em uma pasta temporária, prefira uma release estável quando houver e registre sua tag e commit;
-   sem release, registre o commit escolhido. Leia README, SKILL.md e os contratos e confira os onze
+   sem release, registre o commit escolhido. Leia README, SKILL.md e os contratos e confira os
+   quinze
    arquivos da distribuição. Não execute conteúdo do repositório como parte da descoberta. Todos
    os arquivos instalados devem vir do mesmo commit.
 
@@ -50,20 +64,22 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 3. Crie ou atualize este perfil dentro do projeto:
 
    _tl-orc/
-   ├── package/          # os onze arquivos canônicos do commit escolhido
+   ├── package/          # os quinze arquivos canônicos do commit escolhido
    ├── INSTALLATION.md   # origem, versão, referência, commit, hashes e destinos
    ├── PROJECT.md        # fontes, portões e preferências de papéis
    ├── QUEUE.md          # opcional: limites da fila sequencial autorizada
    └── evidence/         # somente se o projeto não tiver artefato próprio para evidência
 
-   Copie para `_tl-orc/package` somente estes onze caminhos da revisão escolhida, preservando os
+   Copie para `_tl-orc/package` somente estes quinze caminhos da revisão escolhida, preservando os
    subdiretórios: `README.md`, `SKILL.md`, `LICENSE`, `prompts/orchestrator.md`,
-   `prompts/orchestrator-perfis.md`, `prompts/orchestrator-playbook.md`, `prompts/planner.md`,
-   `prompts/maker.md`, `prompts/checker-report-only.md`, `schemas/review-result.schema.json` e
-   `docs/PROJECT_CONFIGURATION.md`. Não faça cópia recursiva da origem; `.git`, `.gitignore`,
+   `prompts/orchestrator-perfis.md`, `prompts/orchestrator-playbook.md`, `prompts/classifier.md`,
+   `prompts/planner.md`, `prompts/maker.md`, `prompts/checker-report-only.md`, `prompts/searcher.md`,
+   `schemas/classification-result.schema.json`, `schemas/review-result.schema.json`,
+   `docs/PROJECT_CONFIGURATION.md` e `docs/MODEL_ROUTING.md`. Não faça cópia recursiva da origem;
+   `.git`, `.gitignore`,
    configurações locais, backlog e qualquer outro arquivo não entram no pacote.
 
-   Antes de gravar os hashes em `INSTALLATION.md`, compare cada um dos onze arquivos de
+   Antes de gravar os hashes em `INSTALLATION.md`, compare cada um dos quinze arquivos de
    `_tl-orc/package` byte a byte com o caminho correspondente na pasta temporária da revisão.
    Arquivo ausente, adicional ou diferente bloqueia a instalação. Gere os hashes a partir da
    origem conferida e valide a cópia com eles; nunca derive a prova somente do destino copiado.
@@ -86,7 +102,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    - Codex e Antigravity: `.agents/skills/tl-orchestrator`.
 
    Use link simbólico relativo para `_tl-orc/package` somente quando o harness, o sistema e a
-   política do projeto o suportarem; caso contrário, faça uma cópia verificada dos onze arquivos.
+   política do projeto o suportarem; caso contrário, faça uma cópia verificada dos quinze arquivos.
    Para integrações versionadas para a equipe, use por padrão a cópia verificada, pois o suporte
    local a links não garante o mesmo comportamento nos demais checkouts. Não crie integração para
    agente ausente nem presuma que caminhos de um harness funcionam em outro. Compare antes de
@@ -100,17 +116,30 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 
 6. Registre em `_tl-orc/PROJECT.md` o perfil-padrão publicado, salvo decisão vigente diferente no
    projeto:
-   - Orquestrador: o agente em que `tl-orchestrator` foi invocado;
-   - Planner: Claude;
-   - Maker: Codex, com `gpt-5.6-terra` preferido quando estiver disponível;
-   - Checker report-only: Agy/Antigravity.
+   - Orquestrador: harness, modelo e effort selecionados pelo usuário na sessão;
+   - Classificador: Codex gpt-5.6-luna medium → Claude sonnet medium →
+     Agy gemini-3.8-flash-medium, em sessões auxiliares somente leitura;
+   - Planner: Claude → Codex → Agy;
+   - Maker: Codex → Claude → Agy;
+   - Checker report-only: Agy → Claude → Codex, preferindo família diferente dos Makers.
 
-   Registre separadamente o modelo preferido, a capacidade observada e o modelo efetivamente usado
-   em cada papel. Um modelo que funcionou em sessão anterior ou aparece na CLI não se torna
-   preferência ou fallback; se o modelo preferido não puder ser despachado, registre o bloqueio e
-   peça a escolha do usuário. O Checker exige sessão independente e família de modelos distinta do
-   Maker; usar Agy não prova isso por si só. Verifique as permissões de cada papel e registre
-   limites sem tratar uma instrução de leitura como bloqueio técnico de escrita.
+   Registre routing_mode: classifier, o catálogo permitido e checker_independence: preferred
+   (ou required quando o consumidor exigir outra família). Para cada fase, o Classificador recebe
+   story_id, phase, context_revision, catalog_revision, revisão do contrato/schema, papéis então
+   necessários, trabalho residual, riscos, critérios/provas, políticas/orçamento, pares autorizados
+   e somente as evidências pertinentes com IDs. Ele devolve o objeto versão 2 com modelo/effort,
+   evidence_ids e cost_basis para cada harness de cada papel. Confira schema, correspondência das
+   revisões, pares, pins, restrições e pertinência da evidência antes de qualquer despacho.
+
+   Preserve separadamente escolhas fixadas, capacidade observada, recomendação e despacho
+   efetivo. Preferência antiga permanece restrição até mudança autorizada; na adoção explícita
+   do roteamento variável, registre quais escolhas fixas o pedido substitui. Revalide modelo,
+   effort, família, permissões e sessão a cada chamada. Registre motivos de fallback; se o
+   Checker usar a mesma família em sessão nova, declare a limitação. Não trate uma instrução
+   report-only como bloqueio técnico de escrita. Mudança de fase reclassifica os papéis necessários;
+   versão 1 não é promovida por inferência. Quota, autenticação e timeout usam a classificação
+   existente e não reduzem qualidade. Registre medições e falhas conforme o guia, sem inventar
+   custo, tokens, latência ou aceite ausentes.
 
 7. Preencha `INSTALLATION.md` e `PROJECT.md` somente com fatos conferidos e preferências já
    declaradas. Este passo deriva da seção "Conferir atualizações" do guia, que é sua fonte
@@ -124,11 +153,11 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    outros esquemas e transportes sem consultá-los. Nunca passe origem, referência ou commit não
    validado a shell, helper ou transporte Git. Prefira uma ferramenta web estruturada; se só
    houver cliente HTTPS por shell, use a origem canônica constante e os demais valores validados e
-   codificados como argumentos literais, sem expansão ou avaliação. Papéis Planner, Maker e
-   Checker designados não fazem essa conferência.
+   codificados como argumentos literais, sem expansão ou avaliação. Papéis Classificador, Planner,
+   Maker e Checker designados não fazem essa conferência.
 
    Antes da rede ou de informar um estado, confirme que o `SKILL.md` carregado está em um destino
-   registrado e que os onze arquivos carregados coincidem com `_tl-orc/package` e seus hashes. Se
+   registrado e que os quinze arquivos carregados coincidem com `_tl-orc/package` e seus hashes. Se
    outra instalação estiver sombreando o perfil ou o conteúdo divergir, informe o conflito sem
    atribuir ao perfil `atual` ou `atualização disponível`.
 
@@ -160,7 +189,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    de uma tarefa do projeto.
 ```
 
-`_tl-orc/` pertence ao projeto consumidor e não faz parte dos onze arquivos desta distribuição.
+`_tl-orc/` pertence ao projeto consumidor e não faz parte dos quinze arquivos desta distribuição.
 As integrações podem ser versionadas para uso da equipe quando a política do projeto permitir; a
 cópia verificada é o padrão para esse uso compartilhado.
 Os caminhos acima seguem a documentação atual de [Claude Code](https://code.claude.com/docs/en/skills),
@@ -181,7 +210,9 @@ contexto atuais acompanham o pedido:
 Planner, Maker e Checker opinam primeiro de forma independente e podem responder às objeções em
 uma rodada de contraponto. O Orquestrador apresenta recomendação, divergências e evidências
 faltantes para você decidir. O [modo Debater](prompts/orchestrator-playbook.md#debater) usa sessões
-somente leitura e não implementa nem aprova uma entrega. Não exige IDs de story ou comando novo.
+somente leitura e não implementa nem aprova uma entrega. A identidade consultiva do Maker é
+resolvida antes do Checker para preservar diversidade de família mesmo sem diff. Não exige IDs de
+story ou comando novo.
 
 O fluxo abaixo descreve uma mudança com implementação autorizada. Um pedido limitado a análise
 ou planejamento termina nessa etapa. Decisões reservadas ao usuário voltam a ele.
@@ -189,13 +220,15 @@ ou planejamento termina nessa etapa. Decisões reservadas ao usuário voltam a e
 ```mermaid
 flowchart TD
     U["Usuário"] -->|Define objetivo e autoriza escopo| O["Orquestrador"]
-    O -->|Quando precisa de auditoria ou spec| P["Planner · Claude"]
+    O -->|Story, fase, revisões, catálogo e evidências| CL["Classificador · perfil econômico fixo"]
+    CL -->|Tier, pares, evidências e base de custo| D["Orquestrador valida e resolve a cadeia"]
+    D -->|Quando precisa de auditoria ou spec| P["Planner · Claude → Codex → Agy"]
     P -->|Propõe spec e corte| R["Orquestrador ratifica o corte"]
-    O -->|Spec já executável| R
-    R -->|Despacha implementação autorizada| M["Maker · Codex"]
+    D -->|Spec já executável| R
+    R -->|Despacha implementação autorizada| M["Maker · Codex → Claude → Agy"]
     M -->|Diff e evidências| V["Orquestrador confere e verifica"]
     V -->|Correção necessária no escopo| M
-    V -->|Nova sessão e família distinta do Maker| C["Checker report-only · Agy"]
+    V -->|Nova sessão; prefere outra família| C["Checker · Agy → Claude → Codex"]
     C -->|Parecer| J["Orquestrador valida o parecer"]
     J -->|Parecer inválido: solicitar nova resposta| C
     J -->|Correção de implementação| M
@@ -216,13 +249,13 @@ mais tarde para processar a próxima.
 
 Dentro da mesma story, os achados em escopo atribuídos ao Maker voltam em um único briefing — por
 exemplo, R1–R4 — sem pedir uma autorização separada. O limite padrão são duas rodadas de correção;
-decisão humana, alteração de escopo, indisponibilidade de Claude/Codex/Agy, parecer inválido ou
+decisão humana, alteração de escopo, cadeia de fallback esgotada, parecer inválido ou
 falha sem atribuição param a fila e apresentam o ponto de retomada. A fila não faz push nem abre
 pull request.
 
-## Exportar os onze arquivos
+## Exportar os quinze arquivos
 
-Em um terminal com ferramentas padrão POSIX, entre na raiz do pacote (pasta deste README). O bloco abaixo cria uma pasta temporária nova fora do projeto e nomeia exatamente os onze arquivos distribuídos. Usa `/tmp` para que uma configuração local de `TMPDIR` não leve a exportação para dentro do projeto. A pasta de origem deve estar fora de `/tmp` ou deve-se conferir que o destino não está dentro dela.
+Em um terminal com ferramentas padrão POSIX, entre na raiz do pacote (pasta deste README). O bloco abaixo cria uma pasta temporária nova fora do projeto e nomeia exatamente os quinze arquivos distribuídos. Usa `/tmp` para que uma configuração local de `TMPDIR` não leve a exportação para dentro do projeto. A pasta de origem deve estar fora de `/tmp` ou deve-se conferir que o destino não está dentro dela.
 
 ```sh
 set -eu
@@ -232,26 +265,30 @@ cp README.md SKILL.md LICENSE "$export_dir/"
 cp prompts/orchestrator.md \
    prompts/orchestrator-perfis.md \
    prompts/orchestrator-playbook.md \
+   prompts/classifier.md \
    prompts/planner.md \
    prompts/maker.md \
-   prompts/checker-report-only.md "$export_dir/prompts/"
-cp schemas/review-result.schema.json "$export_dir/schemas/"
-cp docs/PROJECT_CONFIGURATION.md "$export_dir/docs/"
+   prompts/checker-report-only.md \
+   prompts/searcher.md "$export_dir/prompts/"
+cp schemas/classification-result.schema.json \
+   schemas/review-result.schema.json "$export_dir/schemas/"
+cp docs/PROJECT_CONFIGURATION.md docs/MODEL_ROUTING.md "$export_dir/docs/"
 printf '%s\n' "$export_dir"
 (cd "$export_dir" && find . -type f -print | LC_ALL=C sort)
 ```
 
 Copiam-se apenas os caminhos explícitos, todos arquivos regulares. Outros arquivos da origem, inclusive `.gitignore`, histórico, configurações locais e backlog, não entram. Não use cópia recursiva da origem para exportar. A exportação não publica nem instala nada.
 
-Para conferir os onze arquivos, execute a partir da mesma raiz:
+Para conferir os quinze arquivos, execute a partir da mesma raiz:
 
 ```sh
 checksum_file=$(mktemp /tmp/tl-orchestrator-sha256.XXXXXX) &&
 shasum -a 256 README.md SKILL.md LICENSE \
   prompts/orchestrator.md prompts/orchestrator-perfis.md \
-  prompts/orchestrator-playbook.md prompts/planner.md \
-  prompts/maker.md prompts/checker-report-only.md \
-  schemas/review-result.schema.json docs/PROJECT_CONFIGURATION.md \
+  prompts/orchestrator-playbook.md prompts/classifier.md prompts/planner.md \
+  prompts/maker.md prompts/checker-report-only.md prompts/searcher.md \
+  schemas/classification-result.schema.json schemas/review-result.schema.json \
+  docs/PROJECT_CONFIGURATION.md docs/MODEL_ROUTING.md \
   > "$checksum_file" &&
 (cd "${export_dir:?Execute primeiro o bloco de exportação}" && shasum -a 256 -c "$checksum_file")
 ```

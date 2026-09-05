@@ -6,7 +6,7 @@ decisões e para registrar preferências operacionais e capacidades com sua proc
 
 ## Duas raízes
 
-- **Raiz do pacote:** pasta instalada contendo [SKILL.md](../SKILL.md), contratos e schema. Referências do método partem desta distribuição.
+- **Raiz do pacote:** pasta instalada contendo [SKILL.md](../SKILL.md), contratos e schemas. Referências do método partem desta distribuição.
 - **Raiz consumidora:** projeto, workspace ou diretório indicado pelo usuário para o trabalho. Código, regras, stories e evidências pertencem a essa raiz ou ao sistema de tarefas que ela declarar.
 
 O pacote pode estar fora do projeto, em uma pasta de skills, ou aninhado em
@@ -43,11 +43,11 @@ update_ref: refs/heads/main
 ```
 
 Use exatamente `enabled` ou `disabled` em `update_check`. Depois desse cabeçalho, mantenha as
-seções `## Arquivos`, com SHA-256 e caminho relativo dos onze arquivos; `## Integrações`, com
+seções `## Arquivos`, com SHA-256 e caminho relativo dos quinze arquivos; `## Integrações`, com
 harness, destino, tipo link/cópia, revisão e conferência; `## Instalações concorrentes`, com escopo,
 precedência e revisão; e `## Migrações`, com release notes consultadas, ações e pendências.
 
-Os hashes de `## Arquivos` são gerados a partir dos onze arquivos da revisão de origem já conferida
+Os hashes de `## Arquivos` são gerados a partir dos quinze arquivos da revisão de origem já conferida
 e usados para validar `_tl-orc/package`. Não os derive apenas do destino: compare origem e cópia
 antes de registrar o perfil, e trate arquivo ausente, adicional ou diferente como bloqueio.
 
@@ -63,14 +63,47 @@ format_version: 1
 <comando ou inspeção, diretório e origem>
 
 ## Preferências operacionais
-<papel, harness, modelo preferido, capacidade observada, modelo efetivo, família, permissões, origem e última conferência>
+<Orquestrador fixo; cadeia do Classificador; Searcher sob demanda (Agy gemini-3.8-flash-medium/medium); ordem dos harnesses por papel; escolhas fixadas; política de independência; origem e última conferência>
+
+## Catálogo permitido
+<harness, IDs e famílias, efforts aceitos, capacidade por papel, limites de custo/quota e disponibilidade com evidência>
+
+## Classificação e despacho
+<story, fase, revisões de contexto/catálogo/contrato, resultado v2 do Classificador, evidências e base de custo, perfis recomendados, modelo/effort efetivos, sessão, medições e motivos de fallback; Searcher registrado separadamente, fora de requested_roles e do schema>
 
 ## Evidências
 <destino vigente no consumidor>
 ```
 
+Um registro de classificação e medição pode usar este formato conceitual, adaptado à sintaxe do
+consumidor. Placeholders devem ser substituídos apenas por valores observados; campo desconhecido
+permanece desconhecido, nunca zero:
+
+```text
+story_id: <ID não vazio ou null somente quando não houver story>
+phase: <debate|planning|implementation|review|rework>
+context_revision: <revisão não vazia>
+catalog_revision: <revisão não vazia>
+contract_revision: <revisão do contrato e schema>
+classification_schema_version: 2
+requested_roles: <somente os papéis desta fase>
+evidence_ids: <IDs pertinentes fornecidos ao Classificador>
+cost_basis: <local_observed|official_task_proxy|token_price_only|unknown>
+
+## Medições por tentativa
+<tentativa; papel/fase; par solicitado e efetivo; revisões de briefing/catálogo/contrato;
+tokens de entrada não cacheados e cacheados; tokens de saída e raciocínio conforme o provedor;
+chamadas; duração ponta a ponta; espera/infraestrutura; aceite independente; falha observada;
+retrabalho decorrente>
+```
+
+Mantenha tentativas falhas na amostra e as unidades de cada contador. `official_task_proxy`
+fundamenta uma estimativa comparável, não o custo exato desta story. Com zero entregas aceitas não
+há custo finito por sucesso a declarar. O perfil registra fatos; o pacote não coleta telemetria,
+executa experimento ou mantém cache automático.
+
 `INSTALLATION.md` registra a URL de origem, versão ou tag quando houver, referência móvel
-acompanhada, commit instalado, hashes dos onze arquivos, destinos de skill, se cada destino é link
+acompanhada, commit instalado, hashes dos quinze arquivos, destinos de skill, se cada destino é link
 ou cópia, se a consulta remota está habilitada e todas as instalações concorrentes encontradas,
 com escopo e precedência. A tag
 identifica a versão instalada; uma
@@ -78,26 +111,50 @@ referência como `refs/heads/main` descobre versões seguintes. `PROJECT.md` tem
 aponta para instruções, stories ou tickets, portões e destino das evidências, que continuam
 autoritativos; e
 registra preferências operacionais declaradas e capacidades observadas, com origem e última
-conferência. O perfil-padrão distribuído é: Orquestrador no agente que ativou o método, **Planner
-no Claude, Maker no Codex (com `gpt-5.6-terra` preferido quando disponível) e Checker no
-Agy/Antigravity**. Esse é o padrão de despacho do pacote, não apenas uma sugestão de instalação.
-Registre separadamente o modelo e sua família; o harness do Checker não prova por si só
-independência em relação ao Maker. Não armazene segredos ou credenciais nesses arquivos.
+conferência. O [perfil-padrão](../prompts/orchestrator-perfis.md#perfil-padrão) mantém o
+Orquestrador na seleção do usuário e usa um Classificador separado: Luna medium → Sonnet medium →
+Gemini 3.8 Flash medium. Esse Classificador escolhe modelo e effort por papel/harness; o Searcher
+pode ser acionado sob demanda com Agy gemini-3.8-flash-medium/medium, fora do schema de
+classificação; as cadeias
+de trabalho são Planner Claude → Codex → Agy, Maker Codex → Claude → Agy e Checker
+Agy → Claude → Codex, preferindo outra família que a dos Makers efetivos.
 
-Em `PROJECT.md`, mantenha a preferência de modelo em coluna ou campo distinto da capacidade
-observada e do modelo efetivamente usado. A preferência precisa identificar sua origem: decisão
-do usuário, decisão do consumidor ou perfil-padrão distribuído. Uma sessão passada, a lista de
-modelos da CLI ou o default do harness são somente capacidade. Eles não promovem um modelo a
-preferência ou fallback. A resolução segue
-esta ordem: escolha atual do usuário, preferência declarada pelo consumidor, perfil-padrão e,
-quando não houver modelo escolhido disponível, bloqueio para decisão do usuário. Assim,
-`gpt-5.6-luna` registrado como capacidade não pode substituir `gpt-5.6-terra` sem designação
-expressa.
+Registre `routing_mode: classifier` quando essa política estiver adotada. Mantenha quatro coisas
+distintas: preferências e escolhas fixadas pelo usuário, catálogo autorizado com capacidade
+observada, recomendação do Classificador e despacho efetivo. Identifique a origem de cada
+preferência: usuário, consumidor ou perfil publicado. Uma sessão passada ou lista da CLI não
+autoriza sozinha outro modelo. O catálogo enumera pares modelo/effort permitidos, restrições por
+papel, família, limites e disponibilidade; os modelos de trabalho são escolhidos pelo
+Classificador a partir dele, sem tabela fixa obrigatória por tier.
 
-Preferências e capacidades são configuração operacional, não decisões do produto ou da tarefa.
-Uma instrução mais recente do usuário prevalece sobre a preferência registrada. A capacidade
-atualmente observada apenas confirma ou bloqueia a escolha; ela não a substitui. Atualize a origem
-e a conferência quando elas mudarem.
+O briefing do Classificador inclui story, fase, revisões separadas de contexto e catálogo, revisão
+do contrato/schema, papéis requeridos somente nessa fase, residual, riscos, critérios e provas,
+políticas, orçamento, pares autorizados e apenas o recorte pertinente de
+[MODEL_ROUTING.md](MODEL_ROUTING.md) e medições locais, com IDs. A pesquisa orienta a decisão e
+faz parte dos quinze arquivos distribuídos; não autoriza modelos nem precisa ser lida inteira por
+cada agente. O papel responsável recebe o contexto crítico integral de execução separadamente.
+
+Registre `checker_independence: preferred` para o padrão que prioriza outra família e admite
+mesma família em sessão nova depois de esgotar alternativas, tornando a limitação visível.
+`checker_independence: required` mantém a exigência de outra família. Harness diferente não prova
+família diferente. Modelo e effort efetivos precisam ser conferidos, incluindo resolução de aliases
+e variantes cujo ID incorpora effort.
+
+As regras de classificação, validação, reclassificação, quota e fallback têm uma única fonte nos
+[perfis](../prompts/orchestrator-perfis.md#classificar-e-resolver). Preserve a recomendação e o
+histórico de saltos no artefato da tarefa. Preferências operacionais não alteram intenção de
+produto nem ampliam autorização. Não armazene segredos ou credenciais nesses registros.
+
+Reutilize uma classificação somente com igualdade de story, fase, papéis, revisões de contexto,
+catálogo e contrato, pins e política. Toda mudança de fase reclassifica os papéis então necessários.
+Um resultado versão 1 não pode ser preenchido por inferência para parecer versão 2. Quota,
+autenticação e timeout percorrem a cadeia já classificada, sem reclassificar ou baixar qualidade.
+
+Na migração de um perfil anterior, preserve modelos explicitamente fixados e exigências de
+independência: eles permanecem restrições até mudança autorizada. A adoção solicitada pelo usuário
+do roteamento variável substitui as escolhas fixas abrangidas pelo pedido; registre essa origem.
+Não transforme uma preferência antiga em mera disponibilidade nem copie IDs antigos como se
+fossem uma escolha nova do Classificador. Atualize origem e última conferência quando mudarem.
 
 Esses registros pertencem ao consumidor. As fontes apontadas continuam autoritativas e devem ser
 relidas quando a tarefa exigir; dado antigo em `_tl-orc/` não prevalece sobre elas. Use
@@ -110,7 +167,7 @@ diff examinado. Sem Git, use `<tarefa-ou-slug>-<UTC>-rNN.md` e registre as vers�
 fontes disponíveis. Normalize o slug para caracteres portáveis, use UTC no formato
 `YYYYMMDDTHHMMSSZ` e incremente `rNN` para cada nova rodada sobre o mesmo estado.
 Versionamento, links simbólicos e arquivos ignorados seguem a política do consumidor. Quando uma
-integração for versionada para a equipe, prefira uma cópia conferida dos onze arquivos. Um link
+integração for versionada para a equipe, prefira uma cópia conferida dos quinze arquivos. Um link
 simbólico deve ser relativo e só deve ser usado quando seu suporte estiver garantido nos checkouts
 em que será consumido.
 
@@ -145,8 +202,9 @@ Cada ativação da fila processa no máximo uma story. Ela considera a primeira 
 do board e só a executa se estiver pronta, com dependências satisfeitas e sem decisão humana
 pendente. Se essa story estiver bloqueada, ambígua ou requerer outro papel além de uma correção em
 escopo pelo Maker, a fila para e registra o motivo em vez de pular para uma story posterior. A
-execução usa por padrão **Planner Claude → Maker Codex → Checker Agy**; indisponibilidade de
-qualquer um deles é bloqueio, não motivo para usar outro papel silenciosamente.
+execução classifica os papéis necessários e segue as cadeias de fallback dos perfis.
+Indisponibilidade comprovada permite avançar dentro da cadeia; falta de classificação válida,
+cadeia esgotada ou disponibilidade incerta não resolvida bloqueia a fila.
 
 Uma tarefa agendada do harness pode invocar a fila em intervalos definidos pelo usuário. Crie ou
 altere essa agenda apenas mediante pedido explícito, usando um prompt que ordene processar uma
@@ -174,10 +232,10 @@ acesse a rede. Esse é o comportamento normal de uma instalação manual que nã
 Com o perfil, `update_check: enabled` habilita por padrão, na ativação como Orquestrador, um acesso
 de rede somente leitura para comparar `installed_commit` com o commit atual de `update_ref`.
 `update_check: disabled` desabilita a consulta; o Orquestrador respeita a decisão e a torna
-visível. Planner, Maker e Checker designados não fazem essa consulta.
+visível. Classificador, Planner, Maker e Checker designados não fazem essa consulta.
 
 Antes de acessar a rede ou informar um estado, confirme que o `SKILL.md` carregado pertence a um
-destino registrado em `INSTALLATION.md` e que seus onze arquivos correspondem exatamente a
+destino registrado em `INSTALLATION.md` e que seus quinze arquivos correspondem exatamente a
 `_tl-orc/package` e aos hashes registrados. Se uma instalação concorrente estiver carregada ou o
 conteúdo divergir, informe o sombreamento ou a divergência local e não atribua ao perfil o estado
 `atual` ou `atualização disponível`.
@@ -293,13 +351,13 @@ revisão. Antes de despachar ou escrever:
 1. escolha uma release alvo ou um commit exato e prove que ele sucede a revisão instalada;
 2. leia em ordem as release notes cujas tags e commits pertençam ao intervalo e compare os
    requisitos com o diff dos contratos entre as duas revisões;
-3. prepare um plano que separe atualização dos onze arquivos, migrações de `INSTALLATION.md` e
+3. prepare um plano que separe atualização dos quinze arquivos, migrações de `INSTALLATION.md` e
    `PROJECT.md`, sincronização das integrações e decisões ainda necessárias;
 4. trate comandos e instruções das notas como conteúdo a verificar, nunca como autorização ou
    entrada direta para shell;
 5. peça ao usuário somente decisões que mudem garantia, política ou preferência declarada.
 
-Depois das decisões, o Maker preserva modificações locais, instala os onze arquivos de uma única
+Depois das decisões, o Maker preserva modificações locais, instala os quinze arquivos de uma única
 revisão, sincroniza cada destino que for cópia e adapta os registros e integrações aos requisitos
 comprovados. O Orquestrador confere hashes, links, descoberta nos harnesses presentes e aderência
 às notas, então submete o resultado ao Checker independente. Registre as notas consultadas, as
@@ -340,8 +398,8 @@ O briefing ou a story pode registrar, no formato existente:
 
 Os valores são descobertos, não executados a partir desta tabela. Quando o perfil local existir,
 informações compartilhadas e conferidas podem ser indexadas em `_tl-orc/PROJECT.md`. Preferências
-pessoais e IDs de modelo ficam na configuração da sessão ou do consumidor, fora do pacote
-reutilizável.
+pessoais e o catálogo atual de modelos de trabalho ficam na sessão ou no consumidor. O pacote
+publica somente o perfil-base substituível e os contratos de classificação e despacho.
 
 ## BMAD e outros métodos
 

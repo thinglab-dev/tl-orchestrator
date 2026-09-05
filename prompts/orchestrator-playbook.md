@@ -2,6 +2,45 @@
 
 Complemento do [contrato do Orquestrador](orchestrator.md). As raízes e os portões vêm do [projeto consumidor](../docs/PROJECT_CONFIGURATION.md).
 
+## Searcher sob demanda
+
+Quando faltar contexto factual para uma decisão, o Orquestrador pode consultar o Searcher antes ou
+durante preparação, debate ou classificação, respeitando pergunta concreta, fontes autorizadas,
+frescor e limites de tempo, chamadas e resposta. Registre cobertura, lacunas e acessos; falha de
+ferramenta ou permissão fica explícita como parcial/bloqueada. O Searcher usa sessão separada e seu
+resumo é evidência orientadora, não prova única nem substituto de leitura obrigatória.
+
+## Evolução na ativação
+
+Quando existir perfil local, execute a [ordem normativa](../docs/EVOLUTION.md#ordem-na-ativação)
+antes da triagem da tarefa. Valide separadamente `update_check`, `update_policy`,
+`contribution_mode` e a autoridade documentada; omissão das duas políticas em perfil legado
+equivale a `notify` e `ask`. Um campo `auto_pr` ou `auto_safe` não prova autoridade.
+
+Compare primeiro pacote, baseline e hashes, registrando arquivos alterados, ausentes e adicionais.
+Se houver delta do método, preserve-o contra a baseline verificada e trate a contribuição antes
+do retorno por divergência. Faça isso fora do consumidor, em checkout fonte isolado, somente para
+a allowlist do pacote e depois de sanitizar conteúdo e metadados; nunca copie `_tl-orc/config`,
+logs, evidências, credenciais ou outro conteúdo privado. Dúvida de propriedade ou privacidade
+para. A contribuição não limpa a instalação e o delta continua bloqueando atualização.
+
+Em `ask`, apresente o patch e o plano. Em `auto_pr`, somente autoridade expressa para o mesmo
+projeto, ator, destino, escopo, commit, push e draft PR permite chegar aos efeitos externos.
+Conduza Maker, prova própria e Checker antes de buscar duplicata e publicar. Duplicata existente
+impede novo PR; não modifique trabalho de terceiro nem reabra rejeitado. Sem permissão comprovada,
+pare sem configurar fork. Nunca faça merge automático. Feature nova depende de intenção delimitada
+e aprovada; suspeita não autoriza desenvolvimento.
+
+Sem delta ou outro bloqueio, `notify` apenas relata. `auto_safe` considera somente release estável
+descendente, nunca mero avanço de `main`, e exige integridade total, precedência conferida, nenhuma
+migração ou decisão pendente e autoridade exata. Antes da escrita, crie e confira snapshot
+recuperável. Depois, aplique uma única revisão pelo Maker, repita hashes, cópias, links,
+precedência e descoberta, e obtenha Checker independente. Falha recupera o snapshot dentro da
+autoridade e interrompe; não deixa atualização parcial.
+
+Esse fluxo ocorre somente na ativação atual. Não crie daemon, agenda, heartbeat ou configuração
+de terceiros para executá-lo.
+
 ## Fila sequencial de stories
 
 Este modo existe para executar stories em ordem sem transformar cada correção de revisão em uma
@@ -22,17 +61,20 @@ decisão humana pendente. Se ela estiver bloqueada ou ambígua, não pule para o
 registre o motivo e aguarde a decisão ou a atualização do board. Quando BMAD reger o módulo,
 execute primeiro a sincronização exigida pela política local e use somente o sprint daquele módulo.
 
-Para a story escolhida, aplique o perfil-padrão salvo substituição registrada: **Planner Claude**
-audita ou esclarece a spec, **Maker Codex** implementa e prova, e **Checker Agy** revisa em nova
-sessão independente. Resolva o modelo de cada papel pelos [perfis](orchestrator-perfis.md#resolver-a-capacidade-atual)
-antes do despacho: capacidade observada não autoriza fallback. Revalide harness, modelo, família e
-permissões em cada despacho. Falta de Claude, Codex ou Agy, ou do modelo escolhido, é bloqueio;
-não substitua em silêncio. Preserve a regra de um escritor por árvore.
+Para a story escolhida, obtenha ou revalide a classificação da **fase atual** para somente os
+papéis necessários, seguindo os [perfis](orchestrator-perfis.md#classificar-e-resolver). O
+Classificador seleciona modelo e effort por papel/harness; Planner audita ou esclarece a spec,
+Maker implementa e prova, e Checker revisa em nova sessão. Toda mudança de fase reclassifica os
+papéis requeridos. Indisponibilidade comprovada permite avançar na cadeia autorizada sem mudar a
+classificação; cadeia esgotada ou ambiguidade não resolvida bloqueia a fila. Revalide a
+independência do Checker após a escolha efetiva do Maker. Preserve um escritor por árvore.
 
 Se o Checker emitir um parecer válido com achados atribuídos somente ao Maker e todos estiverem no
-escopo congelado, consolide os IDs do mesmo parecer em um único briefing de correção ao Maker. Não
-pergunte novamente pelo despacho de R1–R4 ou equivalentes. Depois da correção, renove as provas
-afetadas e envie a árvore final a uma **nova** sessão do Checker Agy. O limite padrão é duas
+escopo congelado, consolide os IDs do mesmo parecer em um único briefing de correção. Classifique
+a fase `rework` pelos achados e pelo residual, sem herdar o tier anterior, antes de despachar o
+Maker com esse briefing. Não pergunte novamente pelo despacho de R1–R4 ou equivalentes. Depois da
+correção, renove as provas afetadas, classifique a fase `review` para a árvore atual e envie-a a
+uma **nova** sessão do Checker resolvido pela política de despacho. O limite padrão é duas
 rodadas de correção após a primeira revisão, ou menor se `_tl-orc/QUEUE.md` o declarar. Ao atingir
 o limite, obter parecer inválido, encontrar achado de intenção/spec, exigir permissão adicional ou
 ver uma falha não atribuída, pare a fila e apresente a evidência e a próxima decisão necessária.
@@ -52,8 +94,11 @@ contexto da conversa; não exija comando especial nem IDs de story. Se o foco es
 ambíguo, esclareça somente essa lacuna. Um pedido genérico de análise não seleciona este modo.
 
 A escolha autoriza o Orquestrador a consultar Planner, Maker e Checker em sessões reais separadas,
-somente leitura, usando as preferências existentes e a capacidade revalidada nos
-[perfis](orchestrator-perfis.md). Não autoriza implementar, executar experimentos que alterem o
+somente leitura, com classificação econômica da fase `debate`, preferências e capacidade
+revalidadas nos [perfis](orchestrator-perfis.md). Resolva a identidade consultiva efetiva do Maker
+antes do Checker; o Checker prioriza família diferente dela e de autores efetivos de artefato, se
+houver, mesmo sem diff. Se fallback mudar o Maker, revalide o Checker. Não autoriza implementar,
+executar experimentos que alterem o
 ambiente, ratificar decisões, mudar ADRs, board, código, instalação ou Git, nem publicar. Os
 participantes não despacham agentes; sua entrega é uma opinião na resposta. O eventual registro
 local pelo Orquestrador depende da autorização já existente para evidências.
@@ -103,6 +148,12 @@ Leia pedido, regras locais, tarefa atual, dependências e estado da árvore. Se 
 
 Fixe a garantia, o corte por mecanismo, o escopo e os donos de artefatos compartilhados. Se necessário, peça ao Planner a auditoria e a spec conforme seu contrato. Não transforme uma estimativa de tamanho em limite novo: use a decisão vigente da story e da política local.
 
+Antes de cada papel classificado (Planner, Maker ou Checker), siga a classificação e a resolução dos
+[perfis](orchestrator-perfis.md#classificar-e-resolver). Dimensionar Maker e Checker não autoriza
+seu despacho quando o pedido se limita a planejamento. Depois de esclarecer a spec, reclassifique
+os papéis requeridos pela nova fase, ainda que riscos, garantias e restrições pareçam iguais. Um
+Planner pode justificar mais capacidade que a execução delimitada subsequente.
+
 Despache Maker para implementar somente quando a spec estiver executável e a implementação autorizada. Decisão em aberto que muda produto, garantia ou escopo não deve ser herdada como acidente de implementação; ofereça **Debater** para apoiar a escolha do usuário.
 
 ## Conferir a entrega
@@ -110,6 +161,10 @@ Despache Maker para implementar somente quando a spec estiver executável e a im
 Leia todos os acréscimos e remoções, incluindo arquivos novos que um diff de rastreados omite. Compare o resultado com os critérios de aceite e verifique os consumidores do comportamento alterado. Em uma retirada, confira ausência de dependências e preservação do material que deveria ficar.
 
 Derive a verificação dos riscos e contratos afetados, inclusive quem constrói ou consome tipos/configurações alterados. Execute os portões existentes definidos para a tarefa; uma alteração documental pode ser comprovada por inspeção, comparação de originais, referências e exportação. Não invente uma suíte de programação para validar documentos.
+
+Antes do Checker, classifique a fase `review` pelo alcance do mecanismo, riscos e contraprovas
+necessárias, não apenas pelo tamanho do diff. O Checker continua sempre em sessão nova, somente
+leitura, e sua cadeia conserva a preferência publicada e a política de independência.
 
 Quando a garantia depende de teste de comportamento, prove pessoalmente que ele discrimina o defeito por sonda prevista ou equivalente: confirme a alteração de fato, observe a falha esperada, recupere o conteúdo original e observe a passagem. Falha de compilação ou teste que não executou não prova discriminação. Use uma cópia isolada ou mecanismo seguro de restauração e confira o diff ao final, inclusive após interrupções.
 

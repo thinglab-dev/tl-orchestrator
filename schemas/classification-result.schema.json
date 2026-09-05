@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tl-orchestrator Classification Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "story_id",
+    "phase",
+    "context_revision",
+    "catalog_revision",
+    "confidence",
+    "facts",
+    "uncertainties",
+    "reclassify_when",
+    "roles"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "story_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "phase": {
+      "enum": [
+        "debate",
+        "planning",
+        "implementation",
+        "review",
+        "rework"
+      ]
+    },
+    "context_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "catalog_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "confidence": {
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "reclassify_when": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "planner": {
+          "$ref": "#/$defs/role"
+        },
+        "maker": {
+          "$ref": "#/$defs/role"
+        },
+        "checker": {
+          "$ref": "#/$defs/role"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tier",
+        "reason",
+        "candidates"
+      ],
+      "properties": {
+        "tier": {
+          "enum": [
+            "simple",
+            "normal",
+            "heavy"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "candidates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/candidate"
+          }
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "harness",
+        "model",
+        "effort",
+        "evidence_ids",
+        "cost_basis",
+        "reason"
+      ],
+      "properties": {
+        "harness": {
+          "enum": [
+            "codex",
+            "claude",
+            "agy"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "effort": {
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra",
+            null
+          ]
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "cost_basis": {
+          "enum": [
+            "local_observed",
+            "official_task_proxy",
+            "token_price_only",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "model": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "effort": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "cost_basis": {
+                "not": {
+                  "const": "unknown"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence_ids": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

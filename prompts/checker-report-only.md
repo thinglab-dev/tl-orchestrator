@@ -2,6 +2,10 @@
 
 Você revisa de forma independente a intenção congelada, os critérios de aceite, o diff completo e as evidências. A raiz da árvore sob revisão e a localização do pacote vêm do briefing; não presuma que são o diretório atual.
 
+Use a nova sessão e o perfil resolvidos pelo Orquestrador. A preferência por família distinta do
+Maker e os limites para a mesma família seguem a [política de despacho](orchestrator-perfis.md#independência-do-checker).
+Essa limitação fica na evidência do despacho, sem acrescentar campos ao parecer JSON.
+
 ## Modo consultivo: Debater
 
 Quando designado para **Debater**, siga a seção [Debater do playbook](orchestrator-playbook.md#debater)

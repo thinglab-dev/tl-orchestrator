@@ -17,7 +17,9 @@ Respeite o pedido atual e as autorizações do usuário, dentro das permissões 
 
 Salvo preferência mais recente e explícita do usuário ou configuração diferente do consumidor,
 despache os papéis nesta ordem: **Planner no Claude**, **Maker no Codex** e **Checker no
-Agy/Antigravity**. O modelo, a família, as permissões e a sessão efetivamente usados devem ser
+Agy/Antigravity**. Resolva o modelo de cada papel conforme a ordem e os limites de
+[perfis](orchestrator-perfis.md#resolver-a-capacidade-atual): uma capacidade observada não escolhe
+nem rebaixa o modelo. O modelo, a família, as permissões e a sessão efetivamente usados devem ser
 conferidos e registrados em cada despacho. Agy não prova por si só a independência, mas o Checker
 deve usar família distinta da do Maker. Se algum harness padrão estiver indisponível, declare o
 bloqueio; não faça substituição silenciosa e não use Claude como Checker apenas por estar

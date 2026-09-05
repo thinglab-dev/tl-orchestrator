@@ -63,7 +63,7 @@ format_version: 1
 <comando ou inspeção, diretório e origem>
 
 ## Preferências operacionais
-<papel, harness, modelo, família, permissões, origem e última conferência>
+<papel, harness, modelo preferido, capacidade observada, modelo efetivo, família, permissões, origem e última conferência>
 
 ## Evidências
 <destino vigente no consumidor>
@@ -79,14 +79,24 @@ aponta para instruções, stories ou tickets, portões e destino das evidências
 autoritativos; e
 registra preferências operacionais declaradas e capacidades observadas, com origem e última
 conferência. O perfil-padrão distribuído é: Orquestrador no agente que ativou o método, **Planner
-no Claude, Maker no Codex e Checker no Agy/Antigravity**. Esse é o padrão de despacho do pacote,
-não apenas uma sugestão de instalação. Registre separadamente o modelo e sua família; o harness do
-Checker não prova por si só independência em relação ao Maker. Não armazene segredos ou
-credenciais nesses arquivos.
+no Claude, Maker no Codex (com `gpt-5.6-terra` preferido quando disponível) e Checker no
+Agy/Antigravity**. Esse é o padrão de despacho do pacote, não apenas uma sugestão de instalação.
+Registre separadamente o modelo e sua família; o harness do Checker não prova por si só
+independência em relação ao Maker. Não armazene segredos ou credenciais nesses arquivos.
+
+Em `PROJECT.md`, mantenha a preferência de modelo em coluna ou campo distinto da capacidade
+observada e do modelo efetivamente usado. A preferência precisa informar sua origem como decisão
+do usuário ou do consumidor; uma sessão passada, a lista de modelos da CLI ou o default do harness
+são somente capacidade. Eles não promovem um modelo a preferência ou fallback. A resolução segue
+esta ordem: escolha atual do usuário, preferência declarada pelo consumidor, perfil-padrão e,
+quando não houver modelo escolhido disponível, bloqueio para decisão do usuário. Assim,
+`gpt-5.6-luna` registrado como capacidade não pode substituir `gpt-5.6-terra` sem designação
+expressa.
 
 Preferências e capacidades são configuração operacional, não decisões do produto ou da tarefa.
-Uma instrução mais recente do usuário e a capacidade atualmente observada prevalecem sobre esse
-registro; atualize a origem e a conferência quando elas mudarem.
+Uma instrução mais recente do usuário prevalece sobre a preferência registrada. A capacidade
+atualmente observada apenas confirma ou bloqueia a escolha; ela não a substitui. Atualize a origem
+e a conferência quando elas mudarem.
 
 Esses registros pertencem ao consumidor. As fontes apontadas continuam autoritativas e devem ser
 relidas quando a tarefa exigir; dado antigo em `_tl-orc/` não prevalece sobre elas. Use

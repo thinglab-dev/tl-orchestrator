@@ -2,9 +2,10 @@
 
 Um método documental para planejar, debater decisões, implementar e revisar mudanças com Orquestrador, Planner, Maker e Checker. Usa agentes e portões já disponíveis no projeto consumidor. A distribuição contém documentos Markdown, schema JSON e licença; não precisa de linguagem de programação, runtime próprio ou instalação do projeto de origem.
 
-O perfil-padrão publicado é **Planner Claude → Maker Codex → Checker Agy/Antigravity**. Cada
-despacho ainda confirma modelo, família, permissões e sessão; uma preferência registrada pelo
-consumidor ou uma instrução mais recente do usuário pode substituí-lo.
+O perfil-padrão publicado é **Planner Claude → Maker Codex (`gpt-5.6-terra` preferido quando
+disponível) → Checker Agy/Antigravity**. Cada despacho ainda confirma modelo, família, permissões
+e sessão; uma preferência registrada pelo consumidor ou uma instrução mais recente do usuário pode
+substituí-lo. Capacidade observada não é uma preferência nem autoriza fallback silencioso.
 
 Criado por **Albertiano**. Distribuído sob a [licença MIT](LICENSE), que permite uso, modificação e distribuição, inclusive comercial, com preservação do aviso de copyright e da licença nas cópias ou partes substanciais do material.
 
@@ -101,14 +102,15 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    projeto:
    - Orquestrador: o agente em que `tl-orchestrator` foi invocado;
    - Planner: Claude;
-   - Maker: Codex;
+   - Maker: Codex, com `gpt-5.6-terra` preferido quando estiver disponível;
    - Checker report-only: Agy/Antigravity.
 
-   Registre separadamente o modelo e a família efetivamente usados em cada papel. O Checker exige
-   sessão independente e família de modelos distinta do Maker; usar Agy não prova isso por si só.
-   Se um dos três harnesses estiver indisponível, registre o bloqueio, em vez de substituir o papel
-   sem autorização. Verifique as permissões de cada papel e registre limites sem tratar uma
-   instrução de leitura como bloqueio técnico de escrita.
+   Registre separadamente o modelo preferido, a capacidade observada e o modelo efetivamente usado
+   em cada papel. Um modelo que funcionou em sessão anterior ou aparece na CLI não se torna
+   preferência ou fallback; se o modelo preferido não puder ser despachado, registre o bloqueio e
+   peça a escolha do usuário. O Checker exige sessão independente e família de modelos distinta do
+   Maker; usar Agy não prova isso por si só. Verifique as permissões de cada papel e registre
+   limites sem tratar uma instrução de leitura como bloqueio técnico de escrita.
 
 7. Preencha `INSTALLATION.md` e `PROJECT.md` somente com fatos conferidos e preferências já
    declaradas. Este passo deriva da seção "Conferir atualizações" do guia, que é sua fonte

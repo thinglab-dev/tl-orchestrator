@@ -24,9 +24,10 @@ execute primeiro a sincronização exigida pela política local e use somente o 
 
 Para a story escolhida, aplique o perfil-padrão salvo substituição registrada: **Planner Claude**
 audita ou esclarece a spec, **Maker Codex** implementa e prova, e **Checker Agy** revisa em nova
-sessão independente. Revalide harness, modelo, família e permissões em cada despacho. Falta de
-Claude, Codex ou Agy é bloqueio; não substitua em silêncio. Preserve a regra de um escritor por
-árvore.
+sessão independente. Resolva o modelo de cada papel pelos [perfis](orchestrator-perfis.md#resolver-a-capacidade-atual)
+antes do despacho: capacidade observada não autoriza fallback. Revalide harness, modelo, família e
+permissões em cada despacho. Falta de Claude, Codex ou Agy, ou do modelo escolhido, é bloqueio;
+não substitua em silêncio. Preserve a regra de um escritor por árvore.
 
 Se o Checker emitir um parecer válido com achados atribuídos somente ao Maker e todos estiverem no
 escopo congelado, consolide os IDs do mesmo parecer em um único briefing de correção ao Maker. Não

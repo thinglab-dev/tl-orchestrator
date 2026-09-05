@@ -1,29 +1,41 @@
 # Perfis e despacho
 
-Complemento do [contrato do Orquestrador](orchestrator.md). Este arquivo orienta seleção e transporte; fixa apenas o perfil-padrão substituível, nunca uma flag, instalação ou modelo não conferido.
+Complemento do [contrato do Orquestrador](orchestrator.md). Este arquivo orienta seleção e transporte; fixa preferências substituíveis, nunca uma flag, instalação ou disponibilidade de modelo não conferida.
 
 ## Perfil-padrão
 
 O padrão distribuído, quando o consumidor não registrar outra preferência e o usuário não a
 alterar na sessão, é:
 
-| Papel | Harness-padrão | Família esperada | Limite |
-| :--- | :--- | :--- | :--- |
-| Planner | Claude | Anthropic | audita e especifica; não implementa sem autorização própria |
-| Maker | Codex | OpenAI | é o único escritor da árvore da story |
-| Checker report-only | Agy/Antigravity | Google Gemini, se esse for o modelo observado | nova sessão, sem escrita e família distinta da do Maker |
+| Papel | Harness-padrão | Modelo preferido | Família esperada | Limite |
+| :--- | :--- | :--- | :--- | :--- |
+| Planner | Claude | modelo escolhido pelo consumidor ou usuário | Anthropic | audita e especifica; não implementa sem autorização própria |
+| Maker | Codex | `gpt-5.6-terra`, quando disponível | OpenAI | é o único escritor da árvore da story |
+| Checker report-only | Agy/Antigravity | modelo escolhido pelo consumidor ou usuário | Google Gemini, se esse for o modelo observado | nova sessão, sem escrita e família distinta da do Maker |
 
 O nome do harness não substitui a conferência do modelo, da família, da sessão e das permissões.
-Registre os valores observados no artefato da story. Se o papel-padrão não puder ser despachado,
-pare e informe a lacuna; não converta outro papel em Checker ou Maker por conveniência.
+Uma preferência de modelo não prova disponibilidade: registre o modelo efetivamente aceito pelo
+despacho no artefato da story. Se o papel ou seu modelo escolhido não puder ser despachado, pare e
+informe a lacuna; não converta outro papel em Checker ou Maker por conveniência, nem rebaixe o
+modelo sem autorização.
 
 ## Resolver a capacidade atual
 
-Use a preferência já declarada pelo usuário; sem preferência local diferente, aplique o
-[perfil-padrão](#perfil-padrão). Descubra ferramentas disponíveis no ambiente. Consulte ajuda
-local, configuração vigente e documentação oficial pertinente antes de usar uma CLI desconhecida.
-Não invente um comando de instalação ou uma flag por memória; não faça chamadas pagas só para
-descobrir uma preferência já registrada.
+Resolva o modelo de cada papel nesta ordem:
+
+1. modelo escolhido explicitamente pelo usuário na sessão atual;
+2. preferência de modelo declarada no consumidor, com origem que a identifique como preferência;
+3. modelo preferido do [perfil-padrão](#perfil-padrão); para Maker, `gpt-5.6-terra` quando a
+   capacidade atual o confirmar;
+4. se não houver escolha utilizável, pare e peça ao usuário que escolha.
+
+Mantenha **preferência** e **capacidade observada** separadas no perfil local. Um modelo listado
+pela CLI, aceito em sessão anterior, definido como default do harness ou registrado em evidência
+como disponível — por exemplo, `gpt-5.6-luna` — não se torna preferência nem fallback. Ele só pode
+ser usado quando o usuário ou a preferência local o designar expressamente. Descubra ferramentas
+disponíveis no ambiente. Consulte ajuda local, configuração vigente e documentação oficial
+pertinente antes de usar uma CLI desconhecida. Não invente um comando de instalação ou uma flag por
+memória; não faça chamadas pagas só para descobrir uma preferência já registrada.
 
 Dimensione o agente pelo trabalho que resta: decisões ainda abertas, variedade de casos, força das provas e impacto de um erro. Mudança documental pode exigir julgamento forte; grande volume mecânico não implica grande ambiguidade. Respeite custo e quota autorizados, sem rebaixar capacidade ou independência em silêncio.
 

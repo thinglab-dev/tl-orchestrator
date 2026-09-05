@@ -85,9 +85,10 @@ Registre separadamente o modelo e sua família; o harness do Checker não prova 
 independência em relação ao Maker. Não armazene segredos ou credenciais nesses arquivos.
 
 Em `PROJECT.md`, mantenha a preferência de modelo em coluna ou campo distinto da capacidade
-observada e do modelo efetivamente usado. A preferência precisa informar sua origem como decisão
-do usuário ou do consumidor; uma sessão passada, a lista de modelos da CLI ou o default do harness
-são somente capacidade. Eles não promovem um modelo a preferência ou fallback. A resolução segue
+observada e do modelo efetivamente usado. A preferência precisa identificar sua origem: decisão
+do usuário, decisão do consumidor ou perfil-padrão distribuído. Uma sessão passada, a lista de
+modelos da CLI ou o default do harness são somente capacidade. Eles não promovem um modelo a
+preferência ou fallback. A resolução segue
 esta ordem: escolha atual do usuário, preferência declarada pelo consumidor, perfil-padrão e,
 quando não houver modelo escolhido disponível, bloqueio para decisão do usuário. Assim,
 `gpt-5.6-luna` registrado como capacidade não pode substituir `gpt-5.6-terra` sem designação

@@ -23,8 +23,9 @@ Para verificação necessária que não pode executar, use um item `intent_gap` 
 Quando um comportamento parecer contrariar o pacote `tl-orchestrator` e estiver fora do escopo da
 entrega, registre-o em `deferred` como `possível defeito do método:`. Inclua a cláusula ou caminho
 do pacote, a versão observada e a evidência que separa essa hipótese de falha do harness, da
-integração local ou do projeto consumidor. Não pesquise, prepare, abra, comente ou atualize issues;
-o encaminhamento externo pertence ao Orquestrador e depende da autorização do usuário.
+integração local ou do projeto consumidor. Não pesquise, prepare ou altere checkout fonte, patch,
+issue ou pull request; não edite o consumidor ou o pacote instalado. O encaminhamento externo
+pertence ao Orquestrador e depende da autorização do usuário.
 
 ## Parecer
 

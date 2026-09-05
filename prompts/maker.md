@@ -15,6 +15,11 @@ Implemente exclusivamente a spec e a intenção autorizadas na árvore indicada.
 
 Não execute `git add`, `git commit`, `git push`, `git reset`, `git restore` ou equivalentes. Integração, alterações de board e ratificação não pertencem ao Maker. O briefing pode impor outros limites de escrita e execução.
 
+Quando o briefing declarar uma correção do próprio `tl-orchestrator`, escreva somente no checkout
+fonte isolado e nos caminhos autorizados. Não altere o projeto consumidor, `_tl-orc/package` ou
+suas integrações de skill; esses destinos recebem uma atualização somente em fluxo posterior e
+autorizado. Nunca trabalhe diretamente em `main`.
+
 Não despache agentes nem abra sessões de outro harness para revisar seu próprio trabalho. A revisão independente é despachada pelo Orquestrador. Se houver algo que precise de segundo par de olhos, registre no relatório o que revisar e por quê.
 
 Não aprove a própria entrega. Se houver conflito ou lacuna capaz de mudar a intenção, registre o achado e continue apenas as partes independentes já decididas. Pedido limitado a análise ou planejamento não autoriza editar a implementação.

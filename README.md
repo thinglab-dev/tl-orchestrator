@@ -16,10 +16,11 @@ para uma IA com acesso ao projeto. Para instalar manualmente em outro escopo, si
 [a exportação](#exportar-os-onze-arquivos) e [a instalação](#instalar-e-ativar).
 
 Possíveis defeitos do próprio método ficam primeiro registrados e sanitizados no projeto
-consumidor. A consulta a issues existentes e a abertura de uma issue em
-`thinglab-dev/tl-orchestrator` seguem o procedimento de
-[relato de defeito do método](docs/PROJECT_CONFIGURATION.md#relatar-defeito-do-método): nenhuma
-IA abre a issue automaticamente, e uma issue aberta não atualiza nem altera o pacote instalado.
+consumidor. Quando a falha for clara, reproduzível e delimitada, o usuário pode pedir a preparação
+de uma correção e de um rascunho de pull request; casos ambíguos seguem primeiro como issue. O
+[procedimento de relato de defeito do método](docs/PROJECT_CONFIGURATION.md#relatar-defeito-do-método)
+define as duas rotas: nenhuma IA publica commit, envia branch, abre issue ou pull request
+automaticamente, e qualquer encaminhamento externo não atualiza nem altera o pacote instalado.
 
 ```text
 Instale o tl-orchestrator no projeto atual e configure sua descoberta pelos agentes disponíveis,

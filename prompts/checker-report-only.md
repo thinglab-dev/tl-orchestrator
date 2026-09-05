@@ -20,6 +20,12 @@ Procure desvios de intenção, regressões, casos de borda e lacunas de evidênc
 
 Para verificação necessária que não pode executar, use um item `intent_gap` dirigido a `human`, inicie o problema com `verificacao_pendente:` e indique a inspeção/comando necessário e o que ele discrimina. O Orquestrador encaminha a decisão; não há roteamento automático.
 
+Quando um comportamento parecer contrariar o pacote `tl-orchestrator` e estiver fora do escopo da
+entrega, registre-o em `deferred` como `possível defeito do método:`. Inclua a cláusula ou caminho
+do pacote, a versão observada e a evidência que separa essa hipótese de falha do harness, da
+integração local ou do projeto consumidor. Não pesquise, prepare, abra, comente ou atualize issues;
+o encaminhamento externo pertence ao Orquestrador e depende da autorização do usuário.
+
 ## Parecer
 
 O [schema JSON](../schemas/review-result.schema.json) é a única fonte da estrutura, dos campos e dos valores permitidos. Leia-o a partir do pacote entregue. A semântica do parecer é: `approved` exige ausência de ações necessárias; `changes_requested` identifica ao menos uma ação concreta. Nunca aprove pela ausência de informação.

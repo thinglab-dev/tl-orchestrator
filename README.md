@@ -15,6 +15,12 @@ atualizações; o perfil permite desabilitá-la com `update_check: disabled`. Co
 para uma IA com acesso ao projeto. Para instalar manualmente em outro escopo, siga
 [a exportação](#exportar-os-onze-arquivos) e [a instalação](#instalar-e-ativar).
 
+Possíveis defeitos do próprio método ficam primeiro registrados e sanitizados no projeto
+consumidor. A consulta a issues existentes e a abertura de uma issue em
+`thinglab-dev/tl-orchestrator` seguem o procedimento de
+[relato de defeito do método](docs/PROJECT_CONFIGURATION.md#relatar-defeito-do-método): nenhuma
+IA abre a issue automaticamente, e uma issue aberta não atualiza nem altera o pacote instalado.
+
 ```text
 Instale o tl-orchestrator no projeto atual e configure sua descoberta pelos agentes disponíveis,
 respeitando minhas preferências, as instruções locais e o trabalho preexistente.

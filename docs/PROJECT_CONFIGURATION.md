@@ -27,6 +27,7 @@ _tl-orc/
 ├── package/          # distribuição canônica, presa a um único commit
 ├── INSTALLATION.md   # procedência, integridade e integrações instaladas
 ├── PROJECT.md        # fontes, portões e preferências de papéis
+├── QUEUE.md          # opcional: autorização e limites da fila sequencial
 └── evidence/         # fallback quando não houver artefato de evidência no consumidor
 ```
 
@@ -77,10 +78,11 @@ referência como `refs/heads/main` descobre versões seguintes. `PROJECT.md` tem
 aponta para instruções, stories ou tickets, portões e destino das evidências, que continuam
 autoritativos; e
 registra preferências operacionais declaradas e capacidades observadas, com origem e última
-conferência. As preferências padrão de harness são: Orquestrador no agente que ativou o método,
-Planner no Claude, Maker no Codex e Checker no Agy/Antigravity. Registre separadamente o modelo e
-sua família; o harness do Checker não prova por si só independência em relação ao Maker. Não
-armazene segredos ou credenciais nesses arquivos.
+conferência. O perfil-padrão distribuído é: Orquestrador no agente que ativou o método, **Planner
+no Claude, Maker no Codex e Checker no Agy/Antigravity**. Esse é o padrão de despacho do pacote,
+não apenas uma sugestão de instalação. Registre separadamente o modelo e sua família; o harness do
+Checker não prova por si só independência em relação ao Maker. Não armazene segredos ou
+credenciais nesses arquivos.
 
 Preferências e capacidades são configuração operacional, não decisões do produto ou da tarefa.
 Uma instrução mais recente do usuário e a capacidade atualmente observada prevalecem sobre esse
@@ -100,6 +102,46 @@ Versionamento, links simbólicos e arquivos ignorados seguem a política do cons
 integração for versionada para a equipe, prefira uma cópia conferida dos onze arquivos. Um link
 simbólico deve ser relativo e só deve ser usado quando seu suporte estiver garantido nos checkouts
 em que será consumido.
+
+## Fila sequencial de stories
+
+`QUEUE.md` é opcional e só deve existir depois de uma autorização explícita para executar stories
+em sequência. Ele não cria cron, heartbeat, processo residente nem acesso a rede. Seu objetivo é
+dar a cada ativação do Orquestrador uma autoridade e um ponto de retomada verificáveis. Use o
+formato abaixo, adaptando os caminhos ao projeto consumidor:
+
+```text
+format_version: 1
+enabled: true
+scope: <módulo-ou-raiz-autorizada>
+board: <caminho-relativo-do-board-ou-sprint>
+execution_tree: <branch-ou-worktree-dedicado>
+max_rework_rounds: 2
+permit_board_update: true
+permit_local_commit: true
+```
+
+`scope` e `board` identificam a única fila autorizada; o Orquestrador lê as fontes apontadas antes
+de agir e não executa valores como comandos. `execution_tree` deve separar a fila de mudanças
+preexistentes e de outros escritores. `max_rework_rounds` limita quantas vezes achados do Checker
+podem voltar automaticamente ao Maker depois da primeira revisão; omisso equivale a `2` e valores
+maiores exigem nova autorização explícita. `permit_board_update` e `permit_local_commit` precisam
+ser `true` para que o estado avance após um parecer aprovado. Push, publicação, pull request,
+mudança de escopo, ação externa e pular uma story bloqueada permanecem proibidos mesmo quando os
+dois campos estão habilitados.
+
+Cada ativação da fila processa no máximo uma story. Ela considera a primeira não concluída na ordem
+do board e só a executa se estiver pronta, com dependências satisfeitas e sem decisão humana
+pendente. Se essa story estiver bloqueada, ambígua ou requerer outro papel além de uma correção em
+escopo pelo Maker, a fila para e registra o motivo em vez de pular para uma story posterior. A
+execução usa por padrão **Planner Claude → Maker Codex → Checker Agy**; indisponibilidade de
+qualquer um deles é bloqueio, não motivo para usar outro papel silenciosamente.
+
+Uma tarefa agendada do harness pode invocar a fila em intervalos definidos pelo usuário. Crie ou
+altere essa agenda apenas mediante pedido explícito, usando um prompt que ordene processar uma
+story elegível e respeitar este arquivo. A tarefa seguinte retoma do board e das evidências
+duráveis; não confie em memória de uma execução anterior. O pacote não instala nem administra essa
+agenda.
 
 ## Instalações concorrentes
 

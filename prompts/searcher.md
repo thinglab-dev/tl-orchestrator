@@ -27,7 +27,9 @@ independente.
 
 ## Saída
 
-Devolva prosa curta, com estas partes identificáveis:
+Respeite o teto de linhas do briefing e prefira uma linha por fato no formato `arquivo:linha`,
+sem prosa introdutória e sem links absolutos; o Orquestrador vai decidir sobre o resumo, não
+reler as fontes. Devolva prosa curta, com estas partes identificáveis:
 
 - **Resumo** e **visão geral** da resposta à pergunta;
 - **Evidências**, cada uma com ID e localização verificável (arquivo e linhas, ou URL com data e

@@ -529,7 +529,7 @@ explicitamente autorizada e nunca inferida de Import Context. Uma implementaçã
 Os blocos abaixo são modelos; substitua placeholders apenas por valores observados e mantenha
 campos desconhecidos como desconhecidos.
 
-### STATUS.md
+### STATUS.md (área global; exemplo do modo padrão, sem áreas cadastradas)
 
 ```text
 format_version: 1
@@ -575,7 +575,9 @@ open_discussions: []
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 ```
 
-No STATUS global, com áreas cadastradas, acrescente a projeção:
+No STATUS global, com áreas cadastradas, `active_work_ref` passa à forma qualificada, por exemplo
+`active_work_ref: native/task/billing:T001@modules/billing/_tl-orc/project/tasks/T001-slug.md`,
+mesmo quando a unidade corrente é da área `global` (`global:T001`), e acrescente a projeção:
 
 ```text
 ## Areas

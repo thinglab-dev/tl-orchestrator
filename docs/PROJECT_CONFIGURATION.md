@@ -70,7 +70,7 @@ antes de registrar o perfil, e trate arquivo ausente, adicional ou diferente com
 
 ```text
 format_version: 1
-work_method: <native ou bmad; opcional por módulo na seção de fontes>
+work_method: <native ou bmad; método padrão da área global e herdado pelas áreas cadastradas que o omitirem>
 task_types: <opcional: tipos adicionais ao núcleo do modelo de trabalho>
 
 ## Fontes autoritativas
@@ -95,13 +95,30 @@ task_types: <opcional: tipos adicionais ao núcleo do modelo de trabalho>
 <destino vigente no consumidor>
 ```
 
-`work_method` declara qual método governa o trabalho novo do projeto; um módulo pode declarar
-outro valor junto à sua fonte. A ausência do campo preserva as fontes e o comportamento de
+`work_method` declara qual método governa o trabalho novo da área global; uma área cadastrada em
+`## Work Areas` pode declarar outro valor exclusivamente na sua linha do cadastro, e o herda quando
+omite. A ausência do campo preserva as fontes e o comportamento de
 autoridade já registrados, sejam BMAD, issues, tickets ou outros boards, e não migra unidades
 existentes; o perfil Native vale então apenas para trabalho novo sem autoridade anterior ou por
 seleção explícita, conforme a [seleção de método](WORK_MODEL.md#seleção-de-método-e-autoridade).
 `task_types` acrescenta tipos ao núcleo sem alterar a regra de que o tipo nunca decide modelo,
 effort, tier ou método.
+
+Um projeto sem módulos não precisa de mais nada: a área de trabalho é `global` em
+`_tl-orc/project/`. Repositórios organizados por módulo podem cadastrar áreas adicionais na seção
+opcional `## Work Areas`, conforme as [áreas de trabalho](WORK_MODEL.md#áreas-de-trabalho):
+
+```text
+## Work Areas
+| area_id | path | work_method | status_source | evidence |
+| billing | modules/billing/_tl-orc/project | bmad | modules/billing/_bmad-output/sprint.md | modules/billing/_tl-orc/project/evidence |
+```
+
+`global` é implícita e reservada; sua linha pode ser omitida e seu `work_method` é o campo global.
+`path` é relativo à raiz consumidora e já contém o caminho documental completo. A ativação valida
+`area_id` duplicado, sobreposição de `path` e conflito com `_tl-orc/package` ou integrações de
+skill; cadastro inválido bloqueia a seleção da área. Área cadastrada não implica diretório criado, e
+nenhuma instalação ou atualização cria, reescreve ou migra esses caminhos.
 
 Um registro de classificação e medição pode usar este formato conceitual, adaptado à sintaxe do
 consumidor. Placeholders devem ser substituídos apenas por valores observados; campo desconhecido
@@ -265,7 +282,10 @@ correspondente de `STATUS.md`; omisso equivale a `false`, e ele não cobre specs
 contextos ou evidências. `max_replans` limita replanejamentos de um Deliverable; omisso equivale a
 `1`. A ordem, a releitura da Task oficial antes do despacho e o tratamento de `cancelled` seguem a
 [fila no perfil Native](WORK_MODEL.md#fila-sequencial-no-perfil-native). `permit_board_update`
-conserva o significado atual para boards externos.
+conserva o significado atual para boards externos. Com áreas cadastradas, uma fila nova declara
+`area_id`; uma fila existente preserva `scope`, `board` e permissões e só é associada a uma área
+quando esses campos a identificam sem ambiguidade. Sem cadastro, `area_id` é desnecessário e a
+fila é `global`.
 
 Cada ativação da fila processa no máximo uma story. Ela considera a primeira não concluída na ordem
 do board e só a executa se estiver pronta, com dependências satisfeitas e sem decisão humana

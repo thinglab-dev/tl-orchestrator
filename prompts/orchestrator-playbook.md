@@ -73,7 +73,9 @@ decisão humana pendente. Quando o board for `_tl-orc/project/STATUS.md`, siga a
 apenas localiza a candidata, e a Task oficial é relida antes do despacho; `cancelled` é terminal e
 não satisfaz dependentes; `permit_state_update` substitui `permit_board_update` como condição de
 avanço de estado e autoriza somente estado e visão central, nunca specs, decisões, contextos ou
-evidências. Se ela estiver bloqueada ou ambígua, não pule para outra por conveniência:
+evidências. Sem áreas cadastradas, a fila é da área `global` e nada muda; com múltiplas áreas,
+uma fila nova declara `area_id`, e uma fila existente só é associada a uma área quando `scope` e
+`board` a identificam sem ambiguidade. Se ela estiver bloqueada ou ambígua, não pule para outra por conveniência:
 registre o motivo e aguarde a decisão ou a atualização do board. Quando BMAD reger o módulo,
 execute primeiro a sincronização exigida pela política local e use somente o sprint daquele módulo.
 
@@ -272,4 +274,4 @@ fechamento já concedida; um Deliverable só recebe `done` depois de verificar s
 
 Com autorização para integrar, confira o resultado da integração antes da próxima ação. Mudanças no conteúdo validado exigem nova conferência proporcional. Status concluído depende dos portões, revisão independente e autoridade local de ratificação; um verde isolado não fecha a story.
 
-Se o pedido era somente planejamento, entregue o plano e encerre aí. Se houve interrupção, registre o ponto de retomada e preserve a árvore. A próxima sessão relê as fontes e o estado real; o registro ajuda a retomar, não executa continuidade por si só. No perfil Native, o encerramento normal grava `released: true` no registro `coordinator`, e a retomada aplica a [tabela de recuperação](../docs/WORK_MODEL.md#transição-e-recuperação): tabela atrasada é reconstruída, referência ativa já concluída é reparada após conferir as evidências, unidade não encontrada é procurada antes de perguntar, e só estados incompatíveis ou evidência insuficiente interrompem a execução afetada.
+Se o pedido era somente planejamento, entregue o plano e encerre aí. Se houve interrupção, registre o ponto de retomada e preserve a árvore. A próxima sessão relê as fontes e o estado real; o registro ajuda a retomar, não executa continuidade por si só. No perfil Native, o encerramento normal grava `released: true` no registro `coordinator`, e a retomada começa pelo cabeçalho global, que aponta a unidade corrente mesmo quando ela pertence a um módulo, relê a unidade oficial e só então reconcilia cabeçalhos atrasados, na ordem unidade, projeções do módulo, visão global, aplicando a [tabela de recuperação](../docs/WORK_MODEL.md#transição-e-recuperação): tabela atrasada é reconstruída, referência ativa já concluída é reparada após conferir as evidências, unidade não encontrada é procurada antes de perguntar, e só estados incompatíveis ou evidência insuficiente interrompem a execução afetada.

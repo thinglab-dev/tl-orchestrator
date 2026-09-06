@@ -119,9 +119,11 @@ Antes de escrever, todos estes portões devem passar:
 
 - os arquivos atuais coincidem byte a byte com a baseline e seus hashes; não há arquivo ausente,
   adicional, delta local, symlink inesperado ou conteúdo fora do manifesto;
-- o plano não toca `_tl-orc/project/`: os documentos de trabalho do
-  [modelo nativo](WORK_MODEL.md) nunca são sobrescritos, excluídos ou migrados por uma
-  atualização, embora possam ser lidos, validados, versionados e copiados para backup;
+- o plano não toca `_tl-orc/project/` nem os caminhos documentais das áreas cadastradas em
+  `## Work Areas`: os documentos de trabalho do [modelo nativo](WORK_MODEL.md) nunca são
+  sobrescritos, excluídos ou migrados por uma atualização, e ficam fora do snapshot de
+  recuperação da atualização, que não é backup documental; leitura, validação, versionamento e
+  backup autorizado continuam permitidos;
 - o `SKILL.md` carregado, todas as cópias/links registrados, revisões e precedência foram
   conferidos, sem sombreamento, destino desconhecido ou conflito;
 - a origem alvo foi obtida separadamente, todos os arquivos pertencem ao mesmo commit, o manifesto
@@ -136,8 +138,8 @@ Antes de escrever, todos estes portões devem passar:
 Antes da mutação, crie um snapshot recuperável dos arquivos do pacote, registros e destinos que
 serão alterados; registre base, hashes, local do snapshot e procedimento de recuperação, e prove
 que o snapshot pode ser lido. Os registros sujeitos à mutação são `INSTALLATION.md`, `PROJECT.md`
-e as integrações registradas; `_tl-orc/project/` fica fora da mutação e da recuperação por
-snapshot, e nenhuma atualização o cria. Maker aplica uma única revisão, o Orquestrador repete a conferência
+e as integrações registradas; `_tl-orc/project/` e os caminhos das áreas cadastradas ficam fora
+da mutação e da recuperação por snapshot, e nenhuma atualização os cria. Maker aplica uma única revisão, o Orquestrador repete a conferência
 de arquivos, hashes, links, precedência e descoberta, e um Checker externo independente revisa a
 árvore final. Se a mutação ou um portão posterior falhar, pare, preserve evidência e use o
 snapshot para recuperar o estado anterior somente dentro da autoridade registrada; confira a

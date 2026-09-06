@@ -4,6 +4,41 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-06
+
+### Adicionado
+
+- Áreas de trabalho opcionais: projetos sem módulos continuam o modo padrão, com tudo em
+  `_tl-orc/project/`; repositórios por módulo cadastram áreas em `## Work Areas` de `PROJECT.md`,
+  com caminho documental completo por área, validação de duplicidade, sobreposição e conflito com
+  a instalação, e `work_method` herdado do global para trabalho novo. Coordenação de escrita
+  continua uma só por árvore, no `STATUS.md` global, que aponta a unidade corrente mesmo em módulo;
+  `STATUS.md` de módulo guarda progresso local, e `## Areas` no global é projeção. Referências
+  qualificadas `<area_id>:<id>` entre áreas, pertencimento (`deliverable`) distinto de procedência
+  (`origin`), detecção de ciclos, registro de revisão vinculado à unidade qualificada, briefs na
+  área responsável pela feature.
+- Migration Findings: durante Import Context e Migrate Work, bugs confirmados e suspeitas
+  encontrados na análise viram Tasks Native `fix` ou `analysis` em `draft` na fila da área
+  responsável, com evidência mínima, deduplicação contra as fontes autoritativas, autoridade BMAD
+  preservada, sem habilitar fila nem promover a `ready` sem spec, e bloqueio só da unidade cuja
+  conclusão esteja impedida.
+
+### Alterado
+
+- SKILL.md: a opção **Atualizar tl-orchestrator** só entra no menu com release estável sucessora
+  comprovada, alinhando a triagem à cláusula "sem oferecer alvo".
+- Classificação: `story_id` aceita ID qualificado no modo multiárea; validação e reuso comparam a
+  forma canônica, classificações anteriores são normalizadas apenas pelo próprio briefing de
+  origem, e dois formatos nunca permitem reuso entre áreas. Schema inalterado.
+- Contrato de evolução protege também os caminhos das áreas cadastradas, distinguindo snapshot de
+  recuperação da atualização de backup documental.
+
+### Migração
+
+- Sem `## Work Areas`, nada muda: formatos de v0.3.0 continuam aceitos e produzidos, filas
+  existentes preservam `scope`, `board` e permissões, e a atualização não reescreve documentos nem
+  `QUEUE.md`. Cadastrar áreas é ato explícito do consumidor.
+
 ## [0.3.0] - 2026-09-06
 
 ### Adicionado
@@ -108,4 +143,5 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 [0.2.1]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.0...v0.2.1
 [0.2.2]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.1...v0.2.2
 [0.3.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.2...v0.3.0
+[0.4.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.3.0...v0.4.0
 [0.2.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.1.5...v0.2.0

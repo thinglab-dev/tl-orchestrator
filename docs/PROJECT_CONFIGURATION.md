@@ -73,7 +73,7 @@ format_version: 1
 <comando ou inspeção, diretório e origem>
 
 ## Preferências operacionais
-<Orquestrador fixo; cadeia do Classificador; Searcher sob demanda (Agy gemini-3.8-flash-medium/medium); ordem dos harnesses por papel; escolhas fixadas; política de independência; origem e última conferência>
+<Orquestrador fixo e fora das cadeias; cadeia do Classificador; Searcher sob demanda (Agy gemini-3.8-flash-medium/medium); ordem dos harnesses por papel; harnesses removidos das cadeias e dos fallbacks, com motivo; escolhas fixadas; política de independência; origem e última conferência>
 
 ## Catálogo permitido
 <harness, IDs e famílias, efforts aceitos, capacidade por papel, limites de custo/quota e disponibilidade com evidência>
@@ -403,8 +403,9 @@ com a autoridade completa descrita no [contrato de evolução](EVOLUTION.md#cont
 Crie ou use um checkout fonte isolado do repositório canônico, partindo da baseline verificada, em
 branch de correção que não seja `main`. Preserve o delta contra essa baseline antes de qualquer
 atualização e nunca leve conteúdo privado do consumidor ao checkout. Maker edita somente os
-caminhos fonte declarados no briefing e não executa operações Git de integração. O Orquestrador
-confere o diff, executa as verificações pertinentes e obtém parecer de Checker externo independente
+caminhos fonte declarados no briefing, executa as verificações pertinentes e não executa operações
+Git de integração. O Orquestrador valida as evidências e uma amostra crítica dirigida, sem repetir
+o diff inteiro, e obtém parecer de Checker externo independente com base, head e o diff completo
 antes de apresentar ou publicar o resultado.
 
 Prepare também um rascunho de pull request que informe incidente e reprodução, versão e commit
@@ -430,7 +431,8 @@ acompanhada de autoridade expressa pode autorizar alterar o pacote instalado, os
 [contrato de evolução](EVOLUTION.md#atualização-auto_safe); qualquer migração ou decisão pendente
 interrompe antes da escrita. A manutenção do método continua sob
 os invariantes do [contrato do Orquestrador](../prompts/orchestrator.md): Maker executa a mutação,
-o Orquestrador produz sua própria prova e um Checker externo independente revisa a árvore final.
+o Orquestrador valida as evidências e confere identidade, hashes e uma amostra dirigida, e um
+Checker externo independente audita a árvore final por inteiro.
 Correção feita diretamente pelo Orquestrador só cabe quando já autorizada e recebe a mesma prova e
 revisão. Antes de despachar ou escrever:
 

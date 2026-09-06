@@ -92,8 +92,9 @@ Com `contribution_mode: ask`, apresente o delta sanitizado e o plano, sem efeito
 Com `contribution_mode: auto_pr` e autoridade completa para o projeto, ator, destino, escopo,
 commit, push e criação de draft PR, o Orquestrador pode conduzir, nesta ordem:
 
-1. conferir a baseline e preparar a mudança no checkout isolado;
-2. executar os portões aplicáveis e obter Checker externo independente;
+1. despachar o Maker para conferir a baseline, preparar a mudança no checkout isolado e executar os
+   portões aplicáveis;
+2. validar o registro recebido do Maker e obter Checker externo independente com o diff completo;
 3. buscar issue, branch ou pull request equivalente no destino autorizado com termos sanitizados;
 4. se não houver duplicata impeditiva, criar commit, enviar uma branch dedicada e abrir **draft
    pull request**, registrando cada efeito.

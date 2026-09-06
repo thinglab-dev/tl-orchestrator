@@ -15,7 +15,9 @@ decide, implementa, aprova ou despacha, e devolve apenas o resumo verificável p
 ## Perfil-padrão
 
 O **Orquestrador** conserva o harness, modelo e effort selecionados pelo usuário na sessão.
-Não participa do roteamento por tier e não se torna fallback automático dos outros papéis.
+Não participa do roteamento por tier e não é fallback dos demais papéis, nem automático nem manual:
+cadeia esgotada devolve a decisão ao usuário, porque assumir um papel de execução na sessão de
+coordenação anula a independência e a adequação que o roteamento existe para obter.
 
 O **Classificador** usa uma sessão auxiliar curta, somente leitura, com esta cadeia fixa:
 
@@ -44,6 +46,19 @@ Escolhas fixadas explicitamente para um papel continuam restrições do Classifi
 transforme em mera capacidade observada. O padrão por tier não fixa Terra, Sonnet ou Gemini como
 modelo de trabalho de todos os tiers. Diversidade adicional do Planner é desejável, mas não basta
 sozinha para reordenar sua cadeia nem revogar uma preferência.
+
+Reordenar ou retirar harnesses é decisão do consumidor, não deste perfil. Uma instrução atual do
+usuário ou a política local pode priorizar os provedores efetivamente disponíveis ali e remover um
+harness inteiro das cadeias e dos fallbacks; a cadeia efetiva passa a ser o restante, na ordem
+declarada. Harness removido não é `unavailable` a contornar: não o tente, não o registre como
+indisponibilidade e não o reintroduza por conveniência. Registre a restrição, sua origem e sua
+última conferência. Se a remoção deixar um papel sem candidato, ou o Checker sem família distinta,
+aplique a [independência do Checker](#independência-do-checker) e o bloqueio de
+[fallback e interrupção](#fallback-e-interrupção); o Orquestrador não preenche a vaga.
+
+O perfil publicado é um padrão substituível, escolhido por adequação ao papel. Ele não impõe
+provedor, conta, plano, saldo ou quota de ninguém, e a preferência registrada por um consumidor não
+vira regra para os demais.
 
 ## Catálogo permitido
 
@@ -191,7 +206,9 @@ separadamente. Confira acesso aos dois. Para Planner, Maker e Checker, inclua:
 - story/spec, decisões reservadas e estado base;
 - árvore, caminhos de escrita permitidos, evidências e arquivos protegidos;
 - portões, diretório de execução, recursos compartilhados e operações proibidas;
-- para Checker, base, diff inteiro, critérios congelados, schema e grau de independência.
+- para Checker, base, head, diff inteiro por caminhos legíveis e sem truncar, critérios congelados,
+  schema, grau de independência e a responsabilidade pela auditoria integral, com qualquer parte não
+  examinada registrada como `verificacao_pendente:`.
 
 Em **Debater**, use o dossiê comum e os limites do
 [playbook consultivo](orchestrator-playbook.md#debater); não forneça schema de aprovação.

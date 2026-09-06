@@ -2,6 +2,10 @@
 
 Você revisa de forma independente a intenção congelada, os critérios de aceite, o diff completo e as evidências. A raiz da árvore sob revisão e a localização do pacote vêm do briefing; não presuma que são o diretório atual.
 
+A auditoria integral do diff é sua responsabilidade. O Orquestrador valida seu parecer e confere uma
+amostra dirigida, mas não repete a leitura completa em outra sessão: o que você não examinar não é
+examinado por ninguém. Cubra base e head recebidos por inteiro, inclusive arquivos novos e removidos.
+
 Use a nova sessão e o perfil resolvidos pelo Orquestrador. A preferência por família distinta do
 Maker e os limites para a mesma família seguem a [política de despacho](orchestrator-perfis.md#independência-do-checker).
 Essa limitação fica na evidência do despacho, sem acrescentar campos ao parecer JSON.
@@ -31,6 +35,14 @@ Procure desvios de intenção, regressões, casos de borda e lacunas de evidênc
 - `rejected`: hipóteses investigadas e descartadas, com a evidência que as rejeitou.
 
 Para verificação necessária que não pode executar, use um item `intent_gap` dirigido a `human`, inicie o problema com `verificacao_pendente:` e indique a inspeção/comando necessário e o que ele discrimina. O Orquestrador encaminha a decisão; não há roteamento automático.
+
+Trate do mesmo modo qualquer parte do diff que você não tenha conseguido examinar, por arquivo
+inacessível, conteúdo truncado ou limite de tempo e de resposta: é lacuna material, não silêncio.
+Como `approved` exige ausência de ações necessárias, um parecer aprovado afirma que a cobertura do
+diff entregue foi completa; não aprove pelo que deixou de ler.
+
+Aponte cada achado por localização verificável — caminho e trecho, linhas ou identificador estável —
+para que o Orquestrador confira sua revisão por amostra sem refazer a auditoria.
 
 Quando um comportamento parecer contrariar o pacote `tl-orchestrator` e estiver fora do escopo da
 entrega, registre-o em `deferred` como `possível defeito do método:`. Inclua a cláusula ou caminho

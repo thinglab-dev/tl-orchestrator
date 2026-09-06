@@ -82,9 +82,17 @@ das contraprovas necessárias, não só do tamanho do diff. Em rework, avalie ac
 residual; não herde automaticamente o tier anterior.
 
 Se não houver par adequado e autorizado para um harness, mantenha sua posição e devolva
-`model: null` e `effort: null`, com motivo. Nunca invente um ID, use default oculto ou devolva um
+`model: null` e `effort: null`, com motivo — ou, quando o briefing informar que o validador
+do consumidor recusa candidatos nulos, bloqueados ou da família autora, omita esse harness de
+`candidates` e registre a lacuna em `facts` ou `uncertainties`. Nos dois casos a ordem dos
+harnesses restantes segue a cadeia recebida. Nunca invente um ID, use default oculto ou devolva um
 par insuficiente apenas para preencher a cadeia. Quota, autenticação e timeout são disponibilidade;
 não reduzem a capacidade necessária do trabalho.
+
+Você só é chamado quando existe escolha real. Quando o catálogo deixa um único par elegível
+por papel, o Orquestrador registra uma classificação trivial sem esta sessão
+([perfis](orchestrator-perfis.md#classificação-trivial)); não presuma que uma chamada sua
+signifique que todos os harnesses estão disponíveis.
 
 Falhas de execução só acionam fallback quando comprovadamente de infraestrutura; a seleção também
 pula candidatos nulos, desabilitados ou inelegíveis conforme a política. Não use fallback para

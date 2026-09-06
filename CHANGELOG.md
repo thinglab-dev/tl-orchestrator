@@ -4,6 +4,23 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+### Adicionado
+
+- **Classificação trivial** em `prompts/orchestrator-perfis.md`: quando catálogo, bloqueios, pins e
+  independência deixam exatamente um par elegível por papel, o Orquestrador registra um objeto
+  versão 2 completo sem abrir a sessão do Classificador, sujeito à mesma validação; zero pares
+  bloqueia, dois ou mais exigem a sessão e `debate` nunca é trivial.
+
+### Alterado
+
+- A validação aceita a omissão de harnesses inelegíveis em `candidates` (bloqueado, sem par para o
+  papel ou da família autora do Checker), com a lacuna registrada em `facts`/`uncertainties`, em
+  vez de exigir sempre um candidato nulo por harness; `prompts/classifier.md` descreve as duas
+  formas. Motivado por consumidores cujo validador executável recusa candidatos nulos.
+- Rodadas sucessivas de `review`/`rework` da mesma story podem reaproveitar o par resolvido quando
+  residual, catálogo, bloqueios, pins e famílias autoras não mudaram, registrando a nova
+  `context_revision`.
+
 ## [0.3.0] - 2026-09-06
 
 ### Adicionado

@@ -89,7 +89,7 @@ permitido no catálogo e selecionado pelo Classificador para aquela tarefa.
    Planner ou Checker.
 3. Valide o objeto contra o [schema](../schemas/classification-result.schema.json) e confira a
    semântica: schema versão 2; correspondência exata de story, fase e revisões de contexto e
-   catálogo; papéis exatos; um candidato por harness na ordem configurada; pares, efforts, pins,
+   catálogo; papéis exatos; no máximo um candidato por harness, na ordem configurada, e somente harnesses elegíveis (um harness bloqueado, sem par autorizado para o papel ou da mesma família autora do Checker pode ser omitido, e sua lacuna fica em `facts` ou `uncertainties`); pares, efforts, pins,
    restrições e orçamento; `model: null` se e somente se `effort: null`; e cada `evidence_id`
    fornecido no briefing e pertinente ao modelo/tarefa. Confira também se `cost_basis` não promete
    mais que a evidência e, quando diferente de `unknown`, tem ao menos um ID econômico pertinente;
@@ -113,6 +113,26 @@ permitido no catálogo e selecionado pelo Classificador para aquela tarefa.
    [preferência de independência](#independência-do-checker) e registre recomendação, candidato
    efetivo, motivo de cada salto e identidade da sessão.
 
+### Classificação trivial
+
+Quando o catálogo permitido, os bloqueios vigentes, os pins e a política de independência deixam
+**exatamente um** par modelo/effort elegível para **cada** papel solicitado na fase, não há escolha
+a dimensionar, e o Orquestrador pode registrar uma **classificação trivial** sem abrir a sessão do
+Classificador. A elegibilidade usa as mesmas regras da validação: harness presente no perfil, papel
+autorizado para o par, provedor não bloqueado no momento e, para o Checker, família diferente de
+todas as famílias autoras, inclusive a do Maker resolvido na mesma classificação. O registro é um
+objeto versão 2 completo, com `story_id`, `phase`, `context_revision` e `catalog_revision` reais,
+um único candidato por papel, `cost_basis: unknown`, `evidence_ids` vazio, o `tier` declarado pelo
+Orquestrador anotado em `uncertainties` e `reclassify_when` cobrindo o retorno de qualquer escolha
+real. Ele passa pela mesma validação de schema, catálogo, bloqueio e independência de um resultado
+vindo da sessão; prefira uma ferramenta do consumidor que gere e valide o objeto de uma vez.
+
+Zero pares elegíveis para um papel é bloqueio, não classificação. Dois ou mais pares em qualquer
+papel solicitado exigem o Classificador em sessão: o atalho reconhece a ausência de escolha, não a
+substitui. `debate` nunca é trivial, porque o painel dimensiona três contribuições intelectuais,
+não apenas provedores. Um bloqueio temporal que vence, um pin retirado, uma família autora nova ou
+um catálogo revisado reabrem a escolha e invalidam o atalho para a fase seguinte.
+
 Classifique antes do primeiro despacho autorizado de Planner, Maker ou Checker. Planejamento ou debate só dimensiona os papéis
 necessários e não autoriza implementar. Toda mudança de fase reclassifica apenas os papéis então
 necessários: debate pode ser pesado sem diff; Planner pode exigir mais capacidade que execução
@@ -125,7 +145,11 @@ Ausência de diff ou escrita não torna Maker ou Checker ociosos nem sustenta ti
 específico de cada contribuição decide o tier, sem impor uniformidade.
 
 Reutilize uma resposta somente com igualdade de story, fase, papéis, revisões de contexto,
-catálogo e contrato, pins e política. Uma resposta versão 1 nunca vira versão 2 por preenchimento
+catálogo e contrato, pins e política. Uma nova rodada de `review` ou `rework` da mesma story,
+com trabalho residual da mesma natureza e catálogo, bloqueios, pins e famílias autoras
+inalterados, pode reaproveitar o par resolvido na rodada anterior registrando a nova
+`context_revision`; mudança material no residual ou em qualquer dessas condições
+reclassifica. Uma resposta versão 1 nunca vira versão 2 por preenchimento
 inferido: reclassifique. Caches e registros anteriores são evidência aproveitável, não runtime de
 reuso ou reclassificação automática. Quota, autenticação e timeout não reclassificam nem reduzem a
 qualidade exigida: percorra os candidatos já classificados.

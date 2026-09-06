@@ -41,6 +41,16 @@ autoridade e interrompe; não deixa atualização parcial.
 Esse fluxo ocorre somente na ativação atual. Não crie daemon, agenda, heartbeat ou configuração
 de terceiros para executá-lo.
 
+Quando a conferência comprovar release estável descendente, apresente antes da triagem `instalada
+→ alvo`, link, motivo nas notas e impacto conhecido na fase, sem urgência inferida. Sem tarefa
+explícita, **Atualizar tl-orchestrator** é a primeira opção do menu; a escolha aciona somente o
+fluxo de atualização, mantendo decisões pendentes para a pessoa. Com tarefa explícita, preserve-a:
+avise o impacto antes de continuar e só interrompa por violação concreta de garantia. Respeite
+adiamento explícito pelo restante da ativação e não repita alvo já aplicado por `auto_safe`.
+Consulta falha ou desabilitada, delta, sombreamento, instalação concorrente, conteúdo divergente
+ou referência divergente impede oferecer alvo; explique o estado. Numere somente as opções
+exibidas e só inclua fila quando houver board ou fila declarada.
+
 ## Fila sequencial de stories
 
 Este modo existe para executar stories em ordem sem transformar cada correção de revisão em uma

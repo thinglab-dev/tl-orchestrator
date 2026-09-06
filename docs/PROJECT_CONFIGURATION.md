@@ -333,6 +333,28 @@ Em `notify`, não faça migração durante a conferência. Em `auto_safe`, siga 
 [portões de atualização](EVOLUTION.md#atualização-auto_safe); qualquer dúvida regride para relato e
 decisão humana.
 
+### Oferta de atualização verificada
+
+Depois de comprovar uma release estável descendente, e antes da triagem de uma tarefa sem pedido
+explícito, ofereça como primeira opção **Atualizar tl-orchestrator**. Identifique `instalada →
+alvo`, vincule a release e resuma, a partir das notas consultadas, o motivo e qualquer impacto
+conhecido na fase atual; não atribua urgência que as fontes não sustentem. A oferta em `notify` é
+somente uma escolha: não grava nem migra. Escolhê-la autoriza o fluxo de atualização do método,
+mas não resolve migrações, garantias, políticas ou preferências pendentes em nome do usuário.
+
+Se a pessoa já pediu uma tarefa explícita, mantenha essa tarefa e apenas informe a atualização e
+seu impacto conhecido antes de continuar. Uma release ordinária não bloqueia a fase; pare somente
+quando houver violação concreta de uma garantia. Uma recusa ou adiamento explícito encerra a
+oferta nesta ativação. Após uma atualização `auto_safe` bem-sucedida, não repita a opção para o
+mesmo alvo.
+
+Não ofereça alvo instalável quando a release estável sucessora não foi verificada: por exemplo,
+consulta falha ou desabilitada, delta, conteúdo ausente ou adicional, instalação concorrente,
+sombreamento ou referência divergente. Em falha ou consulta desabilitada, o uso da versão já
+instalada continua possível, com a limitação visível; diante de bloqueio de integridade ou garantia,
+preserve os guardas aplicáveis e não trate o pacote como confiável. Numere cada menu somente com as
+opções efetivamente exibidas; a fila sequencial só entra quando existir board ou fila declarada.
+
 ## Relatar defeito do método
 
 Um defeito do método é uma divergência reproduzível entre o comportamento observado e uma regra
@@ -401,7 +423,8 @@ desbloqueia sobrescrita.
 
 ## Aplicar uma atualização
 
-Conduzido pelo Orquestrador, um pedido explícito de atualização ou uma política `auto_safe`
+Conduzido pelo Orquestrador, uma escolha explícita **Atualizar tl-orchestrator**, outro pedido
+explícito de atualização ou uma política `auto_safe`
 acompanhada de autoridade expressa pode autorizar alterar o pacote instalado, os registros
 `_tl-orc/` e as integrações da skill. `auto_safe` obedece aos portões mais estritos do
 [contrato de evolução](EVOLUTION.md#atualização-auto_safe); qualquer migração ou decisão pendente

@@ -2,6 +2,14 @@
 
 Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
+## [0.2.2] - 2026-09-05
+
+### Corrigido
+
+- Destaca, antes da triagem, uma release estável sucessora comprovada como atualização explícita,
+  com alvo, notas, impacto conhecido e numeração dinâmica do menu, sem transformar `notify` em
+  escrita nem substituir uma tarefa já solicitada.
+
 ## [0.2.1] - 2026-09-05
 
 ### Manutenção
@@ -46,4 +54,5 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   16 arquivos.
 
 [0.2.1]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.0...v0.2.1
+[0.2.2]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.1...v0.2.2
 [0.2.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.1.5...v0.2.0

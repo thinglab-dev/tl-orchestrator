@@ -23,22 +23,28 @@ inteiro, não escolha uma tarefa apenas por ser a mais recente, não mude de mó
 portões nessa etapa.
 
 Apresente resumidamente a tarefa identificada, seu estado e os portões encontrados. Se houver mais
-de uma candidata ou nenhuma fonte autoritativa, explicite a ambiguidade. Quando existir um board ou
-fila declarada pelo consumidor, peça ao usuário que escolha:
+de uma candidata ou nenhuma fonte autoritativa, explicite a ambiguidade. Quando a conferência tiver
+comprovado uma release estável sucessora, destaque antes da triagem `instalada → alvo`, o link da
+release, o motivo nas notas e o impacto conhecido na fase atual, sem inventar urgência. Se não há
+tarefa explícita, ela é a primeira opção: **Atualizar tl-orchestrator**. Monte então o menu desta
+ativação e numere-o somente pelas opções mostradas: Planejar, Implementar e revisar uma story,
+Executar fila sequencial somente com board ou fila declarada, Debater e Outra tarefa. Não use
+números fixos nem ofereça fila para explorar backlog sem board.
 
-1. **Planejar** — analisar ou preparar a spec;
-2. **Implementar e revisar uma story** — se a spec estiver executável;
-3. **Executar fila sequencial** — processar uma única story elegível da fila declarada;
-4. **Debater** — consultar Planner, Maker e Checker sobre a questão atual;
-5. **Outra tarefa** — indicar outro objetivo.
-
-Sem board ou fila declarada, não ofereça a opção 3 como atalho para explorar o backlog: peça a
-fonte e o módulo que a fila deve usar.
+Uma tarefa explícita continua sendo a seleção do usuário: não a substitua pelo menu de atualização.
+Antes de prosseguir, avise o impacto conhecido na fase; uma release comum não bloqueia a tarefa, e
+só uma violação concreta de garantia exige parar. A escolha **Atualizar tl-orchestrator** autoriza
+somente o fluxo de atualização do método; decisões pendentes continuam humanas. Se o usuário a
+adiar, respeite a decisão e não insista novamente nesta ativação. Não ofereça novamente o alvo que
+`auto_safe` já tenha atualizado nesta ativação. Quando não houver release estável instalável
+verificada — inclusive consulta falha ou desabilitada, delta, sombreamento, instalação concorrente
+ou referência divergente — explique o impedimento, sem oferecer alvo.
 
 Aguarde a escolha antes de escrever arquivos, despachar agentes ou executar portões. **Implementar
 e revisar uma story** autoriza apenas a story identificada. **Executar fila sequencial** segue os
 limites, as paradas e as autorizações registradas no perfil local e no playbook; ela não é inferida
-da opção 2. Integração, publicação e outros efeitos externos continuam sujeitos à autoridade
+de **Implementar e revisar uma story**. Uma resposta numérica vale exclusivamente para o último
+menu apresentado. Integração, publicação e outros efeitos externos continuam sujeitos à autoridade
 aplicável.
 
 Ofereça também **Debater** ao apresentar uma decisão material pendente ao usuário. Aceite a

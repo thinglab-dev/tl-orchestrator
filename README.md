@@ -33,7 +33,10 @@ a organização do trabalho a outro método, o Orquestrador mantém `Project →
 decisões e discussões em `_tl-orc/project/`, com um `STATUS.md` central para consultar e retomar.
 O mesmo cabeçalho de coordenação serve a projetos governados por BMAD, sem copiar seu estado. O
 perfil também define a operação **Import Context**, que deriva Feature Briefs pequenos e
-rastreáveis de documentos existentes sem transferir a autoridade do trabalho.
+rastreáveis de documentos existentes sem transferir a autoridade do trabalho. Projetos sem módulos
+são o modo padrão e usam só `_tl-orc/project/`; repositórios organizados por módulo podem cadastrar
+áreas de trabalho adicionais em `PROJECT.md`, mantendo uma única coordenação de escrita por
+árvore.
 
 ## Quick Start — instalar no projeto atual
 

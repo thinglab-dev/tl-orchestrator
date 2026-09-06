@@ -75,7 +75,9 @@ permitido no catálogo e selecionado pelo Classificador para aquela tarefa.
 ## Classificar e resolver
 
 1. Prepare um briefing curto com `story_id` (`null` apenas sem story; no perfil Native, o ID da
-   Task ou do Deliverable, como `T012` ou `D002`), `phase`,
+   Task ou do Deliverable, como `T012` ou `D002`, qualificado como `billing:T012` quando houver
+   áreas cadastradas, com `area_id` informado como contexto do briefing e nunca como campo do
+   resultado), `phase`,
    `context_revision`, `catalog_revision` e revisão do contrato/schema; intenção e modo autorizado;
    trabalho residual, riscos, critérios, provas existentes e faltantes; políticas, orçamento,
    pins e cadeias; `requested_roles` somente da fase atual; catálogo de pares autorizados; e o
@@ -125,7 +127,11 @@ Ausência de diff ou escrita não torna Maker ou Checker ociosos nem sustenta ti
 específico de cada contribuição decide o tier, sem impor uniformidade.
 
 Reutilize uma resposta somente com igualdade de story, fase, papéis, revisões de contexto,
-catálogo e contrato, pins e política. Uma resposta versão 1 nunca vira versão 2 por preenchimento
+catálogo e contrato, pins e política. Com áreas cadastradas, a igualdade de story compara a forma
+canônica `<area_id>:<id>`; um `story_id` sem prefixo só é canonizado quando a área é inequívoca, e
+uma classificação anterior é normalizada pelo seu próprio briefing de origem, registrado e
+verificável, nunca pelo briefing atual. Sem essa procedência, reclassifique; dois formatos aceitos
+nunca permitem reutilizar classificação entre áreas diferentes. Uma resposta versão 1 nunca vira versão 2 por preenchimento
 inferido: reclassifique. Caches e registros anteriores são evidência aproveitável, não runtime de
 reuso ou reclassificação automática. Quota, autenticação e timeout não reclassificam nem reduzem a
 qualidade exigida: percorra os candidatos já classificados.

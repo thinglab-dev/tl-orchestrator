@@ -65,6 +65,132 @@ partir da primeira Task; os demais diretórios são opcionais.
 coordenar trabalho BMAD. Nunca é criada por uma atualização do pacote, e sua criação não transfere
 autoridade para o perfil Native.
 
+## Áreas de trabalho
+
+O modo padrão é o **projeto sem módulos**, inclusive em instalações novas: tudo fica em
+`_tl-orc/project/`, que é a área `global`. Sem áreas adicionais cadastradas, o Orquestrador assume
+`global` sem perguntar qual módulo usar, sem exigir cadastro e sem criar pasta de módulos. Native e
+BMAD continuam disponíveis conforme a autoridade configurada. O suporte a múltiplas áreas é
+opcional e existe para repositórios que organizam trabalho por módulo.
+
+| Projeto | Organização documental |
+| :--- | :--- |
+| Sem módulos | tudo em `_tl-orc/project/` |
+| Com módulos cadastrados | área `global` mais uma área documental por módulo |
+
+**A organização documental por área é distinta da coordenação de escrita, que continua por
+árvore.** Uma instalação por repositório; documentos globais e, quando cadastrados, documentos por
+módulo.
+
+### Cadastro
+
+Áreas adicionais são cadastradas na seção `## Work Areas` de `_tl-orc/PROJECT.md`, sem arquivo
+extra. `global` é implícita e reservada, com caminho fixo `_tl-orc/project/`; sua linha pode ser
+omitida, e seu `work_method` é o campo global já declarado em `PROJECT.md`, sem redeclaração.
+
+```text
+## Work Areas
+| area_id | path | work_method | status_source | evidence |
+| billing | modules/billing/_tl-orc/project | bmad | modules/billing/_bmad-output/sprint.md | modules/billing/_tl-orc/project/evidence |
+```
+
+- `path` é relativo à raiz consumidora e já contém o caminho documental completo da área. O
+  exemplo `modules/<module>/` é de um consumidor específico; projetos organizados em `apps/`,
+  `services/` ou outros caminhos usam o cadastro com seus próprios `path`, sem renomear pastas.
+- Validação no cadastro e na ativação: `area_id` duplicado, sobreposição entre `path` de áreas
+  e conflito com destinos da instalação (`_tl-orc/package`, integrações de skill). Cadastro
+  inválido bloqueia a seleção da área, não a ativação.
+- Uma pasta documental de módulo não cadastrado é reportada, não adotada.
+- Área cadastrada não implica diretório criado. A ativação somente leitura informa a condição
+  "cadastrada, sem documentos"; a estrutura nasce na primeira operação autorizada que precisar
+  dela. Trabalhar em um módulo inicializa, na mesma operação, os documentos globais necessários à
+  coordenação: `_tl-orc/project/STATUS.md` e `CONTEXT.md`.
+- `work_method` omitido no módulo herda o global, sempre como padrão para trabalho novo, nunca
+  para unidades existentes.
+- Caminhos `_tl-orc/...` de instalação resolvem sempre pela raiz consumidora; documentos de área
+  resolvem pelo `path` cadastrado. O caminho documental não determina o diretório de execução dos
+  portões, que continua vindo da tarefa e da política do consumidor.
+- Abrir uma subpasta ou informar `cwd` dentro de um módulo não seleciona área nem autoridade.
+
+### Seleção de área e autoridade
+
+Ordem: referência explícita do usuário, verificada na fonte; unidade já registrada; área
+declarada na tarefa; pergunta. Sem área resolvida, nenhuma escrita em `project/` de módulo.
+
+O método configurado na área define o padrão para trabalho novo sem autoridade anterior. Não
+altera o método de unidades existentes: uma Task Native dentro de um módulo BMAD continua Native.
+Referência explícita a unidade inexistente, ou que contradiz a área declarada, não autoriza criar
+nem selecionar outra silenciosamente; é ambiguidade material.
+
+### Coordenação por árvore, progresso por área
+
+O `coordinator` do `STATUS.md` **global** governa a escrita em toda a árvore do repositório,
+inclusive em `project/` de módulos e na seção `## Areas`. A regra de um escritor por árvore, que
+já inclui autores de specs e relatórios, permanece: caminhos de resultado separados não demonstram
+isolamento, porque Git, configuração, índices e outros recursos são compartilhados. Execução
+simultânea em árvores distintas segue o contrato existente, sem configuração nova.
+
+O `STATUS.md` de módulo não tem `coordinator`. Mantém `active_work_ref` da área, `next_action`,
+`current_role`, contadores locais, tabela derivada de Tasks e a linha `coordination: global`.
+
+### Camadas de status e ponto de retomada
+
+| Camada | Conteúdo |
+| :--- | :--- |
+| Cabeçalho global (`_tl-orc/project/STATUS.md`) | `coordinator` e a referência da execução corrente na árvore: `active_work_ref`, qualificado no modo multiárea, inclusive quando a unidade pertence a um módulo; `current_role`; `next_action` |
+| Cabeçalho do módulo | progresso local: `active_work_ref` da área, `next_action`, contadores, `coordination: global` |
+| Task ou artefato externo | estado oficial da unidade |
+| Seção `## Areas` do STATUS global | projeção dos módulos cadastrados, derivada e reconstruível, sem linha de `global`: `area_id`, `work_method`, `active_work_ref` e caminho do `STATUS.md` da área; ponteiro, nunca cópia de tabelas de Tasks nem de estado BMAD |
+
+Um novo harness lê o cabeçalho global e sabe qual unidade, de qual área, estava sendo conduzida.
+Ordem de escrita, sem atomicidade: primeiro a unidade, depois as projeções locais do módulo, por
+último a visão global. Na retomada, releia a unidade oficial antes de reconciliar cabeçalhos
+atrasados; divergência esperada segue a [tabela de recuperação](#transição-e-recuperação) e não
+exige confirmação adicional.
+
+### Referências entre áreas
+
+- Dentro da área, os IDs são locais (`T012`). Entre áreas, a referência qualificada usa `:`
+  (`billing:T012`, `global:DEC003`) e é aceita em `depends_on`, `decisions`, `origin`,
+  `deliverable`, `tasks`, `affects_context`, `resulting_work` e nos links de discussões. Sem
+  prefixo, a referência é local.
+- Pertencimento é campo próprio, distinto de procedência. Uma Task de módulo pertencente a um
+  Deliverable global declara `deliverable: global:D002`, `standalone: false` e
+  `origin: global:D002`; `origin` não substitui `deliverable`. O Deliverable global lista `tasks`
+  qualificadas e só fecha com `integration_criteria` verificados através das áreas.
+- Referências cruzadas não autorizam escrever nem despachar trabalho em outra área.
+- Dependências entre áreas preservam `blocked_by` e a regra de `cancelled`; ciclos entre áreas
+  são detectados e bloqueiam a seleção, com a cadeia exibida.
+- `active_work_ref` no modo multiárea é `<method>/<unit_type>/<area_id>:<id>@<source_location>`.
+- O registro de revisão identifica a unidade qualificada (`<area_id>:<id>`), `spec_revision` e
+  `content_id`. Igualdade de hashes entre unidades não transporta uma aprovação de uma Task para
+  outra.
+
+### Formatos legados e classificação
+
+Sem cadastro, os formatos deste documento para uma única área continuam aceitos e produzidos. No
+modo multiárea, registros e despachos novos usam referências qualificadas; referências antigas sem
+prefixo são interpretadas somente quando a área de origem é inequívoca pelo documento que as
+contém, e divergência exige esclarecimento. Uma atualização do pacote não reescreve documentos
+para acrescentar `global:`.
+
+No briefing do Classificador, `area_id` é dado de contexto; o schema não recebe propriedade nova,
+e `story_id` recebe o ID qualificado no modo multiárea. A validação e o reuso comparam a forma
+canônica `<area_id>:<id>` obtida do briefing; um `story_id` sem prefixo só é canonizado quando a
+área é inequívoca. Uma classificação anterior é normalizada pelo seu próprio briefing de origem,
+verificável no registro daquela classificação, nunca pelo briefing da tarefa atual; sem essa
+procedência, reclassifique. Aceitar dois formatos nunca permite reutilizar classificação entre
+áreas diferentes, e as demais exigências de igualdade permanecem.
+
+### Carregamento e importação por área
+
+Conjunto inicial para uma unidade de módulo: `CONTEXT.md` global curto, `CONTEXT.md` da área,
+`INDEX.md` da área quando existir, briefs afetados e dependências diretas, unidade ativa e decisões
+referenciadas, inclusive `global:DEC…`. Documentos compartilhados são referenciados por link e
+revisão, nunca copiados para áreas. Import Context roda por área. O brief fica na área responsável
+pela feature: em projetos sem módulos, todos em `_tl-orc/project/context/features/`; com módulos,
+features de escopo global na área global e as demais na área correspondente.
+
 ## Seleção de método e autoridade
 
 `PROJECT.md` declara `work_method: native` ou `work_method: bmad` para o projeto ou por módulo.
@@ -247,14 +373,17 @@ Esta cláusula não autoriza gravação em atividade somente leitura.
 ### Registro de revisão
 
 Fora do parecer e sem alterar o schema, o arquivo de evidência da rodada,
-`project/evidence/Tnnn-rNN.md`, registra o parecer JSON íntegro, `spec_revision`, `content_id`
-revisado, sessão, harness, modelo, effort, família e limitações de independência. É esse registro
-que vincula o parecer ao conteúdo.
+`project/evidence/Tnnn-rNN.md`, registra o parecer JSON íntegro, a unidade revisada (qualificada
+como `<area_id>:<id>` no modo multiárea), `spec_revision`, `content_id` revisado, sessão, harness,
+modelo, effort, família e limitações de independência. É esse registro que vincula o parecer ao
+conteúdo e à unidade; hashes iguais em outra unidade não transportam a aprovação.
 
 ## Proteção nas atualizações
 
-O atualizador, inclusive `auto_safe`, não sobrescreve, exclui nem migra `project/`. Leitura,
-validação, versionamento e backup continuam permitidos. `PROJECT.md`, `INSTALLATION.md`,
+O atualizador, inclusive `auto_safe`, não sobrescreve, exclui nem migra `project/` nem os caminhos
+documentais das áreas cadastradas. Esses caminhos ficam fora da mutação e da recuperação por
+snapshot da atualização, que é distinta de backup documental. Leitura, validação, versionamento e
+backup autorizado continuam permitidos. `PROJECT.md`, `INSTALLATION.md`,
 `QUEUE.md` e `_tl-orc/evidence/` seguem o [contrato de evolução](EVOLUTION.md).
 
 ## Adapter BMAD
@@ -281,6 +410,11 @@ a coordenação. A tabela de Tasks nativas só existe quando há Tasks nativas.
   recebe `blocked_by` e exige replanejamento.
 - `permit_state_update: true` em `QUEUE.md` autoriza somente os campos de estado da Task e a
   atualização correspondente de `STATUS.md`. Não cobre specs, decisões, contextos ou evidências.
+- Sem cadastro de áreas, a fila é da área `global` implícita e o comportamento anterior continua
+  integralmente. Com múltiplas áreas, filas novas declaram `area_id`; filas existentes preservam
+  `scope`, `board` e permissões, e sua área só é resolvida quando inequívoca a partir de `scope` e
+  `board`. Divergência exige esclarecimento, sem inferência. Atualizar o pacote não reescreve
+  `QUEUE.md` nem sua autorização.
 - Limites: `max_rework_rounds` por Task, `max_replans` por Deliverable com omissão igual a `1`, e
   estagnação: duas rodadas consecutivas com os mesmos achados do Checker bloqueiam e apresentam a
   decisão necessária.
@@ -415,6 +549,36 @@ open_discussions: []
 ## Tasks
 | id | type | deliverable | status | depends_on | blocked_by | state_revision | last_evidence |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+```
+
+### STATUS.md de módulo (somente no modo multiárea)
+
+```text
+format_version: 1
+area_id: billing
+coordination: global
+work_method: bmad
+active_work_ref: bmad/story/billing:S-12@modules/billing/_bmad-output/sprint.md
+current_role: none
+next_action: <frase curta>
+next_task_id: 1
+next_deliverable_id: 1
+next_decision_id: 1
+next_discussion_id: 1
+open_discussions: []
+
+## Tasks
+| id | type | deliverable | status | depends_on | blocked_by | state_revision | last_evidence |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+```
+
+No STATUS global, com áreas cadastradas, acrescente a projeção:
+
+```text
+## Areas
+| area_id | work_method | active_work_ref | status |
+| :--- | :--- | :--- | :--- |
+| billing | bmad | bmad/story/billing:S-12@… | modules/billing/_tl-orc/project/STATUS.md |
 ```
 
 ### CONTEXT.md

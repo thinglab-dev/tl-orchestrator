@@ -2,6 +2,12 @@
 
 Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
+## [Unreleased]
+
+### Corrigido
+
+- A validação do export agora compara caminhos no formato POSIX do manifesto também no Windows.
+
 ## [0.2.0] - 2026-09-05
 
 ### Adicionado

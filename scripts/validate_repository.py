@@ -138,6 +138,11 @@ def validate_links(files: list[str]) -> None:
             resolve_link(source, target, package)
 
 
+def export_relative_path(path: Path, export: Path) -> str:
+    """Return an exported file path in the manifest's POSIX representation."""
+    return path.relative_to(export).as_posix()
+
+
 def validate_export(files: list[str]) -> None:
     with tempfile.TemporaryDirectory(prefix="tl-orchestrator-validate-") as tmp:
         export = Path(tmp)
@@ -146,7 +151,7 @@ def validate_export(files: list[str]) -> None:
             destination = export / item
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, destination)
-        exported = sorted(str(path.relative_to(export)) for path in export.rglob("*") if path.is_file())
+        exported = sorted(export_relative_path(path, export) for path in export.rglob("*") if path.is_file())
         if exported != sorted(files):
             fail("exported path set differs from manifest")
         for item in files:

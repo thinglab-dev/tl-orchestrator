@@ -102,6 +102,36 @@ Depois de registrar a conclusão, encerre a ativação. Uma tarefa agendada pode
 mais tarde para escolher a próxima story; o pacote não mantém um processo, heartbeat ou loop
 próprio.
 
+### Condução pelo executor
+
+Um consumidor pode entregar o laço da fila a um condutor determinístico (script ou executor
+local) em vez de mantê-lo numa sessão longa do Orquestrador. O motivo é custo: numa sessão
+conversacional cada chamada de ferramenta relê o contexto acumulado, e uma story chega a centenas
+de chamadas. O condutor não substitui nenhum papel; ele apenas encadeia o que o Orquestrador
+faria mecanicamente e chama os papéis em sessões novas e curtas nos pontos de decisão fixos:
+
+- **Planner** escreve ou audita a spec e declara `pending_decisions`; qualquer item pendente para
+  o condutor antes do Maker, porque a decisão é humana.
+- **Orquestrador** entra em duas sessões novas por story: ratificar a spec (executável, dentro do
+  DAG e dos limites locais) e a prova própria por amostra dirigida sobre o diff, os portões e o
+  parecer do Checker. Responde `proceed` ou `stop` com razões; `stop` para o condutor.
+- **Maker** implementa a partir de um briefing gerado da spec e do mapa do Searcher; o condutor
+  roda os portões e devolve falhas como correção, dentro do limite declarado em `QUEUE.md`.
+- **Checker** revisa em nova sessão, com o diff completo, e a independência de família é
+  revalidada após a escolha efetiva do Maker.
+
+O condutor nunca julga ambiguidade, nunca escolhe story fora da ordem do board, nunca reduz um
+portão a exit code sem a prova própria e nunca encerra o run em nome do usuário: toda parada tem
+motivo nomeado, relatório durável e retomada explícita. Classificação trivial resolve os papéis
+sem sessão do Classificador quando há um par elegível; mais de um par para o condutor e devolve a
+classificação à sessão normal.
+
+Efeitos externos continuam fora da fila por padrão. Um consumidor que já delegou publicação ou
+integração à IA por regra própria pode declará-lo em `QUEUE.md`, chave a chave (commit, push,
+pull request, merge), com autor e data da autorização; chave ausente vale negado, e um risco de
+efeito externo novo apontado pelo Planner ou pela prova própria desliga o merge daquela story.
+O pacote continua sem processo, heartbeat ou laço próprio: o condutor é do consumidor.
+
 ## Discuss
 
 **Discuss** é uma conversa entre Orquestrador e usuário para esclarecer objetivo, restrições,

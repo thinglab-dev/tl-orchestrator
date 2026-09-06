@@ -27,6 +27,14 @@ A spec deve permitir ao Maker e ao Checker responder:
 
 Use o formato de tarefa existente. Ao propor stories filhas, dê a cada uma uma spec identificável e referencie uma única fonte para decisões transversais. Registros de mecanismo, sprint e decisões só podem ser alterados quando pertencem ao seu escopo explícito; eles não são arquivos obrigatórios do método.
 
+## Prova que discrimina
+
+Cada spec carrega prova própria. A sonda contrafactual nomeia o arquivo, a função, a condição ou o dado que será mutado, o teste ou consumidor que deve ficar vermelho e o que restaura o verde. "Remover a precondição do AC01" ou "adulterar o insumo" não é sonda; é espaço em branco. O mesmo vale para tarefas e estado auditado: texto idêntico repetido entre stories irmãs indica template, não planejamento, e é defeito a corrigir antes de entregar. Em story de evidência ou de decisão humana, a sonda adultera a fixture, o peer ou a condição do ensaio, e a spec diz qual.
+
+## Validar com a máquina do consumidor
+
+Antes de declarar o plano pronto, prove que o consumidor o executa como você pretende, com as ferramentas dele e não com um validador seu: ordem e dependências no arquivo e no formato que o engine lê, referências cruzadas na grafia que ele resolve, portões que existem de fato ou são declarados como prosa. Registre o comando ou teste usado e o resultado. Um arquivo de declaração novo pode mudar retroativamente o veredito de itens já concluídos; consulte a prontidão de itens anteriores depois de introduzi-lo e registre o efeito.
+
 ## Entrega
 
 Escreva somente os artefatos de planejamento autorizados, respeitando um escritor por árvore. Se o pedido é análise na resposta, não crie arquivos por hábito. Não avance para implementação depois do plano.

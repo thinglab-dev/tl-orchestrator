@@ -2,6 +2,16 @@
 
 Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
+## [Unreleased]
+
+### Corrigido
+
+- O contrato do Planner exige sonda contrafactual, tarefas e estado auditado específicos por
+  story, e prova de que o consumidor executa o plano com as próprias ferramentas (dependências
+  no arquivo e formato que o engine lê; efeito retroativo de declarações novas sobre itens
+  concluídos). Motivado por uma rodada em que 17 specs saíram com a mesma sonda de template e um
+  grafo de dependências que o engine consumidor ignorava.
+
 ## [0.2.2] - 2026-09-05
 
 ### Corrigido

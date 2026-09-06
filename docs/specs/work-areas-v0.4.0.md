@@ -1,6 +1,6 @@
 <!-- Documento de trabalho do repositório fonte. Não faz parte da distribuição (fora do distribution-manifest.json). Referência canônica da implementação da v0.4.0. -->
 
-# tl-orchestrator — Especificação: áreas de trabalho por módulo (revisão 6, congelada)
+# tl-orchestrator — Especificação: áreas de trabalho por módulo (revisão 7, com registro de achados na migração)
 
 ```text
 Status: conceptual contract frozen
@@ -10,6 +10,8 @@ Target version: v0.4.0
 
 Nova capacidade com compatibilidade legada preservada. A correção de redação do menu acompanha como item separado.
 **Base:** v0.3.0 (`3e717f0`).
+**Revisão 7:** acrescenta, por pedido do usuário, o registro de erros e bugs encontrados durante a importação e migração na fila de correção. As demais decisões da revisão 6 permanecem; implementação não autorizada.
+
 **Motivação:** o `platform` organiza trabalho por módulo. O contrato v0.3.0 permite `work_method` por módulo, mas a ativação resolve `_tl-orc/...` pela raiz consumidora e fixa `_tl-orc/project/` como única área documental.
 
 ## 1. Modelo
@@ -104,6 +106,18 @@ Um novo harness lê o cabeçalho global e sabe qual unidade, de qual área, esta
 
 Conjunto inicial: `CONTEXT.md` global curto, `CONTEXT.md` da área, `INDEX.md` da área quando existir, briefs afetados e dependências diretas, unidade ativa e decisões referenciadas, inclusive `global:DEC…`. Compartilhados por referência e revisão, nunca copiados. Import Context roda por área. **O brief fica na área responsável pela feature:** em projetos sem módulos, todos os briefs ficam em `_tl-orc/project/context/features/`; em projetos com módulos, features de escopo global ficam na área global e as demais na área correspondente. Fontes BMAD preservadas como em v0.3.0.
 
+## 7.1 Migration Findings — registro na fila de correção
+
+Durante `Import Context` e, quando implementada, `Migrate Work`, o Orquestrador registra erros, bugs e suspeitas materiais encontrados na análise na fila de trabalho da área responsável. O registro faz parte da operação autorizada: não exige uma nova decisão do usuário por achado. Esta cláusula acrescenta captura e triagem documental; não implementa a transferência de autoridade de `Migrate Work` nesta evolução.
+
+- **Unidades novas.** Esta política da operação seleciona explicitamente `method: native` para os achados novos, inclusive quando o trabalho de produto continua em BMAD. Bug confirmado gera Task `type: fix`, inicialmente `status: draft`. Suspeita sem confirmação gera Task `type: analysis`, também `draft`, com a hipótese e a verificação necessária; não é apresentada como bug comprovado. O tipo não decide método nem capacidade do executor.
+- **Área.** A Task fica na área responsável pela correção; problemas de escopo global ficam em `global`. Em projetos sem módulos, todos os achados ficam em `global`, sem exigir cadastro adicional. Referências entre áreas seguem o §5.
+- **Evidência mínima.** A Task registra origem (importação e epic/story/documento, quando existentes), fonte com caminho e revisão, comportamento esperado e observado, evidência ou passos de reprodução disponíveis, impacto observado, incertezas e próximo passo de verificação. Uma divergência entre documentos é registrada como tal, sem presumir falha no código. O registro de importação e as `Open Questions` dos briefs afetados apontam para a unidade correspondente.
+- **Deduplicação e autoridade.** Antes de criar uma Task, confira unidades relacionadas nas fontes autoritativas da área. Se a mesma correção já estiver registrada, reutilize sua referência e vincule a nova evidência no registro da operação, sem criar outra unidade nem alterar o estado original. Uma unidade BMAD existente continua na fila BMAD até transferência deliberada; não ganha cópia Native nem é despachada pelos dois métodos. Repetir a importação não recria os mesmos achados.
+- **Visibilidade e prontidão.** A Task nova aparece na tabela derivada de `STATUS.md` da área, com o estado real `draft`. O Orquestrador promove para `ready` somente depois de cumprir o contrato de spec, critérios e verificação. O registro não habilita `QUEUE.md`, não amplia suas permissões e não torna um item `draft` elegível para execução. A correção segue o ciclo normal de classificação, planejamento quando exigido, Maker e Checker, dentro da autorização de execução aplicável.
+- **Coordenação e escopo.** Criação de Tasks, alocação de IDs e atualização das projeções seguem a coordenação global e a regra de um escritor por árvore. Descobrir um bug não amplia o escopo para modificar código ou corrigir produto durante a migração; correções já cobertas por uma autorização vigente seguem essa autorização.
+- **Bloqueios.** A existência de um bug preexistente não bloqueia automaticamente toda a importação ou migração. Se impedir o critério de conclusão ou a transferência correta de autoridade, bloqueie apenas a unidade afetada, registrando `blocked_by` com a referência e o motivo. Os demais achados permanecem visíveis na fila, sem declarar resolvida uma funcionalidade que continua com defeito.
+
 ## 8. Filas
 
 - Sem `## Work Areas`, `global` é implícita e o comportamento legado continua integralmente.
@@ -126,7 +140,7 @@ Oferecer "Atualizar tl-orchestrator" **somente** com release estável sucessora 
 
 | Arquivo | Alteração |
 | :--- | :--- |
-| `docs/WORK_MODEL.md` | áreas; coordenação global versus progresso local; templates de `STATUS.md` global (com `## Areas`) e de módulo; referências qualificadas e pertencimento; carregamento e importação por área |
+| `docs/WORK_MODEL.md` | áreas; coordenação global versus progresso local; templates de `STATUS.md` global (com `## Areas`) e de módulo; referências qualificadas e pertencimento; carregamento e importação por área; captura e triagem de Migration Findings |
 | `SKILL.md` | resolução por cadastro; seleção de área explícita; correção do parágrafo de atualização |
 | `prompts/orchestrator.md`, playbook, perfis | `active_work_ref` qualificado; `area_id` no briefing; fila com `area_id` e regra legada |
 | `docs/PROJECT_CONFIGURATION.md` | `## Work Areas`; validações do cadastro; `area_id` em `QUEUE.md` com compatibilidade |
@@ -144,6 +158,8 @@ Cenários: **projeto novo sem módulos e sem BMAD**, cobrindo trabalho Native e 
 - método configurado no módulo não substitui a autoridade registrada na Task;
 - atualização preserva os documentos das áreas e ativação somente leitura não cria diretórios.
 
+**Migration Findings:** no consumidor sintético, a importação encontra um bug comprovado e cria uma Task Native `fix` em `draft`, com origem e evidência, visível no `STATUS.md` da área; uma suspeita gera `analysis`, sem afirmação de bug confirmado. Repetir a operação não duplica Tasks. Um achado já coberto por unidade BMAD mantém essa referência e sua autoridade. O registro não modifica arquivos de produto, não habilita a fila de execução e não promove Tasks para `ready` sem spec. Verificar a área correta tanto com módulos quanto no projeto sem módulos, e o bloqueio somente da unidade cuja conclusão esteja impedida.
+
 Mais: validador do repositório, Checker de família distinta, e smoke por harness na adoção.
 
 ## 13. Decisões fechadas nesta revisão
@@ -154,4 +170,5 @@ Mais: validador do repositório, Checker de família distinta, e smoke por harne
 | Referência qualificada | `:` |
 | `tree: dedicated` | retirado; coordenação por árvore preservada |
 | Versão alvo | v0.4.0 proposta |
-| Implementação | depende de autorização explícita; esta revisão congela o contrato conceitual |
+| Migration Findings | achados registrados na fila da área, com evidência, deduplicação, autoridade preservada e sem execução automática por descoberta |
+| Implementação | depende de autorização explícita; contrato da revisão 6 preservado com o requisito adicional de Migration Findings solicitado pelo usuário |

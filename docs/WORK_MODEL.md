@@ -507,6 +507,46 @@ autoridade sobre as unidades de produto:
 4. **Registrar:** fechamento com evidência. Os originais permanecem acessíveis; mover ou arquivar
    só depois de verificar referências e concluir a transferência de autoridade.
 
+### Migration Findings
+
+Durante Import Context e, quando existir, Migrate Work, o Orquestrador registra erros, bugs e
+suspeitas materiais encontrados na análise como unidades na fila de trabalho da área responsável.
+O registro faz parte da operação autorizada e não exige nova decisão do usuário por achado; ele
+acrescenta captura e triagem documental, sem transferir autoridade nem executar correção.
+
+- **Unidades novas.** A política da operação seleciona explicitamente `method: native` para os
+  achados novos, mesmo quando o trabalho de produto continua em BMAD. Bug confirmado gera Task
+  `type: fix` em `status: draft`. Suspeita sem confirmação gera Task `type: analysis`, também
+  `draft`, com a hipótese e a verificação necessária, sem ser apresentada como bug comprovado. O
+  tipo não decide método nem capacidade do executor.
+- **Área.** A Task fica na área responsável pela correção; problemas de escopo global ficam em
+  `global`. Em projetos sem módulos, todos os achados ficam em `global`, sem cadastro adicional.
+  Referências entre áreas seguem [Referências entre áreas](#referências-entre-áreas).
+- **Evidência mínima.** A Task registra origem (importação e epic, story ou documento, quando
+  existirem), fonte com caminho e revisão, comportamento esperado e observado, evidência ou passos
+  de reprodução disponíveis, impacto observado, incertezas e próximo passo de verificação. Uma
+  divergência entre documentos é registrada como tal, sem presumir falha no código. O registro de
+  importação e as Open Questions dos briefs afetados apontam para a unidade correspondente.
+- **Deduplicação e autoridade.** Antes de criar uma Task, confira unidades relacionadas nas fontes
+  autoritativas da área. Se a mesma correção já estiver registrada, reutilize a referência e
+  vincule a nova evidência no registro da operação, sem criar outra unidade nem alterar o estado
+  original. Uma unidade BMAD existente continua na fila BMAD até transferência deliberada; não
+  ganha cópia Native nem é despachada pelos dois métodos. Repetir a importação não recria os
+  mesmos achados.
+- **Visibilidade e prontidão.** A Task nova aparece na tabela derivada de `STATUS.md` da área com
+  o estado real `draft`. O Orquestrador promove para `ready` somente depois de cumprir o contrato
+  de spec, critérios e verificação. O registro não habilita `QUEUE.md`, não amplia suas
+  permissões e não torna um item `draft` elegível para execução. A correção segue o ciclo normal
+  de classificação, planejamento quando exigido, Maker e Checker, dentro da autorização aplicável.
+- **Coordenação e escopo.** Criação de Tasks, alocação de IDs e atualização das projeções seguem
+  a coordenação global e a regra de um escritor por árvore. Descobrir um bug não amplia o escopo
+  para modificar código ou corrigir produto durante a migração; correções já cobertas por uma
+  autorização vigente seguem essa autorização.
+- **Bloqueios.** Um bug preexistente não bloqueia automaticamente toda a importação ou migração.
+  Se impedir o critério de conclusão ou a transferência correta de autoridade, bloqueie apenas a
+  unidade afetada, registrando `blocked_by` com a referência e o motivo. Os demais achados
+  permanecem visíveis na fila, sem declarar resolvida uma funcionalidade que continua com defeito.
+
 Um piloto mede contexto inicial carregado, leitura adicional efetiva, qualidade das respostas
 sobre a feature e custo de criação e atualização. A meta é reduzir redescoberta e leitura
 irrelevante, não premiar a ausência de consulta às fontes. A entrega mínima de um piloto é o

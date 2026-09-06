@@ -15,6 +15,11 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   qualificadas `<area_id>:<id>` entre áreas, pertencimento (`deliverable`) distinto de procedência
   (`origin`), detecção de ciclos, registro de revisão vinculado à unidade qualificada, briefs na
   área responsável pela feature.
+- Migration Findings: durante Import Context e Migrate Work, bugs confirmados e suspeitas
+  encontrados na análise viram Tasks Native `fix` ou `analysis` em `draft` na fila da área
+  responsável, com evidência mínima, deduplicação contra as fontes autoritativas, autoridade BMAD
+  preservada, sem habilitar fila nem promover a `ready` sem spec, e bloqueio só da unidade cuja
+  conclusão esteja impedida.
 
 ### Alterado
 

@@ -94,10 +94,19 @@ contexto da conversa; não exija comando especial nem IDs de story. Se o foco es
 ambíguo, esclareça somente essa lacuna. Um pedido genérico de análise não seleciona este modo.
 
 A escolha autoriza o Orquestrador a consultar Planner, Maker e Checker em sessões reais separadas,
-somente leitura, com classificação econômica da fase `debate`, preferências e capacidade
-revalidadas nos [perfis](orchestrator-perfis.md). Resolva a identidade consultiva efetiva do Maker
-antes do Checker; o Checker prioriza família diferente dela e de autores efetivos de artefato, se
-houver, mesmo sem diff. Se fallback mudar o Maker, revalide o Checker. Não autoriza implementar,
+somente leitura. **Antes de despachar qualquer participante**, envie `requested_roles` exatamente
+`planner`, `maker` e `checker` e obtenha um único resultado versão 2 da fase `debate`, com esses
+papéis exatos em `roles`, revisões correspondentes e candidatos válidos por harness conforme os
+perfis, incluindo `null`/`null` quando não houver par adequado. Pins são restrições de entrada e
+não dispensam o Classificador. Resultado estrutural ou semanticamente inválido bloqueia todos os
+despachos do painel; não complete o resultado por inferência. Indisponibilidade ou cadeia esgotada
+segue o contrato de resolução.
+
+Com o resultado válido, revalide preferências e capacidade nos
+[perfis](orchestrator-perfis.md). Resolva a identidade consultiva efetiva do Maker antes do Checker;
+o Checker prioriza família diferente dela e de autores efetivos de artefato, se houver, mesmo sem
+diff. Passe modelo e effort explicitamente em cada chamada e confira o par efetivo, sem herdar o
+default do harness — inclusive `max`. Se fallback mudar o Maker, revalide o Checker. Não autoriza implementar,
 executar experimentos que alterem o
 ambiente, ratificar decisões, mudar ADRs, board, código, instalação ou Git, nem publicar. Os
 participantes não despacham agentes; sua entrega é uma opinião na resposta. O eventual registro

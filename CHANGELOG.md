@@ -2,6 +2,17 @@
 
 Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
+## [Unreleased]
+
+### Corrigido
+
+- Atualizações que sincronizam arquivos agora também exigem migração do perfil e das integrações,
+  fresh load e smoke test de roteamento antes de declarar adoção operacional completa.
+- O Debater bloqueia todo despacho até validar a classificação `debate` de Planner, Maker e Checker,
+  com pares modelo/effort explícitos; pins continuam restrições sem dispensar o Classificador.
+- Evidências distinguem conteúdo `synchronized` de `operational_verified` ou
+  `operational_pending`, sem transformar indisponibilidade em sucesso.
+
 ## [0.2.0] - 2026-09-05
 
 ### Adicionado

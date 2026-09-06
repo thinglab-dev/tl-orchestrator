@@ -58,6 +58,13 @@ Uma contribuição preparada ou publicada não remove o delta local, não valida
 instalados, não elimina conflito e não desbloqueia uma atualização. Alterações do consumidor fora
 do pacote são distinguidas do delta do método e permanecem intocadas.
 
+Uma atualização também separa sincronização de adoção operacional. `synchronized` prova somente
+que pacote, registros e integrações vieram da revisão conferida. Quando a revisão muda roteamento
+ou despacho, migre o perfil e as instruções consumidoras, faça fresh load da skill exata e execute
+o smoke test limitado descrito no [guia](PROJECT_CONFIGURATION.md#migração-operacional-do-roteamento).
+Somente essa evidência permite `operational_verified`; impossibilidade de testar fica
+`operational_pending` e impede declarar adoção completa, sem desfazer uma sincronização válida.
+
 ## Contribuir melhorias
 
 O delta é sempre calculado contra a baseline de origem cuja revisão e hashes foram verificados,
@@ -116,6 +123,8 @@ Antes de escrever, todos estes portões devem passar:
   conferidos, sem sombreamento, destino desconhecido ou conflito;
 - a origem alvo foi obtida separadamente, todos os arquivos pertencem ao mesmo commit, o manifesto
   e os hashes de origem e cópia foram conferidos e nenhum conteúdo remoto foi executado;
+- o plano identifica migrações operacionais e os estados `synchronized` e
+  `operational_verified|operational_pending` que deverão ser registrados por harness;
 - todas as release notes do intervalo foram lidas em ordem e não há migração, decisão pendente,
   mudança de garantia, política, permissão, preferência ou integração que exija escolha humana;
 - existe autorização expressa e vigente para exatamente esse projeto, ator, destinos, escopo e
@@ -127,7 +136,9 @@ que o snapshot pode ser lido. Maker aplica uma única revisão, o Orquestrador r
 de arquivos, hashes, links, precedência e descoberta, e um Checker externo independente revisa a
 árvore final. Se a mutação ou um portão posterior falhar, pare, preserve evidência e use o
 snapshot para recuperar o estado anterior somente dentro da autoridade registrada; confira a
-recuperação. Não continue parcialmente nem apague o snapshot antes do aceite.
+recuperação. Depois da cópia, conclua a migração e a prova operacional do guia. Falha de capacidade
+deixa `operational_pending`, não sucesso inventado; falha da mutação recupera o snapshot. Não
+continue uma mutação parcial nem apague o snapshot antes do aceite.
 
 Qualquer delta, arquivo extra, conflito, migração pendente ou garantia alterada transforma a
 operação em `notify`: apresente release, bloqueio e decisão necessária. Não afrouxe um portão,

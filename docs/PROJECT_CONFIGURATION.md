@@ -81,6 +81,9 @@ format_version: 1
 ## Classificação e despacho
 <story, fase, revisões de contexto/catálogo/contrato, resultado v2 do Classificador, evidências e base de custo, perfis recomendados, modelo/effort efetivos, sessão, medições e motivos de fallback; Searcher registrado separadamente, fora de requested_roles e do schema>
 
+## Adoção operacional
+<revisão synchronized; operational_verified ou operational_pending por harness; fresh load, smoke test, evidência e limites>
+
 ## Evidências
 <destino vigente no consumidor>
 ```
@@ -160,11 +163,39 @@ catálogo e contrato, pins e política. Toda mudança de fase reclassifica os pa
 Um resultado versão 1 não pode ser preenchido por inferência para parecer versão 2. Quota,
 autenticação e timeout percorrem a cadeia já classificada, sem reclassificar ou baixar qualidade.
 
-Na migração de um perfil anterior, preserve modelos explicitamente fixados e exigências de
-independência: eles permanecem restrições até mudança autorizada. A adoção solicitada pelo usuário
-do roteamento variável substitui as escolhas fixas abrangidas pelo pedido; registre essa origem.
-Não transforme uma preferência antiga em mera disponibilidade nem copie IDs antigos como se
-fossem uma escolha nova do Classificador. Atualize origem e última conferência quando mudarem.
+Na migração de um perfil anterior, diferencie a origem. Modelos que eram somente defaults do perfil
+legado são substituídos pelo perfil publicado. Modelos explicitamente fixados pelo usuário ou pelo
+consumidor permanecem pins e restrições até mudança autorizada, mas não dispensam a classificação
+da fase. A adoção solicitada pelo usuário do roteamento variável substitui somente os pins
+abrangidos pelo pedido; registre essa origem. Não transforme pin em mera disponibilidade nem copie
+ID antigo como recomendação nova. Se a procedência for ambígua, marque apenas essa decisão como
+pendente; somente uma atualização explicitamente autorizada pode prosseguir com a sincronização
+independente. `auto_safe` para diante da decisão pendente conforme o contrato de evolução, e nenhum
+despacho incompatível é inferido.
+Atualize origem e última conferência quando mudarem.
+
+### Migração operacional do roteamento
+
+Instalar uma revisão que introduza ou altere o Classificador exige migrar também `PROJECT.md`, as
+instruções consumidoras e cada integração registrada que ainda codifique despacho fixo. Registre
+`routing_mode: classifier`, o perfil auxiliar, as cadeias e pins, `checker_independence`, o catálogo
+permitido com capacidades e limites e os registros por fase. Não marque a adoção como concluída
+apenas porque os 16 arquivos e hashes coincidem.
+
+Depois da sincronização, carregue de novo o `SKILL.md` exato por cada destino e precedência
+registrados; memória da sessão anterior não prova descoberta. Em harness utilizável, execute um
+smoke test somente leitura e limitado a uma pergunta sintética sem efeito de produto. Ele deve
+observar uma chamada válida ao Classificador antes do primeiro despacho, com fase `debate`, papéis
+exatos Planner/Maker/Checker, seguida pelos três despachos com pares modelo/effort explícitos e
+ferramentas somente leitura. Limite chamadas, custo e autoridade ao teste; participantes podem ser
+stubs controlados quando o objetivo for somente provar a ordem. Parar após a classificação é prova
+parcial do gate, não da ordem completa, do painel nem de harnesses ou transportes que não rodaram.
+
+Mantenha dois estados independentes: `synchronized` identifica revisão, hashes, registros e
+integrações copiados; `operational_verified` exige evidência do fresh load e smoke test por harness.
+Se ferramenta, autenticação, quota, permissão ou orçamento impedirem a chamada, registre
+`operational_pending`, motivo, alcance testado e próximo passo. Não mude pins, fabrique chamada,
+painel, modelo efetivo ou sucesso para obter estado verde.
 
 Esses registros pertencem ao consumidor. As fontes apontadas continuam autoritativas e devem ser
 relidas quando a tarefa exigir; dado antigo em `_tl-orc/` não prevalece sobre elas. Use
@@ -392,9 +423,11 @@ revisão. Antes de despachar ou escrever:
 
 Depois das decisões, o Maker preserva modificações locais, instala os 16 arquivos de uma única
 revisão, sincroniza cada destino que for cópia e adapta os registros e integrações aos requisitos
-comprovados. O Orquestrador confere hashes, links, descoberta nos harnesses presentes e aderência
-às notas, então submete o resultado ao Checker independente. Registre as notas consultadas, as
-migrações aplicadas, as provas, o parecer e qualquer pendência. Alterações em código, produto,
+comprovados, incluindo a [migração operacional do roteamento](#migração-operacional-do-roteamento).
+O Orquestrador confere hashes, links, descoberta nos harnesses presentes e aderência às notas,
+então submete o resultado ao Checker independente. Registre separadamente `synchronized` e
+`operational_verified` ou `operational_pending`, além das notas consultadas, migrações, provas,
+parecer e pendências. Alterações em código, produto,
 stories ou backlog do consumidor exigem pedido explícito além da atualização do método.
 
 ## Descoberta proporcional

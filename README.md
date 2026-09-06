@@ -10,7 +10,8 @@ Gemini 3.8 Flash medium, em fallback sequencial.
 
 As cadeias dos papéis são **Planner Claude → Codex → Agy**, **Maker Codex → Claude → Agy** e
 **Checker Agy → Claude → Codex**, preferindo família diferente da do Maker e sempre em sessão
-nova. Indisponibilidade comprovada permite fallback registrado; ambiguidade não resolvida bloqueia.
+nova. Indisponibilidade comprovada permite fallback registrado; ambiguidade não resolvida bloqueia
+somente o despacho ou a decisão que dela depende.
 Preferências mais recentes do usuário e restrições do consumidor prevalecem sobre o padrão. O
 roteamento satisfaz primeiro o risco e depois busca o menor custo esperado por entrega aceita; não
 há tabela fixa tier → modelo nem promessa de economia ou precisão baseada só em benchmark.
@@ -157,8 +158,12 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    revisões, pares, pins, restrições e pertinência da evidência antes de qualquer despacho.
 
    Preserve separadamente escolhas fixadas, capacidade observada, recomendação e despacho
-   efetivo. Preferência antiga permanece restrição até mudança autorizada; na adoção explícita
-   do roteamento variável, registre quais escolhas fixas o pedido substitui. Revalide modelo,
+   efetivo. Modelo que era apenas default do perfil legado é substituído pelo perfil publicado;
+   escolha explicitamente fixada continua como pin e restrição do Classificador, mas nunca dispensa
+   sua chamada. Se a origem antiga for ambígua, deixe essa decisão pendente; sincronização
+   independente exige atualização explicitamente autorizada, e `auto_safe` deve parar.
+   Na adoção explícita do roteamento variável, registre
+   quais pins o pedido substitui. Revalide modelo,
    effort, família, permissões e sessão a cada chamada. Registre motivos de fallback; se o
    Checker usar a mesma família em sessão nova, declare a limitação. Não trate uma instrução
    report-only como bloqueio técnico de escrita. Mudança de fase reclassifica os papéis necessários;
@@ -209,8 +214,11 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    contrato de evolução. Use como fontes normativas a seção "Aplicar uma atualização" do guia e
    [Atualização auto_safe](docs/EVOLUTION.md#atualização-auto_safe). Leia as notas aplicáveis em ordem, compare
    os contratos entre a versão instalada e a alvo e apresente o plano de migração. Preserve o
-   regime do método: Maker executa as alterações; o Orquestrador confere hashes, integrações e
-   descoberta; um Checker externo independente revisa a árvore final. Correção direta pelo
+   regime do método: Maker executa as alterações; o Orquestrador confere hashes, integrações,
+   descoberta, fresh load e o smoke test operacional; um Checker externo independente revisa a
+   árvore final. Hashes provam apenas a cópia. Registre `synchronized` separadamente de
+   `operational_verified`; se o harness não puder executar a prova, use `operational_pending` com
+   o motivo, sem declarar adoção completa. Correção direta pelo
    Orquestrador exige a mesma prova e revisão. Registre notas consultadas, migrações, provas,
    parecer e pendências. Essa autorização não inclui alterar código, produto ou backlog do
    consumidor sem pedido explícito.

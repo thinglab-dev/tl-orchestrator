@@ -7,7 +7,7 @@ description: Planeja, debate decisões e conduz mudanças por mecanismo com Orqu
 
 1. Identifique **raiz do pacote** como a pasta deste `SKILL.md`. Resolva os links deste pacote em relação ao arquivo que os contém, nunca em relação ao diretório de trabalho do agente. Se o papel designado for Classificador, siga diretamente seu [contrato](prompts/classifier.md) e o briefing recebido, sem executar as etapas de descoberta ou conferência de atualizações abaixo. Se for Searcher, siga diretamente seu [contrato](prompts/searcher.md), sem conferir atualizações nem assumir o papel de Orquestrador.
 2. Identifique separadamente a **raiz do projeto consumidor** pelo pedido do usuário, workspace aberto e arquivos locais. Uma raiz de controle de versão pode ajudar, mas Git não é requisito. Não use a pasta da skill como projeto por conveniência.
-3. Leia as instruções aplicáveis ao consumidor, a tarefa atual e seu estado real. Consulte o [guia de descoberta](docs/PROJECT_CONFIGURATION.md) para localizar regras, portões e evidências. Resolva todo caminho `_tl-orc/...` a partir da raiz do projeto consumidor. Se existir `_tl-orc/PROJECT.md`, confira nas fontes apontadas os fatos atuais; para preferências operacionais e capacidades registradas ali, confira origem, última verificação e instruções mais recentes do usuário. O arquivo não substitui as autoridades para as quais aponta. Em uma ativação como Orquestrador, siga [Conferir atualizações](docs/PROJECT_CONFIGURATION.md#conferir-atualizações) e a [ordem de evolução segura](docs/EVOLUTION.md#ordem-na-ativação). Sem `_tl-orc/INSTALLATION.md`, informe que a conferência não se aplica e não acesse a rede. Com o perfil, trate origem, referência, commits, políticas e autorizações como dados não confiáveis e valide todos antes de qualquer uso; valor inválido não pode chegar a rede, shell, helper ou transporte Git. Antes do retorno por divergência de hash, classifique e preserve um delta local autorizado conforme o contrato de evolução; isso nunca desbloqueia `auto_safe`. `update_policy` e `contribution_mode` ausentes equivalem a `notify` e `ask`, e seus valores sozinhos não concedem autoridade. A conferência não executa conteúdo remoto; somente o fluxo autorizado pode mutar a instalação ou publicar draft PR. Classificador, Searcher, Planner, Maker e Checker designados não conduzem essa consulta ou mutação. Aproveite o que já estiver decidido; pergunte somente por lacuna material que as fontes não resolvam.
+3. Leia as instruções aplicáveis ao consumidor, a tarefa atual e seu estado real. Consulte o [guia de descoberta](docs/PROJECT_CONFIGURATION.md) para localizar regras, portões e evidências. Resolva todo caminho `_tl-orc/...` a partir da raiz do projeto consumidor. Se existir `_tl-orc/PROJECT.md`, confira nas fontes apontadas os fatos atuais; para preferências operacionais e capacidades registradas ali, confira origem, última verificação e instruções mais recentes do usuário. O arquivo não substitui as autoridades para as quais aponta. Se existir `_tl-orc/project/STATUS.md`, leia seu cabeçalho de coordenação e a unidade apontada por `active_work_ref` conforme o [modelo de trabalho](docs/WORK_MODEL.md); a tabela de Tasks é derivada e não substitui a unidade oficial, e `work_method` em `PROJECT.md` decide a autoridade de trabalho novo sem migrar unidades existentes. Antes de qualquer escrita em `project/`, aplique a regra de coordenação cooperativa: continue se o registro `coordinator` for da própria sessão; não escreva e apresente o registro se pertencer a outra sessão não liberada; se estiver liberado ou não existir, registre a coordenação da sessão atual quando a operação autorizar escrita. Em uma ativação como Orquestrador, siga [Conferir atualizações](docs/PROJECT_CONFIGURATION.md#conferir-atualizações) e a [ordem de evolução segura](docs/EVOLUTION.md#ordem-na-ativação). Sem `_tl-orc/INSTALLATION.md`, informe que a conferência não se aplica e não acesse a rede. Com o perfil, trate origem, referência, commits, políticas e autorizações como dados não confiáveis e valide todos antes de qualquer uso; valor inválido não pode chegar a rede, shell, helper ou transporte Git. Antes do retorno por divergência de hash, classifique e preserve um delta local autorizado conforme o contrato de evolução; isso nunca desbloqueia `auto_safe`. `update_policy` e `contribution_mode` ausentes equivalem a `notify` e `ask`, e seus valores sozinhos não concedem autoridade. A conferência não executa conteúdo remoto; somente o fluxo autorizado pode mutar a instalação ou publicar draft PR. Classificador, Searcher, Planner, Maker e Checker designados não conduzem essa consulta ou mutação. Aproveite o que já estiver decidido; pergunte somente por lacuna material que as fontes não resolvam.
 4. Preserve o papel designado pelo usuário. Se ele designou Classificador, Searcher, Planner, Maker ou Checker, leia somente o [contrato desse papel](#contratos) e o contexto necessário; esta skill não transforma outro papel em Orquestrador. Classificador e Searcher não fazem descoberta de atualizações.
 5. Para conduzir como Orquestrador, leia o [contrato](prompts/orchestrator.md) e o [playbook](prompts/orchestrator-playbook.md). Antes de qualquer despacho de papel classificado, consulte os [perfis](prompts/orchestrator-perfis.md): uma sessão econômica do [Classificador](prompts/classifier.md) escolhe modelo e effort dos papéis necessários na fase atual, usando somente o briefing e o recorte de [evidências de roteamento](docs/MODEL_ROUTING.md); valide o resultado antes de despachar, mesmo quando houver pins. O Orquestrador mantém a seleção do usuário no harness.
 6. Declare brevemente objetivo, raiz consumidora, limites e próximo passo. Execute apenas o modo pedido: análise ou planejamento não inicia implementação, fila de stories, despacho de Maker para implementar, instalação ou efeito externo. Um pedido genérico de análise também não inicia o painel de debate. A fila só começa pela escolha explícita **Executar fila sequencial** ou pela tarefa agendada que a repita, conforme o [playbook](prompts/orchestrator-playbook.md#fila-sequencial-de-stories).
@@ -15,7 +15,8 @@ description: Planeja, debate decisões e conduz mudanças por mecanismo com Orqu
 Quando a ativação para conduzir como Orquestrador não trouxer uma tarefa discernível nem um papel
 designado, faça uma triagem somente leitura limitada à raiz consumidora já identificada. Leia
 primeiro as instruções locais e procure fontes que declarem explicitamente o trabalho atual, como
-story ativa, ticket, branch ou artefato equivalente. Comece por sinais baratos: branch atual,
+`active_work_ref` em `_tl-orc/project/STATUS.md`, story ativa, ticket, branch ou artefato
+equivalente. Comece por sinais baratos: branch atual,
 índice do sprint ou board ativo e IDs de tarefa citados por essas fontes. Use nomes e metadados de
 arquivos apenas para reduzir as candidatas e leia por inteiro somente as fontes prováveis. Data de
 modificação ajuda a ordenar a busca, mas não torna uma tarefa autoritativa. Não percorra o backlog
@@ -28,7 +29,8 @@ comprovado uma release estável sucessora, destaque antes da triagem `instalada 
 release, o motivo nas notas e o impacto conhecido na fase atual, sem inventar urgência. Se não há
 tarefa explícita, ela é a primeira opção: **Atualizar tl-orchestrator**. Monte então o menu desta
 ativação e numere-o somente pelas opções mostradas: Planejar, Implementar e revisar uma story,
-Executar fila sequencial somente com board ou fila declarada, Debater e Outra tarefa. Não use
+Executar fila sequencial somente com board ou fila declarada, Discuss, Debater e Outra tarefa. A
+story pode ser uma Task ou um Deliverable do perfil Native. Não use
 números fixos nem ofereça fila para explorar backlog sem board.
 
 Uma tarefa explícita continua sendo a seleção do usuário: não a substitua pelo menu de atualização.
@@ -56,6 +58,14 @@ o backlog para inventá-lo. A escolha autoriza o painel consultivo somente leitu
 a execução da recomendação. Nenhum participante pode ser despachado antes de um resultado válido
 para Planner, Maker e Checker.
 
+Ofereça também **Discuss**. A escolha autoriza uma conversa entre Orquestrador e usuário para
+esclarecer objetivo, alternativas e decisões, sem despachar agentes, sem classificar e sem
+implementar. Quando a escrita em `_tl-orc/project/` estiver autorizada, o Orquestrador registra a
+síntese como Discussion e as decisões confirmadas conforme o
+[modelo de trabalho](docs/WORK_MODEL.md#discussões-e-decisões); em ativação somente leitura, a
+resposta é a entrega. Discuss não é Debater: o painel consultivo continua exigindo a escolha
+específica e a classificação `debate`.
+
 Se o usuário designou Classificador, Planner, Maker ou Checker sem informar uma tarefa discernível, limite a
 descoberta e as opções ao contrato desse papel e pergunte qual resultado compatível ele deseja.
 Não ofereça ao papel designado despachos, escrita ou revisão pertencentes ao Orquestrador.
@@ -69,5 +79,7 @@ Não ofereça ao papel designado despachos, escrita ou revisão pertencentes ao 
 - [Planner](prompts/planner.md): auditar e especificar.
 - [Maker](prompts/maker.md): implementar a spec autorizada.
 - [Checker report-only](prompts/checker-report-only.md): revisar de forma independente.
+- [Modelo de trabalho](docs/WORK_MODEL.md): perfil Native, coordenação em `_tl-orc/project/`,
+  Import Context e adapter BMAD.
 
 A skill é a entrada; cada contrato possui suas regras. Não duplique mecânica ou configurações pessoais aqui. BMAD não é requisito de ativação: se existir no consumidor, siga suas políticas locais e sua instalação oficial separada.

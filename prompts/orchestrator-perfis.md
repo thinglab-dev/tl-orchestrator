@@ -74,7 +74,8 @@ permitido no catálogo e selecionado pelo Classificador para aquela tarefa.
 
 ## Classificar e resolver
 
-1. Prepare um briefing curto com `story_id` (`null` apenas sem story), `phase`,
+1. Prepare um briefing curto com `story_id` (`null` apenas sem story; no perfil Native, o ID da
+   Task ou do Deliverable, como `T012` ou `D002`), `phase`,
    `context_revision`, `catalog_revision` e revisão do contrato/schema; intenção e modo autorizado;
    trabalho residual, riscos, critérios, provas existentes e faltantes; políticas, orçamento,
    pins e cadeias; `requested_roles` somente da fase atual; catálogo de pares autorizados; e o
@@ -191,7 +192,12 @@ separadamente. Confira acesso aos dois. Para Planner, Maker e Checker, inclua:
 - story/spec, decisões reservadas e estado base;
 - árvore, caminhos de escrita permitidos, evidências e arquivos protegidos;
 - portões, diretório de execução, recursos compartilhados e operações proibidas;
-- para Checker, base, diff inteiro, critérios congelados, schema e grau de independência.
+- para Checker, base, diff inteiro, critérios congelados, schema e grau de independência;
+- no perfil Native, `spec_revision`, `content_id` e `content_paths` da Task, o perfil de
+  verificação da spec e o conjunto inicial de contexto selecionado pelo
+  [modelo de trabalho](../docs/WORK_MODEL.md#carregamento-e-envelhecimento): `CONTEXT.md`, índice,
+  briefs das features afetadas e dependências diretas, unidade ativa e decisões referenciadas. O
+  tipo da Task não entra no briefing do Classificador como sinal de tier.
 
 Em **Debater**, use o dossiê comum e os limites do
 [playbook consultivo](orchestrator-playbook.md#debater); não forneça schema de aprovação.

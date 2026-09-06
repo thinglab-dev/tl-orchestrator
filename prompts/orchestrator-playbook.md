@@ -67,7 +67,13 @@ retomada. Não varra todos os backlogs nem escolha uma story apenas pela data.
 
 Uma ativação processa **no máximo uma** story. Considere a primeira story não concluída na ordem
 declarada pelo board e prossiga somente se ela estiver pronta, com dependências satisfeitas e sem
-decisão humana pendente. Se ela estiver bloqueada ou ambígua, não pule para outra por conveniência:
+decisão humana pendente. Quando o board for `_tl-orc/project/STATUS.md`, siga a
+[fila no perfil Native](../docs/WORK_MODEL.md#fila-sequencial-no-perfil-native): a ordem canônica
+é o `order` do Deliverable ou a ordem topológica por `depends_on` com desempate por ID; a tabela
+apenas localiza a candidata, e a Task oficial é relida antes do despacho; `cancelled` é terminal e
+não satisfaz dependentes; `permit_state_update` substitui `permit_board_update` como condição de
+avanço de estado e autoriza somente estado e visão central, nunca specs, decisões, contextos ou
+evidências. Se ela estiver bloqueada ou ambígua, não pule para outra por conveniência:
 registre o motivo e aguarde a decisão ou a atualização do board. Quando BMAD reger o módulo,
 execute primeiro a sincronização exigida pela política local e use somente o sprint daquele módulo.
 
@@ -95,6 +101,21 @@ publique, abra pull request, altere outro módulo ou acione um sistema externo p
 Depois de registrar a conclusão, encerre a ativação. Uma tarefa agendada pode despertar o método
 mais tarde para escolher a próxima story; o pacote não mantém um processo, heartbeat ou loop
 próprio.
+
+## Discuss
+
+**Discuss** é uma conversa entre Orquestrador e usuário para esclarecer objetivo, restrições,
+alternativas e decisões. Não despacha agentes, não chama o Classificador e não implementa; o
+Orquestrador usa a própria sessão. Distinga o que o usuário confirmou do que é hipótese ou dúvida.
+
+Quando a escrita em `_tl-orc/project/` estiver autorizada, registre a síntese como Discussion,
+com pergunta, referências de contexto, alternativas, decisões confirmadas, hipóteses, questões
+abertas e trabalho resultante, e grave cada decisão confirmada como Decision com `origin`
+apontando para a discussão. Conforme o trabalho amadurecer, proponha Deliverables e Tasks com
+`origin` na discussão, aguardando ratificação do corte. Uma Discussion nunca é apagada nem movida:
+`resolved` exige link de saída ou nota de ausência de trabalho resultante, e `superseded` aponta a
+sucessora. Em ativação somente leitura, a resposta é a entrega e nada é gravado. Discuss não
+substitui **Debater** nem a revisão de uma implementação.
 
 ## Debater
 
@@ -173,6 +194,14 @@ seu despacho quando o pedido se limita a planejamento. Depois de esclarecer a sp
 os papéis requeridos pela nova fase, ainda que riscos, garantias e restrições pareçam iguais. Um
 Planner pode justificar mais capacidade que a execução delimitada subsequente.
 
+No perfil Native, uma Task só entra em execução em `ready`, com spec conforme o
+[modelo de trabalho](../docs/WORK_MODEL.md#spec-antes-de-ready). O Orquestrador pode ser o autor
+da spec de uma Task delimitada e sem incerteza material, registrando `spec_author: orchestrator`;
+decomposição, incerteza relevante, pedido do usuário ou Deliverable exigem Planner. Aloque IDs
+apenas como sessão coordenadora, conferindo os existentes antes de avançar o contador, e nunca
+sobrescreva um arquivo existente. Selecione o conjunto inicial de contexto pelo índice de
+features, quando existir, e registre as ampliações que cada papel fizer.
+
 Despache Maker para implementar somente quando a spec estiver executável e a implementação autorizada. Decisão em aberto que muda produto, garantia ou escopo não deve ser herdada como acidente de implementação; ofereça **Debater** para apoiar a escolha do usuário.
 
 ## Conferir a entrega
@@ -232,6 +261,15 @@ Atribua os achados: correção no escopo ao Maker, spec inconsistente ao Planner
 
 Registre a evidência no artefato próprio da story: base/estado examinado, arquivos relevantes, critérios atendidos, comandos e exits, resultados de comparações/sondas, parecer e pendências. Declare separadamente o que foi observado, inferido e não verificado.
 
+No perfil Native, o registro de revisão em `project/evidence/Tnnn-rNN.md` preserva o parecer
+íntegro junto a `spec_revision`, `content_id`, `content_paths`, sessão, harness, modelo, effort,
+família e limitações de independência. Registrar o parecer e atualizar o estado não alteram o
+`content_id`; alteração material em um caminho coberto exige nova revisão. A Task só recebe
+`done` com portões executados, parecer `approved` vinculado ao `content_id` e autoridade de
+fechamento já concedida; um Deliverable só recebe `done` depois de verificar seus
+`integration_criteria`, não apenas por todas as Tasks estarem `done`. Quando a Task declarar
+`affects_context`, a atualização dos Feature Briefs afetados faz parte do fechamento.
+
 Com autorização para integrar, confira o resultado da integração antes da próxima ação. Mudanças no conteúdo validado exigem nova conferência proporcional. Status concluído depende dos portões, revisão independente e autoridade local de ratificação; um verde isolado não fecha a story.
 
-Se o pedido era somente planejamento, entregue o plano e encerre aí. Se houve interrupção, registre o ponto de retomada e preserve a árvore. A próxima sessão relê as fontes e o estado real; o registro ajuda a retomar, não executa continuidade por si só.
+Se o pedido era somente planejamento, entregue o plano e encerre aí. Se houve interrupção, registre o ponto de retomada e preserve a árvore. A próxima sessão relê as fontes e o estado real; o registro ajuda a retomar, não executa continuidade por si só. No perfil Native, o encerramento normal grava `released: true` no registro `coordinator`, e a retomada aplica a [tabela de recuperação](../docs/WORK_MODEL.md#transição-e-recuperação): tabela atrasada é reconstruída, referência ativa já concluída é reparada após conferir as evidências, unidade não encontrada é procurada antes de perguntar, e só estados incompatíveis ou evidência insuficiente interrompem a execução afetada.

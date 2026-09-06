@@ -2,7 +2,12 @@
 
 Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
-## [Unreleased]
+## [0.2.1] - 2026-09-05
+
+### Manutenção
+
+- Registra a rotina de fechamento do repositório fonte com publicação de release após
+  revisão e validação, sem ampliar permissões de contribuições de consumidores.
 
 ### Corrigido
 
@@ -40,4 +45,5 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   `docs/MODEL_ROUTING.md` e `docs/EVOLUTION.md`, atualiza o manifesto e exige novos hashes para os
   16 arquivos.
 
+[0.2.1]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.1.5...v0.2.0

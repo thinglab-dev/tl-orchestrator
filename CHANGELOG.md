@@ -4,6 +4,48 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-06
+
+### Adicionado
+
+- Perfil **Native** em `docs/WORK_MODEL.md`: hierarquia `Project → Deliverable → Task` com
+  Tasks standalone, tipos que sugerem a verificação inicial sem decidir modelo, effort ou método,
+  documentos de trabalho em `_tl-orc/project/`, estado oficial em cada Task com `STATUS.md`
+  derivado e cabeçalho de coordenação cooperativa presente também em projetos BMAD, recuperação
+  sem confirmação humana para desatualizações esperadas, identificação verificável do conteúdo
+  revisado (`content_id`) separada dos registros de controle, IDs sequenciais com recuperação
+  serial e bloqueio em colisão real, conclusão de Deliverable por critérios de integração.
+- Operação **Import Context**: `context/INDEX.md`, Feature Briefs por feature com estados
+  `current`, `stale` e `retired`, separação entre `planned`, `implemented` e `confirmed`, registro
+  `imports/IMPnnn.md` com correspondência bidirecional, regra de carregamento seletivo e
+  envelhecimento sem gravação em ativação somente leitura. **Migrate Work** fica definido apenas
+  como interface.
+- Modo **Discuss** no menu de ativação, distinto de **Debater**: conversa sem despacho nem
+  classificação.
+- `PROJECT.md` aceita `work_method` e `task_types`; `QUEUE.md` aceita `permit_state_update` e
+  `max_replans`, com `STATUS.md` como board no perfil Native.
+- Manifesto passa a 17 arquivos distribuídos.
+
+### Alterado
+
+- O contrato do Planner exige prova conforme o perfil de verificação: sonda contrafactual
+  obrigatória sempre que a garantia for comportamentalmente discriminável, qualquer que seja o
+  tipo; verificação por fontes, premissas ou inspeção nos demais tipos. As provas comportamentais
+  exigidas pelas garantias existentes são preservadas.
+- O Checker recebe `spec_revision`, `content_id` e `content_paths`, confere nas fontes as
+  afirmações de Feature Briefs relevantes à revisão e tem seu parecer preservado no registro de
+  revisão fora do schema, que permanece na versão 1.
+- O contrato de evolução exclui `_tl-orc/project/` de snapshot, mutação e migração de
+  atualizações, inclusive `auto_safe`.
+
+### Migração
+
+- `story_id` continua o nome do campo no schema de classificação, versão 2, e aceita IDs de Task
+  ou Deliverable do perfil Native; a transição para `work_id` fica planejada para uma versão 3.
+- Perfis sem `work_method` preservam suas fontes e autoridade; a atualização não cria
+  `_tl-orc/project/` nem migra unidades existentes.
+- `INSTALLATION.md` passa a registrar 17 hashes.
+
 ### Corrigido
 
 - O contrato do Planner exige sonda contrafactual, tarefas e estado auditado específicos por
@@ -65,4 +107,5 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 [0.2.1]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.0...v0.2.1
 [0.2.2]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.1...v0.2.2
+[0.3.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.2...v0.3.0
 [0.2.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.1.5...v0.2.0

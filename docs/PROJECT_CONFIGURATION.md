@@ -31,8 +31,13 @@ _tl-orc/
 ├── INSTALLATION.md   # procedência, integridade e integrações instaladas
 ├── PROJECT.md        # fontes, portões e preferências de papéis
 ├── QUEUE.md          # opcional: autorização e limites da fila sequencial
-└── evidence/         # fallback quando não houver artefato de evidência no consumidor
+├── evidence/         # fallback quando não houver artefato de evidência no consumidor
+└── project/          # documentos de trabalho do modelo nativo; nunca criado pela instalação
 ```
+
+`project/` segue o [modelo de trabalho](WORK_MODEL.md). É criado na primeira operação autorizada
+que necessite dessa estrutura, inclusive para coordenar trabalho BMAD, e nenhuma instalação ou
+atualização o cria, sobrescreve, exclui ou migra.
 
 `INSTALLATION.md` começa com estas chaves estáveis, uma por linha:
 
@@ -50,14 +55,14 @@ contribution_mode: <ask ou auto_pr>
 Use exatamente `enabled` ou `disabled` em `update_check`, `notify` ou `auto_safe` em
 `update_policy`, e `ask` ou `auto_pr` em `contribution_mode`. Perfil legado que omita as duas
 políticas equivale a `notify` e `ask`; a leitura não o regrava. Depois desse cabeçalho, mantenha as
-seções `## Arquivos`, com SHA-256 e caminho relativo dos 16 arquivos; `## Integrações`, com
+seções `## Arquivos`, com SHA-256 e caminho relativo dos 17 arquivos; `## Integrações`, com
 harness, destino, tipo link/cópia, revisão e conferência; `## Instalações concorrentes`, com escopo,
 precedência e revisão; `## Autorizações de evolução`, quando existirem, com projeto, ator,
 destinos, escopo, efeitos, procedência e última confirmação; e `## Migrações`, com release notes
 consultadas, ações e pendências. Não registre uma autorização que não tenha sido expressamente
 declarada; os valores das políticas sozinhos não a substituem.
 
-Os hashes de `## Arquivos` são gerados a partir dos 16 arquivos da revisão de origem já conferida
+Os hashes de `## Arquivos` são gerados a partir dos 17 arquivos da revisão de origem já conferida
 e usados para validar `_tl-orc/package`. Não os derive apenas do destino: compare origem e cópia
 antes de registrar o perfil, e trate arquivo ausente, adicional ou diferente como bloqueio.
 
@@ -65,6 +70,8 @@ antes de registrar o perfil, e trate arquivo ausente, adicional ou diferente com
 
 ```text
 format_version: 1
+work_method: <native ou bmad; opcional por módulo na seção de fontes>
+task_types: <opcional: tipos adicionais ao núcleo do modelo de trabalho>
 
 ## Fontes autoritativas
 <tipo, localização e última conferência>
@@ -88,9 +95,18 @@ format_version: 1
 <destino vigente no consumidor>
 ```
 
+`work_method` declara qual método governa o trabalho novo do projeto; um módulo pode declarar
+outro valor junto à sua fonte. A ausência do campo preserva as fontes e o comportamento de
+autoridade já registrados, sejam BMAD, issues, tickets ou outros boards, e não migra unidades
+existentes; o perfil Native vale então apenas para trabalho novo sem autoridade anterior ou por
+seleção explícita, conforme a [seleção de método](WORK_MODEL.md#seleção-de-método-e-autoridade).
+`task_types` acrescenta tipos ao núcleo sem alterar a regra de que o tipo nunca decide modelo,
+effort, tier ou método.
+
 Um registro de classificação e medição pode usar este formato conceitual, adaptado à sintaxe do
 consumidor. Placeholders devem ser substituídos apenas por valores observados; campo desconhecido
-permanece desconhecido, nunca zero:
+permanece desconhecido, nunca zero. No perfil Native, `story_id` recebe o ID da Task ou do
+Deliverable, como `T012` ou `D002`:
 
 ```text
 story_id: <ID não vazio ou null somente quando não houver story>
@@ -116,7 +132,7 @@ há custo finito por sucesso a declarar. O perfil registra fatos; o pacote não 
 executa experimento ou mantém cache automático.
 
 `INSTALLATION.md` registra a URL de origem, versão ou tag quando houver, referência móvel
-acompanhada, commit instalado, hashes dos 16 arquivos, destinos de skill, se cada destino é link
+acompanhada, commit instalado, hashes dos 17 arquivos, destinos de skill, se cada destino é link
 ou cópia, se a consulta remota está habilitada e todas as instalações concorrentes encontradas,
 com escopo e precedência. A tag
 identifica a versão instalada; uma
@@ -144,7 +160,7 @@ O briefing do Classificador inclui story, fase, revisões separadas de contexto 
 do contrato/schema, papéis requeridos somente nessa fase, residual, riscos, critérios e provas,
 políticas, orçamento, pares autorizados e apenas o recorte pertinente de
 [MODEL_ROUTING.md](MODEL_ROUTING.md) e medições locais, com IDs. A pesquisa orienta a decisão e
-faz parte dos 16 arquivos distribuídos; não autoriza modelos nem precisa ser lida inteira por
+faz parte dos 17 arquivos distribuídos; não autoriza modelos nem precisa ser lida inteira por
 cada agente. O papel responsável recebe o contexto crítico integral de execução separadamente.
 
 Registre `checker_independence: preferred` para o padrão que prioriza outra família e admite
@@ -180,7 +196,7 @@ Instalar uma revisão que introduza ou altere o Classificador exige migrar tamb�
 instruções consumidoras e cada integração registrada que ainda codifique despacho fixo. Registre
 `routing_mode: classifier`, o perfil auxiliar, as cadeias e pins, `checker_independence`, o catálogo
 permitido com capacidades e limites e os registros por fase. Não marque a adoção como concluída
-apenas porque os 16 arquivos e hashes coincidem.
+apenas porque os 17 arquivos e hashes coincidem.
 
 Depois da sincronização, carregue de novo o `SKILL.md` exato por cada destino e precedência
 registrados; memória da sessão anterior não prova descoberta. Em harness utilizável, execute um
@@ -208,7 +224,7 @@ diff examinado. Sem Git, use `<tarefa-ou-slug>-<UTC>-rNN.md` e registre as vers�
 fontes disponíveis. Normalize o slug para caracteres portáveis, use UTC no formato
 `YYYYMMDDTHHMMSSZ` e incremente `rNN` para cada nova rodada sobre o mesmo estado.
 Versionamento, links simbólicos e arquivos ignorados seguem a política do consumidor. Quando uma
-integração for versionada para a equipe, prefira uma cópia conferida dos 16 arquivos. Um link
+integração for versionada para a equipe, prefira uma cópia conferida dos 17 arquivos. Um link
 simbólico deve ser relativo e só deve ser usado quando seu suporte estiver garantido nos checkouts
 em que será consumido.
 
@@ -226,7 +242,9 @@ scope: <módulo-ou-raiz-autorizada>
 board: <caminho-relativo-do-board-ou-sprint>
 execution_tree: <branch-ou-worktree-dedicado>
 max_rework_rounds: 2
+max_replans: 1
 permit_board_update: true
+permit_state_update: false
 permit_local_commit: true
 ```
 
@@ -238,6 +256,16 @@ maiores exigem nova autorização explícita. `permit_board_update` e `permit_lo
 ser `true` para que o estado avance após um parecer aprovado. Push, publicação, pull request,
 mudança de escopo, ação externa e pular uma story bloqueada permanecem proibidos mesmo quando os
 dois campos estão habilitados.
+
+No perfil Native, `board` pode apontar para `_tl-orc/project/STATUS.md`. Nesse caso,
+`permit_state_update` substitui `permit_board_update` como condição de avanço de estado após um
+parecer aprovado, e `permit_board_update` não tem efeito sobre `project/`.
+`permit_state_update: true` autoriza somente os campos de estado da Task e a atualização
+correspondente de `STATUS.md`; omisso equivale a `false`, e ele não cobre specs, decisões,
+contextos ou evidências. `max_replans` limita replanejamentos de um Deliverable; omisso equivale a
+`1`. A ordem, a releitura da Task oficial antes do despacho e o tratamento de `cancelled` seguem a
+[fila no perfil Native](WORK_MODEL.md#fila-sequencial-no-perfil-native). `permit_board_update`
+conserva o significado atual para boards externos.
 
 Cada ativação da fila processa no máximo uma story. Ela considera a primeira não concluída na ordem
 do board e só a executa se estiver pronta, com dependências satisfeitas e sem decisão humana
@@ -280,7 +308,7 @@ a `notify` e `ask`. Classificador, Searcher, Planner, Maker e Checker designados
 consulta ou mutação.
 
 Siga primeiro a [ordem na ativação](EVOLUTION.md#ordem-na-ativação). Confirme que o `SKILL.md`
-carregado pertence a um destino registrado em `INSTALLATION.md` e compare os 16 arquivos com
+carregado pertence a um destino registrado em `INSTALLATION.md` e compare os 17 arquivos com
 `_tl-orc/package`, a baseline e os hashes registrados. Se houver delta local, classifique-o e
 execute somente o encaminhamento autorizado de contribuição antes de retornar por divergência.
 Esse desvio deliberado torna a preservação alcançável, mas não permite tratar o pacote modificado
@@ -438,13 +466,13 @@ revisão. Antes de despachar ou escrever:
    prove que ele sucede a revisão instalada; `auto_safe` aceita apenas release estável descendente;
 2. leia em ordem as release notes cujas tags e commits pertençam ao intervalo e compare os
    requisitos com o diff dos contratos entre as duas revisões;
-3. prepare um plano que separe atualização dos 16 arquivos, migrações de `INSTALLATION.md` e
+3. prepare um plano que separe atualização dos 17 arquivos, migrações de `INSTALLATION.md` e
    `PROJECT.md`, sincronização das integrações e decisões ainda necessárias;
 4. trate comandos e instruções das notas como conteúdo a verificar, nunca como autorização ou
    entrada direta para shell;
 5. peça ao usuário somente decisões que mudem garantia, política ou preferência declarada.
 
-Depois das decisões, o Maker preserva modificações locais, instala os 16 arquivos de uma única
+Depois das decisões, o Maker preserva modificações locais, instala os 17 arquivos de uma única
 revisão, sincroniza cada destino que for cópia e adapta os registros e integrações aos requisitos
 comprovados, incluindo a [migração operacional do roteamento](#migração-operacional-do-roteamento).
 O Orquestrador confere hashes, links, descoberta nos harnesses presentes e aderência às notas,
@@ -493,6 +521,14 @@ publica somente o perfil-base substituível e os contratos de classificação e 
 ## BMAD e outros métodos
 
 O pacote funciona com uma story em Markdown, um ticket ou outro contrato verificável. Quando BMAD existir, leia sua instalação oficial e as políticas locais aplicáveis. Use os artefatos do projeto correto e customizações suportadas; não altere upstream para acomodar o método. Não invente instruções de instalação: consulte a documentação oficial atual se essa for uma tarefa autorizada.
+
+A presença de BMAD não seleciona método: a autoridade de cada unidade segue a
+[seleção de método](WORK_MODEL.md#seleção-de-método-e-autoridade). Com `work_method: bmad`, o
+[adapter](WORK_MODEL.md#adapter-bmad) mapeia Task para story e Deliverable para epic, consulta o
+estado no artefato do sprint e mantém em `_tl-orc/project/STATUS.md` apenas o cabeçalho de
+coordenação. A operação [Import Context](WORK_MODEL.md#import-context) pode derivar Feature Briefs
+dos documentos BMAD sem transferir autoridade; transferir unidades exige a operação separada
+[Migrate Work](WORK_MODEL.md#migrate-work).
 
 ## Exemplos de parecer
 

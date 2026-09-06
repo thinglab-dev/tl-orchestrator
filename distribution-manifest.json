@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "package_file_count": 16,
+  "package_file_count": 17,
   "package_files": [
     "README.md",
     "SKILL.md",
@@ -17,6 +17,7 @@
     "schemas/review-result.schema.json",
     "docs/PROJECT_CONFIGURATION.md",
     "docs/MODEL_ROUTING.md",
-    "docs/EVOLUTION.md"
+    "docs/EVOLUTION.md",
+    "docs/WORK_MODEL.md"
   ]
 }

@@ -19,6 +19,10 @@ permanecem vigentes.
 - Produza provas proporcionais à garantia, incluindo testes de comportamento quando necessários. Use os portões declarados; não afrouxe guardas ou asserções para obter verde.
 - Registre comandos literais, diretórios, exits, resultados e limites no artefato próprio da story. Distingua verificação executada, impossibilidade de executar e hipótese ainda não provada.
 - Confira o diff inteiro e entregue alterações, evidências e pendências para revisão.
+- No perfil Native do [modelo de trabalho](../docs/WORK_MODEL.md), escreva somente nos caminhos
+  de escrita da spec, que definem os `content_paths`, e na seção de evidência da sua rodada. Não altere `status`, `state_revision`,
+  o cabeçalho de `STATUS.md`, decisões ou discussões; esses campos pertencem ao Orquestrador.
+  Registre as consultas de contexto que ampliou além do conjunto inicial recebido.
 
 ## Limites do papel
 

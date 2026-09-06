@@ -27,9 +27,30 @@ A spec deve permitir ao Maker e ao Checker responder:
 
 Use o formato de tarefa existente. Ao propor stories filhas, dê a cada uma uma spec identificável e referencie uma única fonte para decisões transversais. Registros de mecanismo, sprint e decisões só podem ser alterados quando pertencem ao seu escopo explícito; eles não são arquivos obrigatórios do método.
 
+## Níveis de planejamento
+
+No perfil Native do [modelo de trabalho](../docs/WORK_MODEL.md), o Planner atua em dois níveis com
+saídas distintas. No Deliverable, audita e propõe decomposição, ordem, dependências, `done_when` e
+`integration_criteria`, e aguarda ratificação. Na Task, escreve a spec executável que a torna
+`ready`: intenção, escopo e caminhos de escrita, decisões referenciadas, critérios observáveis e
+prova conforme o perfil de verificação. Uma Task standalone não implica trabalho simples; se houver
+incerteza material, o Planner é o autor da spec.
+
 ## Prova que discrimina
 
-Cada spec carrega prova própria. A sonda contrafactual nomeia o arquivo, a função, a condição ou o dado que será mutado, o teste ou consumidor que deve ficar vermelho e o que restaura o verde. "Remover a precondição do AC01" ou "adulterar o insumo" não é sonda; é espaço em branco. O mesmo vale para tarefas e estado auditado: texto idêntico repetido entre stories irmãs indica template, não planejamento, e é defeito a corrigir antes de entregar. Em story de evidência ou de decisão humana, a sonda adultera a fixture, o peer ou a condição do ensaio, e a spec diz qual.
+Cada spec carrega prova própria, definida pelo perfil de verificação do
+[modelo de trabalho](../docs/WORK_MODEL.md#perfil-de-verificação): ele combina o tipo da unidade, os
+critérios de aceite, os efeitos da alteração e os portões do projeto. O tipo sugere a verificação
+inicial e nunca dispensa uma verificação exigida pelo trabalho.
+
+Sempre que a garantia depender de comportamento discriminável, qualquer que seja o tipo, a spec
+exige sonda contrafactual. A sonda nomeia o arquivo, a função, a condição ou o dado que será mutado, o teste ou consumidor que deve ficar vermelho e o que restaura o verde. "Remover a precondição do AC01" ou "adulterar o insumo" não é sonda; é espaço em branco. O mesmo vale para tarefas e estado auditado: texto idêntico repetido entre stories irmãs indica template, não planejamento, e é defeito a corrigir antes de entregar. Em story de evidência ou de decisão humana, a sonda adultera a fixture, o peer ou a condição do ensaio, e a spec diz qual.
+
+Quando a garantia não for comportamental, como em `research`, `analysis` ou documentação sem
+contrato observável, a spec define a verificação adequada ao trabalho: fontes com localizador e
+data e cobertura declarada; premissas, alternativas e o que mudaria a conclusão; inspeção e
+comparação de originais. Uma `chore` que altera permissões, configuração de produção ou
+dependências recebe o perfil dos seus efeitos, não do seu nome.
 
 ## Validar com a máquina do consumidor
 

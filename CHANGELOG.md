@@ -4,6 +4,8 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-06
+
 ### Adicionado
 
 - Perfil **Native** em `docs/WORK_MODEL.md`: hierarquia `Project → Deliverable → Task` com
@@ -105,4 +107,5 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 [0.2.1]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.0...v0.2.1
 [0.2.2]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.1...v0.2.2
+[0.3.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.2...v0.3.0
 [0.2.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.1.5...v0.2.0

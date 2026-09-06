@@ -10,7 +10,9 @@ papéis classificados. Quando necessário, use sessão nova com Agy/Antigravity
 `gemini-3.8-flash-medium` / `medium`; política local ou pedido explícito do usuário pode substituir
 esse perfil após validação e registro. Não chame o Classificador para cada busca. O Searcher não
 decide, implementa, aprova ou despacha, e devolve apenas o resumo verificável previsto em
-[seu contrato](searcher.md). Busca trivial direta não exige agente.
+[seu contrato](searcher.md). Busca trivial direta — um único comando barato de saída curta — não
+exige agente; leitura de arquivos, diffs ou várias fontes exige, conforme
+[Contexto mínimo](orchestrator-playbook.md#contexto-mínimo-do-orquestrador).
 
 ## Perfil-padrão
 

@@ -36,8 +36,12 @@ não repete em seu próprio modelo a otimização econômica do Classificador. M
 nova classificação dos papéis necessários. Registros anteriores podem fornecer evidência, mas não
 executam cache, reclassificação ou continuidade automática.
 
-Quando uma pergunta exigir contexto antes da classificação, o Orquestrador pode despachar o
-Searcher sob demanda, em nova sessão, com o perfil fixado no [contrato do Searcher](searcher.md).
+Todo levantamento factual que custe contexto — localizar código, extrair trechos, mapear tarefas,
+conferir citações, resumir um documento — vai para o Searcher, em nova sessão, com o perfil fixado
+no [contrato do Searcher](searcher.md); o Orquestrador decide sobre o resumo recebido e não faz a
+busca ele mesmo. Busca trivial direta é um único comando barato de saída curta, como uma âncora por
+`grep` ou um `git log` de poucas linhas; ler um arquivo, um diff ou vários arquivos inteiros não é
+trivial. Veja [Contexto mínimo](orchestrator-playbook.md#contexto-mínimo-do-orquestrador).
 Confira o envelope e os erros do harness, a cobertura real e o estado de acesso: saída vazia ou
 consulta negada é bloqueada, não sucesso, e não exige que o Searcher tente responder sem acesso.
 O resumo orienta a decisão, mas não substitui leitura obrigatória, fontes críticas ou revisão
@@ -79,7 +83,7 @@ parada para o usuário.
 - **Escopo:** conclua o resultado autorizado e respeite a condição de parada. Somente análise ou planejamento não permite iniciar implementação ou despachos não pedidos.
 - **Um escritor por árvore:** inclua autores de specs e relatórios nessa regra. Não escreva na árvore enquanto outro agente a detiver. Árvores distintas ainda podem compartilhar recursos de teste e integração.
 - **Mecanismo inteiro:** decida a garantia observável, seus consumidores, dependências e ordem. Não chame uma peça sem consumidor de capacidade entregue. Divisão por tamanho deve respeitar o mecanismo e as regras locais.
-- **Prova própria:** leia o diff completo e valide os critérios de aceite na árvore atual. Autorrelato, silêncio de processo ou resultado de outra revisão não provam conclusão.
+- **Prova própria:** valide os critérios de aceite na árvore atual por amostra dirigida: `diff --stat`, relatório do Maker e um conjunto de asserções e citações escolhido por você e verificado pelo Searcher. O diff completo é lido pelo Checker, não por você. Autorrelato, silêncio de processo ou resultado de outra revisão não provam conclusão; uma amostra que contradiga o relato exige nova verificação antes do despacho seguinte.
 - **Revisão externa:** o Orquestrador despacha o Checker em nova sessão somente leitura, aplicando a [política de independência](orchestrator-perfis.md#independência-do-checker). Prefira família distinta do Maker; se a política permitir a mesma família após esgotar alternativas, registre a limitação. Uma exigência local de família distinta continua obrigatória. Não se autoatribua esse papel.
 - **Evidência por story:** preserve comandos, exits, contexto da árvore, parecer e pendências no artefato da tarefa. Um relato temporário não substitui o registro durável de uma execução. Em debate somente leitura, siga os limites de registro do modo consultivo.
 - **Estado e coordenação:** no perfil Native, a Task é dona do seu estado e `STATUS.md` é projeção mais cabeçalho de coordenação cooperativa. Escreva primeiro a unidade, depois a visão central; na retomada, reconcilie sem exigir confirmação humana para desatualizações esperadas. O registro `coordinator` não é lock: continue somente se for da própria sessão; nunca escreva sobre o registro não liberado de outra sessão sem transferência explícita; se estiver liberado ou não existir, registre a coordenação quando a operação autorizar escrita. Vincule cada parecer ao `content_id` revisado; alteração material posterior impede reusar o parecer para fechar a unidade.

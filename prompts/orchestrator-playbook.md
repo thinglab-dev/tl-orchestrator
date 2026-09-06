@@ -2,11 +2,33 @@
 
 Complemento do [contrato do Orquestrador](orchestrator.md). As raízes e os portões vêm do [projeto consumidor](../docs/PROJECT_CONFIGURATION.md).
 
+## Contexto mínimo do Orquestrador
+
+A conversa do Orquestrador relê seu contexto inteiro a cada chamada de ferramenta. O que mais o
+infla é o próprio Orquestrador lendo diffs, contratos, código e artefatos para "conferir". Por
+isso:
+
+- O Orquestrador **não faz trabalho pesado de busca ou leitura**: pede ao Searcher e decide sobre o
+  resumo. Uma pergunta por chamada, com fontes delimitadas, teto de linhas e formato
+  `arquivo:linha`; se a resposta não bastar, pergunta mais estreita, não leitura própria.
+- Saídas de ferramenta entram na conversa **filtradas**: os campos que decidem algo, nunca um
+  estado, recibo, parecer ou log inteiros. Logs vão para arquivo e a conversa recebe poucas linhas.
+- Portões, despachos e entrega rodam como **cadeias em segundo plano** com log em arquivo, lido uma
+  vez ao final.
+- Contratos e políticas são lidos **uma vez por sessão**, no mínimo exigido pela ativação; dúvida
+  posterior vira pergunta ao Searcher com teto curto.
+- Depois de cada unidade entregue, o Orquestrador anuncia um **ponto de compactação** e resume o
+  estado em poucas linhas, para que o usuário compacte a conversa se o cliente oferecer isso.
+
+Nada disso reduz a auditoria: o Checker continua lendo o diff completo, e a prova própria do
+Orquestrador é uma amostra dirigida verificada, não a ausência de conferência.
+
 ## Searcher sob demanda
 
-Quando faltar contexto factual para uma decisão, o Orquestrador pode consultar o Searcher antes ou
-durante preparação, debate ou classificação, respeitando pergunta concreta, fontes autorizadas,
-frescor e limites de tempo, chamadas e resposta. Registre cobertura, lacunas e acessos; falha de
+Quando faltar contexto factual para uma decisão, o Orquestrador consulta o Searcher — antes ou
+durante preparação, debate, classificação ou conferência — respeitando pergunta concreta, fontes
+autorizadas, frescor e limites de tempo, chamadas e resposta. É o caminho padrão, não a exceção:
+ler por conta própria fica reservado à busca trivial de um comando. Registre cobertura, lacunas e acessos; falha de
 ferramenta ou permissão fica explícita como parcial/bloqueada. O Searcher usa sessão separada e seu
 resumo é evidência orientadora, não prova única nem substituto de leitura obrigatória.
 
@@ -206,7 +228,7 @@ Despache Maker para implementar somente quando a spec estiver executável e a im
 
 ## Conferir a entrega
 
-Leia todos os acréscimos e remoções, incluindo arquivos novos que um diff de rastreados omite. Compare o resultado com os critérios de aceite e verifique os consumidores do comportamento alterado. Em uma retirada, confira ausência de dependências e preservação do material que deveria ficar.
+Confira que todos os acréscimos e remoções, incluindo arquivos novos que um diff de rastreados omite, estão no material entregue ao Checker. Compare o resultado com os critérios de aceite por amostra dirigida verificada pelo Searcher, e verifique os consumidores do comportamento alterado pelo mesmo caminho; a leitura integral do diff pertence ao Checker. Em uma retirada, confira ausência de dependências e preservação do material que deveria ficar.
 
 Derive a verificação dos riscos e contratos afetados, inclusive quem constrói ou consome tipos/configurações alterados. Execute os portões existentes definidos para a tarefa; uma alteração documental pode ser comprovada por inspeção, comparação de originais, referências e exportação. Não invente uma suíte de programação para validar documentos.
 

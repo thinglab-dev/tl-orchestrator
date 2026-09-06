@@ -4,6 +4,16 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+### Alterado
+
+- **Searcher primeiro e contexto mínimo do Orquestrador**: todo levantamento que custe contexto vai
+  ao Searcher e o Orquestrador decide sobre o resumo; a invariante de prova própria passa a ser
+  amostra dirigida verificada (o diff completo é do Checker); saídas de ferramenta filtradas,
+  cadeias em segundo plano, contratos lidos uma vez por sessão e ponto de compactação após cada
+  unidade entregue. Nova seção `Contexto mínimo do Orquestrador` no playbook; `searcher.md` pede
+  formato curto `arquivo:linha`. Motivado por medição de um consumidor: 120 M tokens lidos do cache
+  em 94 minutos, a maior parte por leitura própria do Orquestrador.
+
 ## [0.3.0] - 2026-09-06
 
 ### Adicionado

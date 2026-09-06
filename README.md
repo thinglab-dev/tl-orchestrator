@@ -2,6 +2,12 @@
 
 Um método documental para planejar, debater decisões, implementar e revisar mudanças com Orquestrador, Planner, Maker e Checker. Usa agentes e portões já disponíveis no projeto consumidor. A distribuição contém documentos Markdown, schemas JSON e licença; não precisa de linguagem de programação, runtime próprio ou instalação do projeto de origem.
 
+O Orquestrador é um **coordenador leve**: conversa, decide, despacha e valida evidências. Pesquisa
+não trivial, planejamento, implementação, execução de portões e a auditoria completa do diff ficam
+com Searcher, Planner, Maker e Checker; consulta trivial, comando curto de coordenação e a amostra
+crítica dirigida continuam na sessão dele. Ele não é fallback de nenhum papel, e delegar
+redistribui trabalho e custo entre sessões em vez de prometer consumo zero.
+
 O Orquestrador mantém o harness/modelo/effort selecionado pelo usuário. Um **Classificador
 econômico separado** escolhe modelo e effort dos papéis necessários em cada fase, por harness,
 dentro do catálogo permitido. Ele recebe apenas o briefing e um recorte identificado da
@@ -267,9 +273,9 @@ flowchart TD
     P -->|Propõe spec e corte| R["Orquestrador ratifica o corte"]
     D -->|Spec já executável| R
     R -->|Despacha implementação autorizada| M["Maker · Codex → Claude → Agy"]
-    M -->|Diff e evidências| V["Orquestrador confere e verifica"]
+    M -->|Diff e evidências| V["Orquestrador valida evidências e amostra"]
     V -->|Correção necessária no escopo| M
-    V -->|Nova sessão; prefere outra família| C["Checker · Agy → Claude → Codex"]
+    V -->|Nova sessão, diff completo; prefere outra família| C["Checker · Agy → Claude → Codex"]
     C -->|Parecer| J["Orquestrador valida o parecer"]
     J -->|Parecer inválido: solicitar nova resposta| C
     J -->|Correção de implementação| M
@@ -278,6 +284,12 @@ flowchart TD
     J -->|Sem ações pendentes e com autorização| I["Orquestrador integra e confere"]
     I -->|Entrega e evidências| U
 ```
+
+O Checker recebe base, head e o diff completo e responde pela auditoria integral; um parecer
+aprovado afirma cobertura completa, e o que não pôde ser examinado vira pendência explícita. O
+Orquestrador valida identidade, cobertura, portões e parecer e confere uma amostra crítica dirigida
+aos pontos decisivos, sem repetir a leitura inteira nem aceitar autorrelato como prova. Evidência
+insuficiente vira pedido de esclarecimento ao papel responsável, não trabalho assumido por ele.
 
 ### Fila sequencial
 

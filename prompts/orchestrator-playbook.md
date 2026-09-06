@@ -26,9 +26,9 @@ para. A contribuição não limpa a instalação e o delta continua bloqueando a
 
 Em `ask`, apresente o patch e o plano. Em `auto_pr`, somente autoridade expressa para o mesmo
 projeto, ator, destino, escopo, commit, push e draft PR permite chegar aos efeitos externos.
-Conduza Maker, prova própria e Checker antes de buscar duplicata e publicar. Duplicata existente
-impede novo PR; não modifique trabalho de terceiro nem reabra rejeitado. Sem permissão comprovada,
-pare sem configurar fork. Nunca faça merge automático. Feature nova depende de intenção delimitada
+Conduza Maker, validação de evidências e Checker antes de buscar duplicata e publicar. Duplicata
+existente impede novo PR; não modifique trabalho de terceiro nem reabra rejeitado. Sem permissão
+comprovada, pare sem configurar fork. Nunca faça merge automático. Feature nova depende de intenção delimitada
 e aprovada; suspeita não autoriza desenvolvimento.
 
 Sem delta ou outro bloqueio, `notify` apenas relata. `auto_safe` considera somente release estável
@@ -175,32 +175,70 @@ Planner pode justificar mais capacidade que a execução delimitada subsequente.
 
 Despache Maker para implementar somente quando a spec estiver executável e a implementação autorizada. Decisão em aberto que muda produto, garantia ou escopo não deve ser herdada como acidente de implementação; ofereça **Debater** para apoiar a escolha do usuário.
 
-## Conferir a entrega
+## Validar a entrega
 
-Leia todos os acréscimos e remoções, incluindo arquivos novos que um diff de rastreados omite. Compare o resultado com os critérios de aceite e verifique os consumidores do comportamento alterado. Em uma retirada, confira ausência de dependências e preservação do material que deveria ficar.
+A auditoria integral do diff é do Checker e a execução dos portões é do Maker. Sua conferência é de
+segunda ordem: verificar que a prova existe, cobre o que devia cobrir e é verificável, sem refazer a
+leitura completa do diff nem reexecutar as suítes.
 
-Derive a verificação dos riscos e contratos afetados, inclusive quem constrói ou consome tipos/configurações alterados. Execute os portões existentes definidos para a tarefa; uma alteração documental pode ser comprovada por inspeção, comparação de originais, referências e exportação. Não invente uma suíte de programação para validar documentos.
+Comece pela identidade do que foi provado: base e head, árvore e branch, arquivos alterados,
+adicionados e removidos. Compare essa lista com o que o Maker relatou e com o que o Checker examinou;
+arquivo novo omitido por um diff de rastreados é divergência a esclarecer, não detalhe. Confira que
+os portões executados são os declarados para a tarefa, com comando literal, diretório e exit real, e
+que cada critério de aceite tem uma prova associada.
+
+Depois, confira uma amostra crítica dirigida. Escolha-a pelos riscos, não pelo tamanho: os pontos
+decisivos da garantia, os consumidores do comportamento alterado, o que uma retirada deveria
+preservar e os achados de maior severidade do parecer. A amostra serve para detectar prova
+fabricada, superficial ou desalinhada da intenção; não é uma segunda auditoria completa e não
+substitui a do Checker.
+
+Derive dos riscos e contratos afetados a verificação exigida, inclusive de quem constrói ou consome
+tipos e configurações alterados, e declare-a no briefing de quem vai executá-la. Uma alteração
+documental pode ser comprovada por inspeção, comparação de originais, referências e exportação; não
+invente uma suíte de programação para validar documentos.
+
+Quando a garantia depende de teste de comportamento, exija do Maker a prova de que ele discrimina o
+defeito por sonda prevista ou equivalente, com cada passo registrado: confirmar a alteração de fato,
+observar a falha esperada, recuperar o conteúdo original e observar a passagem, em cópia isolada ou
+com restauração segura, conferindo o diff ao final, inclusive após interrupções. Falha de compilação
+ou teste que não executou não prova discriminação. Valide esse registro; se ficar ambíguo, peça a
+repetição ou a contraprova a quem tem o papel, em vez de executá-la no lugar dele.
+
+Evidência ausente, inconsistente ou não verificável não vira aprovação nem tarefa sua: identifique o
+papel responsável, peça o esclarecimento ou a prova que falta e mantenha a entrega em aberto.
 
 Antes do Checker, classifique a fase `review` pelo alcance do mecanismo, riscos e contraprovas
 necessárias, não apenas pelo tamanho do diff. O Checker continua sempre em sessão nova, somente
 leitura, e sua cadeia conserva a preferência publicada e a política de independência.
 
-Quando a garantia depende de teste de comportamento, prove pessoalmente que ele discrimina o defeito por sonda prevista ou equivalente: confirme a alteração de fato, observe a falha esperada, recupere o conteúdo original e observe a passagem. Falha de compilação ou teste que não executou não prova discriminação. Use uma cópia isolada ou mecanismo seguro de restauração e confira o diff ao final, inclusive após interrupções.
-
 ## Medir e atribuir falhas
+
+Estas regras valem para quem executa portões e medições, normalmente o Maker. O Orquestrador as
+declara no briefing e depois as valida no registro recebido; reexecutar a suíte para conferir não é
+sua função, e um relato que não permita essa validação é motivo para pedir a prova de novo.
 
 Mantenha a árvore estável durante portões. Serialize suítes e medições que disputam CPU, serviços, banco ou locks, inclusive entre worktrees. Verifique atividade e obtenha uma janela ociosa; não encerre processos alheios para fabricá-la.
 
 Registre o comando literal, diretório, resultado e exit code real. Um pipe para filtrar saída pode esconder a falha do comando original: capture o resultado antes de resumir. Não deduza conclusão pelo nome de um log ou por uma mensagem citada nele.
 
-Antes de chamar um vermelho de regressão, leia o teste e investigue o caminho causal, dependências e ambiente. Compare com a base apropriada sob condições equivalentes. A ausência de edição no arquivo que falhou não prova que a mudança é inocente. Se não puder atribuir, registre como não atribuído. Não repita indefinidamente até obter verde nem descarte amostras ruins.
+Antes de chamar um vermelho de regressão, leia o teste e investigue o caminho causal, dependências e ambiente. Compare com a base apropriada sob condições equivalentes. A ausência de edição no arquivo que falhou não prova que a mudança é inocente. Se não puder atribuir, registre como não atribuído. Não repita indefinidamente até obter verde nem descarte amostras ruins. Essa investigação pertence a quem executou o portão; o Orquestrador não trata um vermelho sem atribuição como regressão nem como inocência e devolve a atribuição ao papel responsável.
 
 ## Revisão externa
 
 Esta seção e seu schema regem a revisão de entrega. As opiniões consultivas de
 [Debater](#debater) seguem o formato próprio daquele modo e não têm valor de aprovação.
 
-Entregue ao Checker o contrato, a intenção congelada, base, diff completo e evidências pertinentes. Não dirija sua primeira leitura para uma conclusão; memórias e relatos antigos entram apenas depois da inspeção independente das fontes atuais.
+Entregue ao Checker o contrato, a intenção congelada, base, head, diff completo e evidências pertinentes. A auditoria integral desse diff é responsabilidade dele, não sua: entregue-o inteiro, por caminhos legíveis, incluindo arquivos novos e removidos, e não o reduza a um recorte conveniente. Não dirija sua primeira leitura para uma conclusão; memórias e relatos antigos entram apenas depois da inspeção independente das fontes atuais.
+
+Declare no briefing que uma parte não examinada é lacuna material: ela vai ao parecer como
+`verificacao_pendente:` dirigido a `human` e impede `approved`. Assim, `approved` afirma cobertura
+completa do diff entregue, e o Orquestrador valida essa afirmação por identidade da base e do head,
+correspondência entre os arquivos entregues e as localizações citadas no parecer, portões declarados
+e amostra crítica dirigida, sem repetir a leitura integral. Parecer genérico, sem localização
+verificável ou incompatível com o diff entregue não é revisão cumprida: peça o esclarecimento
+necessário e, se a lacuna for da própria revisão, obtenha uma nova revisão independente em vez de
+completá-la você mesmo.
 
 Preserve a resposta original do harness junto à evidência da tarefa. Se ele envolver o parecer
 em um envelope de transporte, identifique seu campo final pela documentação ou pelo contrato

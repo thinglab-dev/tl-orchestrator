@@ -2,6 +2,24 @@
 
 Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
+## [Unreleased]
+
+### Alterado
+
+- O Orquestrador passa a ser um coordenador leve: pesquisa não trivial, planejamento,
+  implementação, execução de portões e auditoria completa do diff são delegadas aos papéis
+  próprios, enquanto conversa, decisão, briefing, consulta trivial, comando curto de coordenação e
+  validação de evidências permanecem na sessão de coordenação.
+- A auditoria integral do diff passa a ser responsabilidade declarada do Checker, que recebe base,
+  head e o diff completo; parte não examinada vira `verificacao_pendente:` e impede `approved`. O
+  Orquestrador valida identidade, cobertura, portões e parecer e confere uma amostra crítica
+  dirigida, exigindo esclarecimento quando a evidência for insuficiente, sem refazer o trabalho
+  pesado nem aceitar autorrelato como prova.
+- O perfil publicado fica explícito como padrão substituível: instrução do usuário ou política do
+  consumidor pode reordenar as cadeias e remover um harness inteiro das rotas e dos fallbacks, sem
+  tratar a remoção como indisponibilidade a contornar. O Orquestrador conserva a seleção do usuário
+  e não é fallback de nenhum papel; cadeia esgotada bloqueia e devolve a decisão.
+
 ## [0.2.2] - 2026-09-05
 
 ### Corrigido

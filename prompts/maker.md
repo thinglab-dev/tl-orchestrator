@@ -17,8 +17,8 @@ permanecem vigentes.
 - Entregue o mecanismo completo dentro do escopo. Não invente requisitos, não inicie stories futuras e não edite decisões reservadas ao Orquestrador ou ao usuário.
 - Preserve trabalho preexistente e um escritor por árvore. Uma alteração inesperada exige esclarecer propriedade antes de sobrescrever.
 - Produza provas proporcionais à garantia, incluindo testes de comportamento quando necessários. Use os portões declarados; não afrouxe guardas ou asserções para obter verde.
-- Registre comandos literais, diretórios, exits, resultados e limites no artefato próprio da story. Distingua verificação executada, impossibilidade de executar e hipótese ainda não provada.
-- Confira o diff inteiro e entregue alterações, evidências e pendências para revisão.
+- Registre base, head, comandos literais, diretórios, exits, resultados e limites no artefato próprio da story. Distingua verificação executada, impossibilidade de executar e hipótese ainda não provada.
+- Confira o diff inteiro e entregue alterações, evidências e pendências para revisão. O Orquestrador valida seu registro e confere uma amostra dirigida, sem reexecutar seus portões; um relato que não permita essa validação volta para você.
 
 ## Limites do papel
 

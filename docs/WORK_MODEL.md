@@ -193,7 +193,9 @@ features de escopo global na área global e as demais na área correspondente.
 
 ## Seleção de método e autoridade
 
-`PROJECT.md` declara `work_method: native` ou `work_method: bmad` para o projeto ou por módulo.
+`PROJECT.md` declara `work_method: native` ou `work_method: bmad` para a área global; uma área
+cadastrada em `## Work Areas` só pode declarar outro valor na sua linha do cadastro, como padrão para
+trabalho novo daquela área.
 Cada unidade de trabalho tem uma única autoridade, registrada nela mesma em `method`. A seleção
 segue esta ordem:
 
@@ -268,8 +270,9 @@ Nenhuma dessas situações exige, por si só, confirmação humana.
 ### Coordenação cooperativa
 
 O registro `coordinator` é um protocolo cooperativo. Não é lock, lease nem contador atômico, e não
-impede sobrescrita concorrente. A primeira versão suporta uma sessão coordenadora por área de
-trabalho, com cooperação entre harnesses. Ausência de escrita por qualquer intervalo não indica
+impede sobrescrita concorrente. A primeira versão suporta uma única sessão coordenadora por
+árvore do repositório, registrada no `STATUS.md` global e válida para todas as áreas, com cooperação
+entre harnesses. Ausência de escrita por qualquer intervalo não indica
 sessão encerrada.
 
 Antes de qualquer escrita em `project/`, o Orquestrador confere o registro e aplica:

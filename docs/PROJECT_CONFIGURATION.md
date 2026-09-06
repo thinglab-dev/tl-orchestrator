@@ -70,7 +70,7 @@ antes de registrar o perfil, e trate arquivo ausente, adicional ou diferente com
 
 ```text
 format_version: 1
-work_method: <native ou bmad; opcional por módulo na seção de fontes>
+work_method: <native ou bmad; método padrão da área global e herdado pelas áreas cadastradas que o omitirem>
 task_types: <opcional: tipos adicionais ao núcleo do modelo de trabalho>
 
 ## Fontes autoritativas
@@ -95,8 +95,9 @@ task_types: <opcional: tipos adicionais ao núcleo do modelo de trabalho>
 <destino vigente no consumidor>
 ```
 
-`work_method` declara qual método governa o trabalho novo do projeto; um módulo pode declarar
-outro valor junto à sua fonte. A ausência do campo preserva as fontes e o comportamento de
+`work_method` declara qual método governa o trabalho novo da área global; uma área cadastrada em
+`## Work Areas` pode declarar outro valor exclusivamente na sua linha do cadastro, e o herda quando
+omite. A ausência do campo preserva as fontes e o comportamento de
 autoridade já registrados, sejam BMAD, issues, tickets ou outros boards, e não migra unidades
 existentes; o perfil Native vale então apenas para trabalho novo sem autoridade anterior ou por
 seleção explícita, conforme a [seleção de método](WORK_MODEL.md#seleção-de-método-e-autoridade).

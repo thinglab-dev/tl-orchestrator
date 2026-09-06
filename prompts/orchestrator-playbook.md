@@ -4,11 +4,22 @@ Complemento do [contrato do Orquestrador](orchestrator.md). As raízes e os port
 
 ## Searcher sob demanda
 
-Quando faltar contexto factual para uma decisão, o Orquestrador pode consultar o Searcher antes ou
-durante preparação, debate ou classificação, respeitando pergunta concreta, fontes autorizadas,
-frescor e limites de tempo, chamadas e resposta. Registre cobertura, lacunas e acessos; falha de
-ferramenta ou permissão fica explícita como parcial/bloqueada. O Searcher usa sessão separada e seu
-resumo é evidência orientadora, não prova única nem substituto de leitura obrigatória.
+Para questão trivial ou contexto já disponível, consulte diretamente a fonte pertinente. Quando o
+levantamento factual não for trivial, prefira o Searcher sob demanda a despachar Planner apenas para
+coletar informações: formule pergunta concreta, delimite as fontes autorizadas e respeite o
+contrato, os perfis e a autoridade vigentes, o frescor e os limites de tempo, chamadas e resposta.
+Essa busca não aciona o Classificador. Registre cobertura, lacunas e acessos; falha de ferramenta
+ou permissão fica explícita como parcial/bloqueada. O Searcher usa sessão separada e seu resumo é
+evidência orientadora, não prova única nem substituto de leitura obrigatória.
+
+Na mesma sessão, não releia fontes inalteradas sem uma causa concreta. Ainda assim, confira
+criticamente os fatos decisivos na fonte adequada e, em retomada, renove o estado que possa ter
+mudado; o registro anterior orienta a retomada, mas não substitui essa conferência.
+
+Para cada papel, entregue somente o contexto necessário à sua tarefa. Ao Checker, preserve também
+o diff completo, inclusos arquivos novos, por caminhos legíveis e sem truncar a prova. Só relate
+métricas de uso, cache ou tokens de raciocínio quando o envelope do harness os informar; bytes não
+equivalem a tokens, custo não medido é desconhecido e não justifica alegar percentual de economia.
 
 ## Evolução na ativação
 

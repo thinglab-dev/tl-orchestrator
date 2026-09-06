@@ -2,6 +2,14 @@
 
 Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
+## [Unreleased]
+
+### Alterado
+
+- O playbook orienta a coleta factual eficiente com Searcher sob demanda, renovação crítica de
+  contexto e briefings mínimos por papel, preservando para o Checker a prova completa e limitando
+  métricas de uso ao que o harness efetivamente reporta.
+
 ## [0.2.0] - 2026-09-05
 
 ### Adicionado

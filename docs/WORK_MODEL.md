@@ -228,12 +228,15 @@ A Task Native é dona de `status` e de `state_revision`, um inteiro que cresce a
 - **Tabela de Tasks nativas:** derivada das Tasks, reconstruível a qualquer momento e nunca editada
   como fonte. Existe somente quando há Tasks nativas. Colunas: `id`, `type`, `deliverable`,
   `status`, `depends_on`, `blocked_by`, `state_revision`, `last_evidence`.
-- **Cabeçalho de coordenação:** presente tanto em `native` quanto em `bmad`.
+- **Cabeçalho de coordenação:** presente tanto em `native` quanto em `bmad`. O bloco abaixo é o
+  cabeçalho do `STATUS.md` **global**; no modo multiárea, `<id>` é a referência qualificada
+  `<area_id>:<id>` conforme [Áreas de trabalho](#áreas-de-trabalho), e o `STATUS.md` de módulo não
+  tem `coordinator` e usa o template próprio em [Templates](#templates).
 
 ```text
 format_version: 1
 work_method: <native|bmad>
-active_work_ref: <method>/<unit_type>/<id>@<source_location>
+active_work_ref: <method>/<unit_type>/<id ou area_id:id no modo multiárea>@<source_location>
 current_role: <orchestrator|planner|maker|checker|none>
 next_action: <frase curta>
 coordinator:
@@ -672,7 +675,7 @@ status: open
 ### Evidence round
 
 ```text
-task: Tnnn
+unit: <Tnnn no modo sem cadastro | area_id:Tnnn no modo multiárea>
 round: rNN
 spec_revision:
 content_id:

@@ -17,7 +17,7 @@ onde o perfil é declarado.
 | Entidade | Definição | Campos |
 | :--- | :--- | :--- |
 | `Project` | Contexto permanente: objetivos, restrições e regras transversais. | `CONTEXT.md` |
-| `Deliverable` | Resultado que reúne Tasks e tem condição própria de conclusão. | `id`, `goal`, `done_when`, `integration_criteria`, `tasks`, `order`, `status`, `origin`, `decisions` |
+| `Deliverable` | Resultado que reúne Tasks e tem condição própria de conclusão. | `id`, `method`, `goal`, `done_when`, `integration_criteria`, `tasks`, `order`, `status`, `origin`, `decisions` |
 | `Task` | Unidade executável com resultado verificável. | `id`, `type`, `deliverable` ou `standalone: true`, `method`, `status`, `state_revision`, `depends_on`, `blocked_by`, `origin`, `decisions`, `spec_author`, `spec_revision`, `rework_round`, `affects_context`, `content_id`, `content_paths` |
 | `Standalone Task` | Task sem Deliverable. Não implica tier `simple`. | os mesmos de Task |
 | `Decision` | Decisão consolidada com justificativa. | `id`, `kind`, `status`, `context`, `options`, `choice`, `rationale`, `origin` |
@@ -190,9 +190,10 @@ até reconciliação explícita das referências; não há sufixo automático.
 
 `ready` exige spec com intenção; escopo e caminhos de escrita, que o autor da spec registra em
 `content_paths` antes da execução; decisões vigentes referenciadas;
-critérios observáveis; prova conforme o [perfil de verificação](#perfil-de-verificação); e os
-briefs afetados em `affects_context` quando existir índice de contexto. A exigência vale
-independentemente de quem escreveu a spec.
+critérios observáveis; prova conforme o [perfil de verificação](#perfil-de-verificação); e a
+declaração `affects_context` sempre que a operação Import Context estiver ativa no projeto, com a
+lista dos briefs afetados ou explicitamente vazia quando nenhum brief for afetado. A exigência
+vale independentemente de quem escreveu a spec.
 
 `spec_author: orchestrator` é permitido para Task delimitada, sem incerteza material e coberta
 pelas regras existentes. Decomposição, incerteza relevante, pedido do usuário ou Deliverable
@@ -461,6 +462,7 @@ content_id: <unknown até a implementação>
 
 ```text
 id: Dnnn
+method: native
 goal:
 done_when:
 integration_criteria:

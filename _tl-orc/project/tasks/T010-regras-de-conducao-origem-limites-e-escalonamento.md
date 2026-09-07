@@ -3,18 +3,18 @@ type: fix
 deliverable: none
 standalone: true
 method: native
-status: in_progress
-state_revision: 7
+status: done
+state_revision: 9
 depends_on: [T009]
 blocked_by: []
 origin: user (2026-09-07, durante T009: "se for necessário, salva no prompt do orchestrator")
 decisions: []
 spec_author: orchestrator
-spec_revision: 8ca85b60ef1c1002 (s3; s2 8ecaf0f6b411ac26 aprovada em r03; s1 eb1c10c039d4d8e6 aprovada em r02)
-rework_round: 3
+spec_revision: 815f98e598b30729 (s4; s3 8ca85b60ef1c1002 revisada em r04; s2 8ecaf0f6b411ac26 aprovada em r03; s1 eb1c10c039d4d8e6 aprovada em r02)
+rework_round: 4
 affects_context: []
-content_paths: [prompts/orchestrator.md, prompts/orchestrator-perfis.md, prompts/orchestrator-playbook.md, prompts/checker-report-only.md, prompts/searcher.md, schemas/classification-result.schema.json, CHANGELOG.md]
-content_id: 0de10d60149cf7c038a0954c6aec302c9fcd111e:bea29257fea4b474
+content_paths: [prompts/orchestrator.md, prompts/orchestrator-perfis.md, prompts/orchestrator-playbook.md, prompts/checker-report-only.md, prompts/searcher.md, prompts/classifier.md, schemas/classification-result.schema.json, CHANGELOG.md]
+content_id: 4ede3a982a12cee02cc7e652b6e43c4a60c0de92:21768d877bbc9055
 worktree: branch fix/t010-conduction-rules em árvore dedicada (um escritor por árvore; T009 segue na branch analysis/t009-semantic-validation)
 
 ## Finding
@@ -38,15 +38,15 @@ AC03 Limite das provas mecânicas: em `orchestrator-playbook.md#revisão-externa
 AC04 Escopo de leitura: em `checker-report-only.md` e na regra geral de `orchestrator.md`, os papéis leem somente a raiz consumidora e a raiz do pacote; qualquer outra fonte precisa constar explicitamente no briefing; leitura fora desse escopo é desvio a declarar no parecer ou relatório.
 AC05 Coerência: nenhuma contradição com reclassificação por fase, independência (preferred/required), regra de que o Orquestrador nunca escolhe modelo/effort, e com o escopo de T007/T008 (que permanecem separadas); SKILL.md e demais arquivos só remetem.
 AC06 Portões: validador verde; manifesto e schemas inalterados; CHANGELOG em Unreleased sem menção a ferramenta ou autoria; sondas por leitura: (a) briefing com origem genérica → o texto o rejeita; (b) quarto rework com achado da mesma classe → o texto manda escalar; (c) Checker que leu fora da raiz sem autorização → o texto manda declarar desvio.
-AC07 Searcher classificado: a regra "nunca escolhe modelo ou effort por conta própria" passa a cobrir também o Searcher sob demanda: `orchestrator-perfis.md#searcher-sob-demanda` e o parágrafo do Searcher em `orchestrator.md` deixam de mandar usar um perfil fixo sem chamar o Classificador; o Searcher recebe modelo e effort de uma classificação da fase (papel `searcher`, admitido no schema de classificação como papel auxiliar, sem tier de trabalho) ou de um pin explícito do usuário ou do consumidor, ainda assim passado ao Classificador como restrição; busca trivial direta continua sem agente; a única exceção de inicialização com perfil fixo é a do próprio Classificador, dita explicitamente. Se o schema de classificação precisar admitir `searcher` em `roles`, a mudança é aditiva (schema_version 2 mantida) e o manifesto permanece com 17 arquivos; `content_paths` passa a incluir `schemas/classification-result.schema.json` e `prompts/searcher.md` se e somente se essa admissão for necessária.
+AC07 Searcher classificado: a regra "nunca escolhe modelo ou effort por conta própria" cobre também o Searcher sob demanda: `orchestrator-perfis.md#searcher-sob-demanda`, o parágrafo do Searcher em `orchestrator.md` e `prompts/searcher.md` deixam de fixar perfil; o Searcher recebe modelo e effort de uma classificação da fase ou de pin explícito do usuário ou do consumidor, ainda assim passado ao Classificador como restrição; a classificação da fase cobre as buscas daquela fase; busca trivial direta continua sem agente; a única exceção de inicialização com perfil fixo é a do próprio Classificador, dita explicitamente. O papel `searcher` entra no schema de classificação de forma aditiva (`schema_version` 2, `additionalProperties: false` preservado) com a MESMA estrutura dos demais papéis, inclusive `tier`, cuja semântica para o Searcher é o dimensionamento da consulta (abrangência, risco de fonte e custo da busca), não um tier de trabalho; `prompts/classifier.md` entra no escopo para remover a exclusão do Searcher de `requested_roles` e da saída e para definir essa semântica do `tier`; a solicitação pode pedir `searcher` sozinho ou junto dos demais papéis. (s4 em 2026-09-07 após o parecer r04: classifier.md no escopo; tier do Searcher definido.)
 ### Verification profile
 `fix` de texto normativo: sondas contrafactuais por leitura (AC06) e Checker report-only de família distinta de toda autoria efetiva, com hipótese rejeitada por critério.
 ## Result
-Quatro regras consolidadas no contrato distribuído: escalonamento consultivo após N reworks (`orchestrator-perfis.md`, Fallback e interrupção); origem por tipo e conteúdo com tabela normativa de seis tipos (`orchestrator-perfis.md`, Briefing concreto); limite das provas mecânicas (`orchestrator-playbook.md`, Revisão externa); escopo de leitura confinado (`orchestrator.md`, invariantes; `checker-report-only.md`). CHANGELOG em Unreleased. Texto único por assunto com remissões.
+Quatro regras consolidadas no contrato distribuído, com a procedência conforme a precedência de fontes de política (s3) e o Searcher classificado com tier de consulta e schema aditivo (s4): escalonamento consultivo após N reworks (`orchestrator-perfis.md`, Fallback e interrupção); origem por tipo e conteúdo com tabela normativa de seis tipos (`orchestrator-perfis.md`, Briefing concreto); limite das provas mecânicas (`orchestrator-playbook.md`, Revisão externa); escopo de leitura confinado (`orchestrator.md`, invariantes; `checker-report-only.md`). CHANGELOG em Unreleased. Texto único por assunto com remissões.
 
 ## Evidence
 `evidence/T010-classification.md`, `T010-maker-report.md`, `T010-r01.md` (changes_requested, duplicação), `T010-r02.md` (approved, spec s1), `T010-r03.md` (approved, spec s2 com a tabela de procedência).
 
 ## Review
-Reaberta em 20260907T232537Z antes da integração do PR #26, por conferência do maintainer: (1) a tabela de procedência restringia catálogo, pins e cadeias a PROJECT.md, contradizendo a precedência vigente (instrução do usuário → configuração do consumidor → perfil publicado) e o caso de projeto sem perfil persistido; (2) o Searcher sob demanda ainda usava perfil fixo sem Classificador. Spec s3; rework 3 classificado; nova revisão exigida.
+Reaberta em 20260907T232537Z antes da integração do PR #26, por conferência do maintainer: (1) a tabela de procedência restringia catálogo, pins e cadeias a PROJECT.md, contradizendo a precedência vigente (instrução do usuário → configuração do consumidor → perfil publicado) e o caso de projeto sem perfil persistido; (2) o Searcher sob demanda ainda usava perfil fixo sem Classificador. Spec s3; rework 3 classificado; r04 changes_requested → spec s4; r05 changes_requested (playbook) → correção própria; r06 `approved` (T010-r06-checker-1); `done` em 20260907T235648Z. Histórico: r04 em 20260907T233909Z; rework 4 classificado.
 r01 changes_requested → rework 1; r02 approved (s1); spec ampliada para s2 por T009-c01; r03 approved (Checker codex gpt-6-astra high, run T010-r03-checker-1), com desvio de leitura autodeclarado pelo Checker (metadados Git via gitdir do worktree). `done` em 20260907T231408Z após o fechamento de T009 (depends_on satisfeito); conteúdo distribuído publicado no PR #26 sem merge. 20260907T230926Z.

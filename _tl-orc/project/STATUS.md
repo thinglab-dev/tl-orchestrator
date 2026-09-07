@@ -2,12 +2,12 @@ format_version: 1
 work_method: native
 active_work_ref: none
 current_role: none
-next_action: T005 done; commit e PR abertos; merge e release aguardam autorização; T001–T003 em draft
+next_action: T005 publicada na 0.5.0; T001–T003 em draft aguardam autorização
 coordinator:
   harness: claude
   session: claude-code-b1467fdf
   started_at: 20260907T174528Z
-  last_write_at: 20260907T182157Z
+  last_write_at: 20260907T195703Z
   released: true
 review_followups: []
 next_task_id: 6

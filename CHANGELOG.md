@@ -4,6 +4,8 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-07
+
 ### Adicionado
 
 - Revisão posterior por outra família e registro `Agent runs`: sob `checker_independence: preferred`,

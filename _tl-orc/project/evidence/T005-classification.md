@@ -6,7 +6,7 @@ context_revision: tl-orchestrator@7923d9c+spec-review-followups-rev1+T005-spec-s
 | run_id | role | harness | model | effort | family | session | phase | round | outcome | fallback_reason |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | T005-r01-classifier-1 | classifier | codex | gpt-5.6-luna | medium | OpenAI | 01a07cfa-0d52-7162-bd5d-e54f6ecdb4c1 | implementation | r01 | JSON truncado (sem chave final) — inválido | none |
-| T005-r01-classifier-2 | classifier | codex | gpt-5.6-luna | medium | OpenAI | 01a07cfa-0d52-7162-bd5d-e54f6ecdb4c1 (resume) | implementation | r01 | JSON válido; semanticamente inválido (evidência não pertinente no 3º candidato do Checker); despacho procedeu com o candidato pin — desvio registrado | correção única do contrato |
+| T005-r01-classifier-2 | classifier | codex | gpt-5.6-terra (desvio: resume sem `-m`; deveria ser gpt-5.6-luna) | medium | OpenAI | 01a07cfa-0d52-7162-bd5d-e54f6ecdb4c1 (resume) | implementation | r01 | JSON válido; semanticamente inválido (evidência não pertinente no 3º candidato do Checker); despacho procedeu com o candidato pin — desvio registrado | correção única do contrato |
 
 Início/fim UTC: 20260907T174556Z → 20260907T174629Z (r1); correção concluída 20260907T174828Z.
 
@@ -25,7 +25,7 @@ context_revision: tl-orchestrator@7923d9c+T005-spec-s1+maker-result-7923d9c22d1c
 | run_id | role | harness | model | effort | family | session | phase | round | outcome | fallback_reason |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | T005-r01-classifier-3 | classifier | codex | gpt-5.6-luna | medium | OpenAI | 01a07d08-2261-7a03-95e4-036fdbe440fb | review | r01 | JSON válido; semanticamente inválido: candidato claude/sonnet com cost_basis official_task_proxy sustentado só por tarifa e cartão de capacidade | none |
-| T005-r01-classifier-4 | classifier | codex | gpt-5.6-luna | medium | OpenAI | 01a07d08-2261-7a03-95e4-036fdbe440fb (resume) | review | r01 | integralmente válido (estrutura, catálogo, pertinência, cost_basis, cadeia, independência); adotado | correção única do contrato |
+| T005-r01-classifier-4 | classifier | codex | gpt-5.6-terra (desvio: resume sem `-m`; deveria ser gpt-5.6-luna) | medium | OpenAI | 01a07d08-2261-7a03-95e4-036fdbe440fb (resume) | review | r01 | integralmente válido (estrutura, catálogo, pertinência, cost_basis, cadeia, independência); adotado | correção única do contrato |
 
 Início/fim UTC: 20260907T180118Z → 20260907T180249Z.
 
@@ -40,3 +40,7 @@ Verificação programática: três candidatos na ordem codex → claude → agy,
 ---
 ## Fases rework (1 e 2) e review r02 — não classificadas (20260907T191004Z)
 **Desvio registrado (reclassificação omitida):** os perfis (`prompts/orchestrator-perfis.md#classificar-e-resolver`) exigem classificação em toda mudança de fase, inclusive `rework`, e só admitem reuso com igualdade de revisão de contexto. O Orquestrador despachou os dois reworks do Maker sem classificar a fase `rework` e reutilizou para o Checker r02 a classificação da fase `review` obtida sobre o `content_id` de r01, embora o conteúdo tivesse mudado. Nenhuma classificação retroativa é reconstruída; o parecer r02 permanece evidência válida sobre o conteúdo, e o par efetivamente usado (codex gpt-6-astra high) coincide com o pin do piloto. Segundo desvio do Orquestrador nesta Task, além do despacho com classificação semanticamente inválida na fase de implementação.
+
+---
+## Desvio registrado a posteriori (2026-09-07): modelo efetivo das correções por `resume`
+As duas correções únicas (runs T005-r01-classifier-2 e T005-r01-classifier-4) foram pedidas com `codex exec resume <sessão>` sem `-m`. A CLI reabriu a sessão com o modelo padrão da configuração e avisou literalmente: "This session was recorded with model `gpt-5.6-luna` but is resuming with `gpt-5.6-terra`. Consider switching back to `gpt-5.6-luna` as it may affect Codex performance.". Portanto os objetos corrigidos e adotados foram produzidos por `gpt-5.6-terra` medium, que não pertence ao perfil fixo do Classificador (Luna → Sonnet → Flash). Os objetos permaneceram válidos (estrutura, catálogo, pertinência) e não são reconstruídos; o desvio é do Orquestrador, que não fixou o modelo no resume. Descoberto ao revisar o smoke de roteamento v0.5.0 no consumidor `platform`, onde o mesmo mecanismo reabriu uma sessão Luna com o modelo padrão. Regra operacional: todo `codex exec resume` de sessão de papel classificado deve repetir `-m <modelo>` e o effort.

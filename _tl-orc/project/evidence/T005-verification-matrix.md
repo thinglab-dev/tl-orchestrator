@@ -1,0 +1,40 @@
+unit: native/task/T005@_tl-orc/project/tasks/T005-review-followups-e-agent-runs.md
+kind: reconciliação da verificação executada com `docs/specs/review-followups.md#11-verificação`
+content_id: 7923d9c22d1c4fe74cf07049e61810db0f36a14f:2f69fcb3080a395d (r02, aprovado)
+
+Tipos de evidência, mantidos separados: **LN** leitura normativa (frase decisiva do texto novo, citada por Checker de família distinta); **EC** execução controlada (consumidor sintético ou entradas fabricadas, harness real, sem efeito de produto); **ER** execução real (rodada da própria Task); **IE** instanciação estrutural sem agente (regra de slug do validador aplicada a exemplos).
+
+## Agent runs (execuções controladas desta reconciliação)
+| run_id | role | harness | model | effort | family | session | phase | round | outcome | fallback_reason |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| T005-r02-probe-1 | orchestrator (sonda com entradas controladas, somente leitura) | codex | gpt-5.6-luna | medium | OpenAI | 01a07d47-6044-7d90-899b-c29ebc414f1a | verification | r02 | resposta conforme o contrato nas quatro observações (A–D) | none |
+| T005-r02-probe-2 | orchestrator (ativação somente leitura em consumidor sintético) | claude | sonnet | medium | Anthropic | 522d2778-c741-4c3e-abce-ed3c29c452df | verification | r02 | menu com 'Revisar por outra família (1)'; pendência lida com identidade completa, alvo e families_used; elegibilidade distinguida de disponibilidade; nada escrito (hash da árvore sintética idêntico antes/depois); nenhum despacho (ferramentas limitadas a Read/Glob/Grep); 51 s | none |
+
+Não são despachos de papel classificado (Planner, Maker ou Checker): são sondas de verificação do Orquestrador, pagas, registradas aqui. Consumo do plano: not_observable.
+
+## Matriz cenário → evidência → limitação
+| # | Cenário (§11) | Evidência | Tipo | Limitação |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | Mesma família sob `preferred`: bloco criado, `done` permitido, STATUS referencia | Astra r01/r02 `rejected` "cenários 1 e 2": perfis:190-194, WORK_MODEL:391, :424; consumidor sintético `synth-bmad` com bloco `RF-1.1-r01` e `review_followups` referenciando (probe-2) | LN + EC (estado construído, não gerado por um despacho real com falha controlada) | Nenhuma revisão real de mesma família foi executada; a criação do bloco por um Orquestrador em fallback real não foi observada |
+| 2 | Mesma situação sob `required`: bloqueio, sem bloco | Astra r01/r02: perfis:198 "bloqueia a revisão com ponto de retomada, sem abrir bloco de pendência"; "nunca converte required em preferred" | LN | Sem execução controlada de bloqueio |
+| 3 | Ativação somente leitura com pendência e outra família no catálogo: menu oferece; nenhuma chamada nem escrita | probe-2: ativação `claude -p --model sonnet --effort medium --allowedTools Read,Glob,Grep` no consumidor sintético `synth-bmad` (bmad, sem módulos, pendência RF-1.1-r01 com families_used [OpenAI], catálogo com Anthropic e Google): menu numerado com a opção 3 'Revisar por outra família (1)'; item (c) da resposta afirma elegibilidade e declara a disponibilidade 'não verificada agora'; item (d) declara que a opção não autoriza escrita, despacho, escolha de modelo nem chamada paga nesta ativação; hash dos 22 arquivos idêntico antes e depois; sessão 522d2778-c741-4c3e-abce-ed3c29c452df | EC | Ausência de chamadas garantida também pela restrição de ferramentas do harness, não só pelo contrato; consumidor e pendência sintéticos; um único harness (Claude) exercitado |
+| 4 | `approved` de outra família cobrindo o alvo: `closed` com `review_ref` e `run_id` | Astra r01/r02: WORK_MODEL:453-455 | LN | Nenhum fechamento real de pendência executado |
+| 5 | `changes_requested` sem autorização: `pending`, `attempts`, achados na fila, sem implementação | Astra r01/r02: WORK_MODEL:457, playbook:292 | LN | Sem execução |
+| 6 / 6b | `changes_requested` com autorização: substituta vinculada; 6b substituta nasce `closed` | Astra r02: playbook:289, WORK_MODEL:458-464 | LN | Sem execução; a própria T005 não teve pendência (Checker de família distinta) |
+| 7 | Conteúdo alterado sem revisão: `pending`; `reason` obrigatório na substituta | Astra r01/r02: WORK_MODEL:466, :460 | LN | Sem execução |
+| 8 | `approved` com `content_id` diferente: não fecha | Astra r01/r02: WORK_MODEL:455 | LN | Sem execução |
+| 9 | Mesmo `content_id` em outra unidade: não transporta | Astra r01/r02: WORK_MODEL:409-410, :455 | LN | Sem execução |
+| 10 | Duas stories `1.1` em áreas distintas: unidades distintas, blocos por área, sem Task Native | Astra r02: WORK_MODEL:272-275; instanciação `RF-billing:1.1-r01` → `rf-billing11-r01` (Astra r02 e Orquestrador) | LN + IE | Sem consumidor multiárea sintético; a colisão foi verificada só pela identidade e pelo slug |
+| 11 | Projeto sem módulos com story BMAD: identidade sem `area_id`, mesmo fluxo | Consumidor sintético `synth-bmad` (work_method bmad, sem módulos): unidade `bmad/story/1.1@_bmad-output/.../sprint-status.yaml`, bloco `RF-1.1-r01` no artefato da story, STATUS global bmad com `review_followups`; referência `#rf-11-r01` resolve pela `heading_anchors` do validador (IE); probe-2 leu e apresentou (EC) | IE + EC | Story e evidência sintéticas; nenhuma execução BMAD real |
+| 12 | Alvo não recuperável: `pending` com limitação | Astra r01/r02: WORK_MODEL:467 | LN | Sem execução |
+| 13 | Timeout ≠ indisponibilidade; erro de quota → fallback; sessão ausente → `not_observable` | probe-1 (entradas fabricadas A–D): A `unknown`, conferir/bloquear, sem fallback (perfis:152-165); B `unavailable`, avança para Claude, sem reclassificar (perfis:161-166, :137-143); C `available`, `session: not_observable`; D só após Codex e Claude indisponíveis admite Agy em sessão nova com `same_family_fresh_session` e bloco RF (perfis:188-195, WORK_MODEL:420-423) | EC (entradas controladas, decisão por leitura em harness real) | Falhas fabricadas no briefing, não provocadas em processos reais; sem esgotamento real de quota, por decisão |
+| 14 | Tentativas descartadas do Classificador preservadas em `Agent runs` | `evidence/T005-r01.md` Agent runs: classifier-1 (JSON truncado) e classifier-3 (cost_basis inválido) preservados ao lado dos adotados | ER | — |
+| 15 | Correção própria do Orquestrador em `families_used` | Astra r01/r02: perfis:186-188, WORK_MODEL:440 | LN | Não houve correção própria em T005; não observado em execução |
+| 16 | Chamada normal ao Checker comprova disponibilidade e gera linha de run | Checker r01 e r02 (`gpt-6-astra` high): acesso comprovado pela chamada, sem sonda separada; linhas T005-r01-checker-1 e T005-r02-checker-1 | ER | — |
+| 17 | Checker lê o alvo pelo `locator`, devolve só JSON; Orquestrador registra associação | r01 e r02: Checker reconstruiu os arquivos pela base + patch do locator e recalculou `content_id` e `spec_revision`; saída só JSON, sem arquivos; associação `run_id`/`content_id`/`spec_revision` registrada pelo Orquestrador em `T005-r01.md` e `T005-r02.md` | ER | — |
+| 18 | Checker valida a redação nova | r02 `approved` com AC01–AC06 e 11 sondas | ER | — |
+
+## Limitações gerais
+- As sondas por leitura decidem o que o texto prescreve; não simulam um despacho com falha real. Isso vale para 1, 2, 4–10, 12 e 15.
+- As execuções controladas usaram estado construído (consumidor sintético) e falhas fabricadas (briefing), conforme a orientação de não provocar esgotamento real de quota.
+- Não foi executada nenhuma revisão real de mesma família; portanto a criação de um bloco RF por um Orquestrador em fallback real permanece não observada. Esse é o próximo dado quando ocorrer o primeiro fallback sob `preferred` em consumidor real.

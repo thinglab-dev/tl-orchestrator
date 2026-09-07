@@ -2,15 +2,15 @@ format_version: 1
 work_method: native
 active_work_ref: none
 current_role: none
-next_action: T001–T003 e T006–T009 em draft aguardam autorização; nenhuma unidade ativa
+next_action: T009 e T010 done; PR de registros de T009 a integrar; PR #26 (T010, distribuído) aguarda merge e release; T001–T003, T006–T008 em draft
 coordinator:
   harness: claude
   session: claude-code-b1467fdf
-  started_at: 20260907T174528Z
-  last_write_at: 20260907T210033Z
+  started_at: 20260907T210307Z
+  last_write_at: 20260907T231408Z
   released: true
 review_followups: []
-next_task_id: 10
+next_task_id: 11
 next_deliverable_id: 1
 next_decision_id: 1
 next_discussion_id: 1
@@ -27,4 +27,5 @@ open_discussions: []
 | T006 | fix | none | draft | [] | [] | 0 | - |
 | T007 | analysis | none | draft | [] | [] | 0 | - |
 | T008 | analysis | none | draft | [] | [] | 0 | - |
-| T009 | analysis | none | draft | [] | [] | 0 | - |
+| T009 | analysis | none | done | [] | [] | 9 | evidence/T009-r07.md |
+| T010 | fix | none | done | [T009] | [] | 6 | evidence/T010-r03.md |

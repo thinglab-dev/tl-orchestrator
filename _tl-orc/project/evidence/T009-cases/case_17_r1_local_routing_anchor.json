@@ -1,0 +1,67 @@
+{
+  "schema_version": 2,
+  "story_id": "T005",
+  "phase": "review",
+  "context_revision": "tl-orchestrator@7923d9c+T005-spec-s1+maker-result-7923d9c22d1c4fe74cf07049e61810db0f36a14f:a74e2ff883eebde7",
+  "catalog_revision": "PROJECT.md-perfil-de-despacho-2026-09-07",
+  "confidence": "high",
+  "facts": [
+    "A revisão cobre uma implementação normativa distribuída em seis arquivos, 294 linhas alteradas e seis critérios de aceitação.",
+    "O risco de erro é alto porque envolve possíveis contradições sutis em independência, content_id, coordenação, classificação, templates, validador, sondas e CHANGELOG.",
+    "A autoria efetiva é da família agy, portanto o Checker deve ser de família distinta e em sessão nova.",
+    "O pin do piloto é codex/gpt-6-astra/high; o esforço xhigh é condicional e não deve substituir o pin sem justificativa específica.",
+    "O trabalho residual é uma revisão completa; as provas do Maker e do Orquestrador reduzem risco de integridade, mas não substituem a avaliação independente do Checker."
+  ],
+  "uncertainties": [
+    "O acesso efetivo a codex/gpt-6-astra ainda não foi comprovado até a primeira chamada.",
+    "Não há medição local de gpt-6-astra para esta tarefa.",
+    "A evidência astra-coding é apenas um proxy de capacidade no Terminal-Bench e não mede revisão nem compara com Terra.",
+    "Não há evidência pertinente para agy/gemini-3.1-pro-high; seu custo deve permanecer desconhecido."
+  ],
+  "reclassify_when": [
+    "Se codex/gpt-6-astra/high não estiver disponível no harness, reclassificar usando o próximo candidato válido da cadeia.",
+    "Se o fallback exigir esforço adicional além de high, registrar justificativa específica sobre o risco e a necessidade antes de usar xhigh.",
+    "Se surgirem novos arquivos, mudanças fora dos seis caminhos permitidos ou divergências no escopo da spec congelada, reavaliar o tier e a confiança.",
+    "Se a revisão deixar de exigir cobertura completa dos AC01–AC06 e das 11 sondas, reconsiderar o tier heavy."
+  ],
+  "roles": {
+    "checker": {
+      "tier": "heavy",
+      "reason": "Revisão independente de alto risco em contrato distribuído, com seis arquivos normativos, seis critérios de aceitação, múltiplas invariantes e necessidade de verificar cobertura, contradições, templates, validador, sondas e CHANGELOG.",
+      "candidates": [
+        {
+          "harness": "codex",
+          "model": "gpt-6-astra",
+          "effort": "high",
+          "evidence_ids": [
+            "price-astra",
+            "transport-openai",
+            "sonnet-effort"
+          ],
+          "cost_basis": "local_observed",
+          "reason": "É o pin explícito do piloto, pertence a família distinta da autoria agy e recebe esforço high adequado à revisão completa; a evidência de capacidade é apenas proxy e o acesso precisa ser confirmado."
+        },
+        {
+          "harness": "claude",
+          "model": "sonnet",
+          "effort": "high",
+          "evidence_ids": [
+            "price-sonnet",
+            "transport-claude",
+            "sonnet-effort"
+          ],
+          "cost_basis": "token_price_only",
+          "reason": "Fallback válido de família distinta, com evidência pertinente de transporte, esforço e tarifa; high é compatível com a revisão normativa completa e o orçamento moderado."
+        },
+        {
+          "harness": "agy",
+          "model": "gemini-3.1-pro-high",
+          "effort": "high",
+          "evidence_ids": [],
+          "cost_basis": "unknown",
+          "reason": "Alternativa final permitida na cadeia, mas pertence à mesma família da autoria efetiva e não deve ser usada enquanto houver candidato de família distinta; não há evidência pertinente disponível para este modelo."
+        }
+      ]
+    }
+  }
+}

@@ -245,6 +245,7 @@ coordinator:
   started_at: <UTC>
   last_write_at: <UTC>
   released: <true|false>
+review_followups: [<unit>@<evidence_ref>#rf-<unit_id>-rnn]
 next_task_id: <n>
 next_deliverable_id: <n>
 next_decision_id: <n>
@@ -255,6 +256,24 @@ open_discussions: [DISCnnn]
 `active_work_ref` identifica a unidade ativa por método, tipo, ID e localização da fonte, e pode
 apontar para um Deliverable em planejamento antes de existir Task ativa. Trabalho externo aparece
 por referência; o estado de uma story é consultado no artefato oficial do BMAD, nunca copiado.
+
+A linha `review_followups` lista as pendências de revisão posterior por outra família abertas na
+árvore, no formato `<unit>@<evidence_ref>#rf-<unit_id>-rnn`; é um campo derivado e reconstruível a partir dos
+blocos `## RF-<unit_id>-rNN` registrados nas evidências, presente tanto em `native` quanto em `bmad`.
+
+A identidade completa da unidade reutiliza o formato do contrato (`active_work_ref`):
+`<method>/<unit_type>/<id | area_id:id>@<source_location>`. Suas quatro formas canônicas são:
+- Native sem módulos: `native/task/T003@_tl-orc/project/tasks/T003-slug.md`;
+- Native multiárea: `native/task/billing:T003@modules/billing/_tl-orc/project/tasks/T003-slug.md`;
+- BMAD sem módulos: `bmad/story/1.1@_bmad-output/implementation-artifacts/sprint-status.yaml`;
+- BMAD multiárea: `bmad/story/billing:1.1@modules/billing/_bmad-output/implementation-artifacts/sprint-status.yaml`.
+
+Essa mesma identidade aparece no alvo da pendência (`target.unit`), no bloco de follow-up, na tabela
+`Agent runs` e no registro de revisão. Duas stories com o mesmo ID em áreas diferentes são unidades
+distintas (por exemplo, `bmad/story/billing:1.1@...` e `bmad/story/identity:1.1@...`), gerando
+pendências distintas com blocos registrados nos artefatos de evidência de cada área, sem criar Task
+Native duplicada, enquanto o cabeçalho global de `STATUS.md` lista as identidades completas em
+`review_followups`.
 
 ### Transição e recuperação
 
@@ -368,21 +387,88 @@ Esta cláusula não autoriza gravação em atividade somente leitura.
 ## Conclusão
 
 - **Task `done`:** portões aplicáveis executados, parecer `approved` válido vinculado ao
-  `content_id` revisado, e autoridade de fechamento já concedida pela política do projeto. Não há
-  confirmação humana adicional por Task por padrão.
+  `content_id` revisado, e autoridade de fechamento já concedida pela política do projeto. Sob
+  `checker_independence: preferred`, o estado `done` é permitido mesmo com pendência de revisão
+  posterior aberta (`status: pending`). Sob `checker_independence: required`, a ausência de parecer
+  de família distinta bloqueia o fechamento com ponto de retomada; a indisponibilidade nunca
+  converte `required` em `preferred`. Não há confirmação humana adicional por Task por padrão.
 - **Deliverable `done`:** todas as Tasks exigidas `done` e `integration_criteria` verificados
   conforme os portões aplicáveis. Tasks todas `done` não comprovam, por si só, que as partes
-  funcionam juntas. O Orquestrador registra o fechamento com a evidência da verificação integrada.
+  funcionam juntas. Ao fechar, o Deliverable lista as pendências de revisão abertas de suas Tasks
+  sem que elas bloqueiem a sua conclusão. O Orquestrador registra o fechamento com a evidência da
+  verificação integrada.
 - **Reuso de parecer:** alteração material posterior à revisão, isto é, novo `content_id`, impede
   o reuso automático do parecer para fechar a Task.
 
 ### Registro de revisão
 
 Fora do parecer e sem alterar o schema, o arquivo de evidência da rodada,
-`project/evidence/Tnnn-rNN.md`, registra o parecer JSON íntegro, a unidade revisada (qualificada
-como `<area_id>:<id>` no modo multiárea), `spec_revision`, `content_id` revisado, sessão, harness,
-modelo, effort, família e limitações de independência. É esse registro que vincula o parecer ao
-conteúdo e à unidade; hashes iguais em outra unidade não transportam a aprovação.
+`project/evidence/Tnnn-rNN.md` (ou o artefato próprio da story BMAD), registra o parecer JSON
+íntegro, a unidade revisada (qualificada como `<area_id>:<id>` no modo multiárea), `spec_revision`,
+`content_id` revisado, `run_id` do Checker, sessão, harness, modelo, effort, família e limitações
+de independência. É esse registro que vincula o parecer ao conteúdo e à unidade; hashes iguais em
+outra unidade não transportam a aprovação.
+
+Toda chamada a agente entra na tabela `Agent runs` da evidência (Planner, Maker, Checker, sondas e
+chamadas que falharam ou tentativas descartadas). A tabela herda a identidade completa da unidade
+(`unit`, [Identidade](#estado)) do cabeçalho da evidência, sem coluna própria de unidade. Formato de
+`run_id`: `<unit_id>-rNN-<role>-<seq>`, único na evidência da unidade, onde `unit_id` é o `id`
+qualificado da identidade sem caminho. Tentativas descartadas e chamadas falhas são preservadas com
+`outcome` e `fallback_reason`. Dados não observáveis no harness são preenchidos como
+`not_observable`, nunca omitidos nem inferidos.
+
+Quando uma revisão for concluída por mesma família em sessão nova sob
+`checker_independence: preferred`, a pendência nasce na rodada de revisão que a gera e mora somente
+ali: no bloco `## RF-<unit_id>-rNN` em `project/evidence/Tnnn-rNN.md` da área da unidade (em
+Native) ou no mesmo bloco no artefato de evidência próprio da story (em BMAD). Nenhuma Task Native é
+criada para acompanhar uma story BMAD. Task, STATUS e registros BMAD apenas referenciam o bloco por
+caminho e âncora (`<evidence_ref>#rf-<unit_id>-rnn`). A âncora é o slug do título que carrega o id.
+Atualizações de acompanhamento são registros de controle: acrescentam entradas datadas ao `log` do
+bloco, sem modificar o alvo nem o parecer original.
+
+```text
+## RF-<unit_id>-rNN
+kind: review follow-up
+target:
+  unit: <identidade completa da unidade>
+  spec_revision: <s>
+  content_id: <formato de versão do trabalho: com Git, commit base mais hash do diff; sem código, hashes dos artefatos>
+  content_paths: [...]
+  locator: <commit | artefato preservado | not_recoverable>
+origin_review: <rNN> run_id: <run_id do Checker de mesma família>
+limitation: same_family_fresh_session
+families_used: [<Maker, reworks, correção própria do Orquestrador, Checker>]
+status: pending | superseded | closed
+review_ref: <evidence#rNN run_id=...> | none
+attempts: [<rNN run_id=... verdict=...>]
+superseded_by: <RF-...> | none
+supersedes: <RF-...> | none
+reason: <texto obrigatório em superseded e em not_recoverable>
+log:
+  - <UTC> <evento>
+```
+
+Estados e regras do follow-up:
+- `pending`: o alvo registrado aguarda parecer independente de outra família.
+- `closed`: somente com parecer `approved`, em sessão nova, de família distinta de todas as
+  `families_used`, cujo registro cubra exatamente o alvo (mesma unidade, mesma `spec_revision` e
+  mesmo `content_id`). `review_ref` guarda evidência, rodada e `run_id`. Aprovação em outra unidade ou
+  com outro `content_id` não transporta e não fecha a pendência.
+- `changes_requested`: mantém o estado `pending` e registra a rodada e o `run_id` em `attempts`.
+- `superseded`: exige `superseded_by` apontando para a pendência substituta sobre o conteúdo novo e
+  `reason` obrigatório que explique quais garantias do alvo original continuam cobertas pelo novo alvo
+  e quais foram alteradas ou retiradas, citando a decisão registrada; a ausência de `reason` é
+  rejeitada (dois `content_id` sozinhos não bastam). A substituta registra sua procedência em
+  `supersedes` e nasce como `pending` (se ainda faltar a revisão independente) ou `closed` (quando já
+  existir parecer independente `approved` cobrindo exatamente o novo alvo com `review_ref`). A
+  pendência original nunca é fechada pelo parecer do conteúdo novo, e a substituta não inventa uma
+  nova revisão de mesma família: herda o `origin_review` da original.
+- Alteração posterior do conteúdo sem revisão não fecha nem apaga a pendência: ela permanece
+  `pending`. Se o alvo original não puder ser recuperado (`locator: not_recoverable`), a pendência
+  permanece `pending` com essa limitação e `reason` obrigatório, declarando o que a revisão posterior
+  pôde examinar.
+
+A condução da revisão posterior e o que ela autoriza ou não estão no [playbook](../prompts/orchestrator-playbook.md#fechamento-ou-interrupção).
 
 ## Proteção nas atualizações
 
@@ -586,6 +672,7 @@ coordinator:
   started_at: <UTC>
   last_write_at: <UTC>
   released: false
+review_followups: []
 next_task_id: 2
 next_deliverable_id: 1
 next_decision_id: 1
@@ -596,6 +683,9 @@ open_discussions: []
 | id | type | deliverable | status | depends_on | blocked_by | state_revision | last_evidence |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 ```
+
+Em projetos com `work_method: bmad`, o cabeçalho global usa `work_method: bmad`, `review_followups: []`
+e a mesma estrutura de coordenação, sem tabela de Tasks nativas.
 
 ### STATUS.md de módulo (somente no modo multiárea)
 
@@ -715,17 +805,51 @@ status: open
 ### Evidence round
 
 ```text
-unit: <Tnnn no modo sem cadastro | area_id:Tnnn no modo multiárea>
+unit: <identidade completa da unidade>
 round: rNN
 spec_revision:
 content_id:
 content_paths: []
+
+## Agent runs
+| run_id | role | harness | model | effort | family | session | phase | round | outcome | fallback_reason |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| <unit_id>-rNN-maker-01 | maker | <harness> | <model> | <effort> | <family> | <session> | implementation | rNN | success | none |
+| <unit_id>-rNN-checker-01 | checker | <harness> | <model> | <effort> | <family> | <session> | review | rNN | success | none |
+
 ## Commands and exits
 ## Own proof
 ## Review record
+run_id: <unit_id>-rNN-checker-01
 harness / model / effort / family / session / independence:
 ### Verdict (JSON, íntegro)
+
+## RF-<unit_id>-rNN
+kind: review follow-up
+target:
+  unit: <identidade completa da unidade>
+  spec_revision: <hash>
+  content_id: <hash base+diff ou artefatos>
+  content_paths: [...]
+  locator: <commit | artefato preservado | not_recoverable>
+origin_review: rNN run_id: <unit_id>-rNN-checker-01
+limitation: same_family_fresh_session
+families_used: [<famílias dos Makers, reworks, Orquestrador e Checker>]
+status: pending
+review_ref: none
+attempts: []
+superseded_by: none
+supersedes: none
+reason: none
+log:
+  - <UTC> pendência criada por revisão de mesma família sob preferred
 ```
+
+`run_id` segue o formato `<unit_id>-rNN-<role>-<seq>`, único na evidência da unidade; `unit_id` é o
+`id` qualificado da [identidade completa da unidade](#estado) sem caminho. A tabela `Agent runs` herda a identidade
+completa `unit` do cabeçalho da evidência; tentativas descartadas e chamadas falhas são preservadas,
+e dados não observáveis usam `not_observable`. O bloco `## RF-<unit_id>-rNN` é incluído quando a
+revisão de mesma família gerar pendência sob `preferred`.
 
 ### INDEX.md
 

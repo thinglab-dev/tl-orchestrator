@@ -4,6 +4,20 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+### Adicionado
+
+- Revisão posterior por outra família e registro `Agent runs`: sob `checker_independence: preferred`,
+  revisão concluída com mesma família por indisponibilidade comprovada abre pendência no bloco
+  `## RF-<unit_id>-rNN` na evidência da unidade, visível no cabeçalho global em `review_followups`,
+  permitindo conclusão da Task sem flexibilizar `required`; identidade completa de unidade em quatro
+  formas compatível com projetos com e sem módulos em Native e BMAD; ciclo de vida de pendências com
+  estados `pending`, `superseded` (com substituta vinculada e mapeamento obrigatório de garantias em
+  `reason`) e `closed` (somente por parecer aprovado de família distinta cobrindo o mesmo alvo);
+  revisão posterior separada de autorização para novas alterações; menu de ativação com opção de
+  revisão por outra família baseada em elegibilidade no catálogo; comprovação de disponibilidade
+  pela chamada normal autorizada; e tabela uniforme `Agent runs` com identificador sequencial único
+  por unidade, preservando tentativas descartadas e chamadas falhas.
+
 ## [0.4.1] - 2026-09-07
 
 ### Corrigido

@@ -7,8 +7,11 @@ Este arquivo orienta somente o repositório fonte; ele não faz parte do pacote 
 1. Parta de uma revisão identificada e trabalhe fora de `main`.
 2. Mantenha a mudança delimitada. Features precisam de intenção aprovada; uma suspeita isolada
    não autoriza ampliar o método.
-3. Não inclua conteúdo de consumidores, `_tl-orc/`, configurações, evidências, logs, caminhos
-   privados, dados pessoais, segredos ou credenciais. Revise também metadados e autoria.
+3. Não inclua conteúdo de consumidores (`_tl-orc/` de projetos consumidores, suas configurações,
+   evidências e logs), caminhos privados, dados pessoais, segredos ou credenciais. Revise também
+   metadados e autoria. O `_tl-orc/project/` deste repositório é a área Native do próprio método
+   (achados, análises e correções sobre o pacote) e pode ser versionado; ele não faz parte da
+   distribuição.
 4. Se alterar a distribuição, atualize `distribution-manifest.json`, todas as listas e contagens do
    README e os links relativos do pacote.
 5. Atualize `CHANGELOG.md` quando a mudança for relevante para uma release.

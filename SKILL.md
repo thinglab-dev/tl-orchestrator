@@ -28,11 +28,16 @@ de uma candidata ou nenhuma fonte autoritativa, explicite a ambiguidade. Quando 
 comprovado uma release estável sucessora, destaque antes da triagem `instalada → alvo`, o link da
 release, o motivo nas notas e o impacto conhecido na fase atual, sem inventar urgência. Somente
 nesse caso, comprovada a release sucessora, e sem tarefa explícita, ela é a primeira opção:
-**Atualizar tl-orchestrator**; sem sucessora comprovada, a opção não entra no menu. Monte então o menu desta
-ativação e numere-o somente pelas opções mostradas: Planejar, Implementar e revisar uma story,
-Executar fila sequencial somente com board ou fila declarada, Discuss, Debater e Outra tarefa. A
-story pode ser uma Task ou um Deliverable do perfil Native. Não use
-números fixos nem ofereça fila para explorar backlog sem board.
+**Atualizar tl-orchestrator**; sem sucessora comprovada, a opção não entra no menu. Quando
+`review_followups` no cabeçalho de `_tl-orc/project/STATUS.md` não estiver vazio e houver candidatos
+elegíveis de outra família no catálogo, ofereça a opção **Revisar por outra família (n)**, com a
+quantidade `n` de pendências abertas; apresentar a opção afirma apenas elegibilidade no catálogo
+e não autoriza chamadas pagas nem escrita, sem daemon e sem detecção de renovação de quota. Monte
+então o menu desta ativação e numere-o somente
+pelas opções mostradas: Planejar, Implementar e revisar uma story, Revisar por outra família (n)
+quando aplicável, Executar fila sequencial somente com board ou fila declarada, Discuss, Debater e
+Outra tarefa. A story pode ser uma Task ou um Deliverable do perfil Native. Não use números fixos
+nem ofereça fila para explorar backlog sem board.
 
 Uma tarefa explícita continua sendo a seleção do usuário: não a substitua pelo menu de atualização.
 Antes de prosseguir, avise o impacto conhecido na fase; uma release comum não bloqueia a tarefa, e
@@ -44,11 +49,12 @@ verificada — inclusive consulta falha ou desabilitada, delta, sombreamento, in
 ou referência divergente — explique o impedimento, sem oferecer alvo.
 
 Aguarde a escolha antes de escrever arquivos, despachar agentes ou executar portões. **Implementar
-e revisar uma story** autoriza apenas a story identificada. **Executar fila sequencial** segue os
-limites, as paradas e as autorizações registradas no perfil local e no playbook; ela não é inferida
-de **Implementar e revisar uma story**. Uma resposta numérica vale exclusivamente para o último
-menu apresentado. Integração, publicação e outros efeitos externos continuam sujeitos à autoridade
-aplicável.
+e revisar uma story** autoriza apenas a story identificada. **Revisar por outra família (n)**
+autoriza a revisão posterior da pendência selecionada conforme o playbook. **Executar fila
+sequencial** segue os limites, as paradas e as autorizações registradas no perfil local e no
+playbook; ela não é inferida de **Implementar e revisar uma story**. Uma resposta numérica vale
+exclusivamente para o último menu apresentado. Integração, publicação e outros efeitos externos
+continuam sujeitos à autoridade aplicável.
 
 Ofereça também **Debater** ao apresentar uma decisão material pendente ao usuário. Aceite a
 palavra `Debater` ou o número atribuído especificamente a essa opção no menu atual. Apenas essa

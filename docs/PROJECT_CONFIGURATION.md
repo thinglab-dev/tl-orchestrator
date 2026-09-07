@@ -181,10 +181,14 @@ faz parte dos 17 arquivos distribuídos; não autoriza modelos nem precisa ser l
 cada agente. O papel responsável recebe o contexto crítico integral de execução separadamente.
 
 Registre `checker_independence: preferred` para o padrão que prioriza outra família e admite
-mesma família em sessão nova depois de esgotar alternativas, tornando a limitação visível.
-`checker_independence: required` mantém a exigência de outra família. Harness diferente não prova
-família diferente. Modelo e effort efetivos precisam ser conferidos, incluindo resolução de aliases
-e variantes cujo ID incorpora effort.
+mesma família em sessão nova depois de esgotar alternativas, tornando a limitação visível. Sob
+`preferred`, a revisão de mesma família abre pendência de revisão posterior na evidência, visível
+na linha `review_followups` do cabeçalho global de coordenação
+([WORK_MODEL.md#registro-de-revisão](WORK_MODEL.md#registro-de-revisão)).
+`checker_independence: required` mantém a exigência de outra família, remetendo aos perfis
+([orchestrator-perfis.md#independência-do-checker](../prompts/orchestrator-perfis.md#independência-do-checker))
+para a regra completa. Harness diferente não prova família diferente. Modelo e effort efetivos precisam ser
+conferidos, incluindo resolução de aliases e variantes cujo ID incorpora effort.
 
 As regras de classificação, validação, reclassificação, quota e fallback têm uma única fonte nos
 [perfis](../prompts/orchestrator-perfis.md#classificar-e-resolver). Preserve a recomendação e o

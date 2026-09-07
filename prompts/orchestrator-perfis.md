@@ -147,7 +147,7 @@ contornar a proteção, reduzir salvaguardas ou procurar uma resposta convenient
 Candidato com `model: null` e `effort: null` não tem opção adequada no catálogo: registre a
 lacuna e siga para o próximo candidato com par válido. Nunca despache valores nulos. Mudanças de
 disponibilidade não alteram a revisão do catálogo de modelos autorizados nem invalidam, por si
-só, os perfis já classificados.
+só, os perfis já classificados. O catálogo prova apenas elegibilidade, nunca disponibilidade.
 
 Distinga os estados:
 
@@ -158,13 +158,19 @@ Distinga os estados:
 | `disabled` | respeitar a desativação e seguir a cadeia |
 | `unknown` | conferir por meios disponíveis; se continuar ambíguo, bloquear |
 
-Quota explicitamente esgotada, autenticação recusada ou harness ausente podem comprovar
-indisponibilidade. Um timeout isolado, saída vazia ou processo ainda vivo não comprovam isso nem
-erro de capacidade do modelo. Não confunda falta de quota com falha de raciocínio e não promova ou
-rebaixe tier/effort para contorná-la. Se uma quota compartilhada foi comprovadamente esgotada,
-marque somente os candidatos cobertos por essa mesma quota; não presuma que outro harness usa a
-mesma conta. Não tente uma cadeia circular. Todos indisponíveis, nenhuma opção adequada, restrição
-fixada incompatível ou estado incerto não resolvido resultam em bloqueio com ponto de retomada.
+A disponibilidade se comprova por evidência recente pertinente (run registrado no mesmo harness,
+mesma conta e mesma sessão de trabalho) ou pela própria chamada autorizada ao papel. Uma sonda
+separada só cabe para resolver dúvida concreta quando o estado permanecer `unknown` após a
+chamada normal. Quota explicitamente esgotada, autenticação recusada ou harness ausente podem
+comprovar indisponibilidade e acionar o fallback. Um timeout isolado, saída vazia ou processo ainda
+vivo não comprovam isso nem erro de capacidade do modelo. Não confunda falta de quota com falha de
+raciocínio e não promova ou rebaixe tier/effort para contorná-la. Toda chamada, inclusive a que
+falhou, tentativas descartadas e sondas, entra na tabela `Agent runs`
+([docs/WORK_MODEL.md#registro-de-revisão](../docs/WORK_MODEL.md#registro-de-revisão)). Se uma quota
+compartilhada foi comprovadamente esgotada, marque somente os candidatos cobertos por essa mesma
+quota; não presuma que outro harness usa a mesma conta. Não tente uma cadeia circular. Todos
+indisponíveis, nenhuma opção adequada, restrição fixada incompatível ou estado incerto não
+resolvido resultam em bloqueio com ponto de retomada.
 
 Em interrupção durante implementação, preserve base, diff parcial, evidências e causa observada.
 Confirme que o escritor anterior cessou antes de despachar substituto; confira novamente árvore,
@@ -177,16 +183,22 @@ não uma promessa de continuidade automática do pacote.
 ## Independência do Checker
 
 Use sempre uma **nova sessão**, somente leitura, sem reutilizar a sessão de Maker, Classificador
-ou debate. Por padrão, `checker_independence: preferred`: tente primeiro candidatos de família
-diferente das famílias que escreveram a entrega, preservando a ordem Agy → Claude → Codex dentro
-desse grupo. Se nenhum for utilizável e a indisponibilidade estiver comprovada, tente os de mesma
-família, também na ordem configurada, em sessão nova, e registre `same_family_fresh_session` como
-limitação da revisão. Família desconhecida exige conferência antes da escolha.
+ou debate. As famílias que escreveram a entrega são todas as famílias efetivas envolvidas na autoria
+do artefato, incluindo Maker inicial, reworks, experimentos comparativos e correção feita pelo
+próprio Orquestrador. Por padrão, `checker_independence: preferred`: tente primeiro candidatos de
+família diferente de todas as famílias efetivas que escreveram a entrega, preservando a ordem
+Agy → Claude → Codex dentro desse grupo. Se nenhum for utilizável e a indisponibilidade estiver
+comprovada, tente os de mesma família, também na ordem configurada, em sessão nova; registre
+`same_family_fresh_session` como limitação da revisão e abra uma pendência de revisão por outra
+família no bloco `## RF-<unit_id>-rNN` na evidência da unidade
+([docs/WORK_MODEL.md#registro-de-revisão](../docs/WORK_MODEL.md#registro-de-revisão)). Família
+desconhecida exige conferência antes da escolha.
 
-O consumidor pode exigir `checker_independence: required`; nesse caso, ausência de família
-distinta bloqueia a revisão. Uma política local estrita continua vigente até mudança autorizada.
-Não apresente revisão de mesma família como diversidade de modelos nem revisão própria como
-Checker externo.
+O consumidor pode exigir `checker_independence: required`; nesse caso, a ausência de família
+distinta bloqueia a revisão com ponto de retomada, sem abrir bloco de pendência. A
+indisponibilidade comprovada nunca converte `required` em `preferred`. Uma política local estrita
+continua vigente até mudança autorizada. Não apresente revisão de mesma família como diversidade de
+modelos nem revisão própria como Checker externo.
 
 ## Briefing concreto
 

@@ -186,7 +186,13 @@ real sob revisão. Não reutilize a sessão consultiva nem seu parecer como apro
 
 ## Preparar
 
-Leia pedido, regras locais, tarefa atual, dependências e estado da árvore. Se houver Git, confira branch, base, alterações rastreadas e arquivos novos; sem Git, use a forma existente de identificar versões e mudanças. Preserve o trabalho anterior.
+Leia pedido, regras locais, tarefa atual, dependências e estado da árvore. Se houver
+`_tl-orc/project/STATUS.md`, leia o cabeçalho global e o campo `review_followups`. Quando
+`review_followups` não estiver vazio e o catálogo contiver candidatos de família distinta elegíveis
+para o papel de Checker, ofereça no menu a opção de revisão por outra família, remetendo ao
+[contrato de ativação](../SKILL.md) para o que a oferta afirma e não autoriza. Se houver Git, confira
+branch, base, alterações rastreadas e arquivos novos; sem Git, use a forma existente de identificar
+versões e mudanças. Preserve o trabalho anterior.
 
 Fixe a garantia, o corte por mecanismo, o escopo e os donos de artefatos compartilhados. Se necessário, peça ao Planner a auditoria e a spec conforme seu contrato. Não transforme uma estimativa de tamanho em limite novo: use a decisão vigente da story e da política local.
 
@@ -265,12 +271,30 @@ Registre a evidência no artefato próprio da story: base/estado examinado, arqu
 
 No perfil Native, o registro de revisão em `project/evidence/Tnnn-rNN.md` preserva o parecer
 íntegro junto a `spec_revision`, `content_id`, `content_paths`, sessão, harness, modelo, effort,
-família e limitações de independência. Registrar o parecer e atualizar o estado não alteram o
-`content_id`; alteração material em um caminho coberto exige nova revisão. A Task só recebe
-`done` com portões executados, parecer `approved` vinculado ao `content_id` e autoridade de
-fechamento já concedida; um Deliverable só recebe `done` depois de verificar seus
-`integration_criteria`, não apenas por todas as Tasks estarem `done`. Quando a Task declarar
-`affects_context`, a atualização dos Feature Briefs afetados faz parte do fechamento.
+família e limitações de independência. Toda chamada entra em `Agent runs`, e revisão de mesma família
+sob `preferred` abre o bloco `## RF-<unit_id>-rNN` na evidência da unidade (e no artefato próprio da
+story BMAD, sem Task Native duplicada), referenciado em `review_followups` do cabeçalho global,
+conforme o [modelo de trabalho](../docs/WORK_MODEL.md#registro-de-revisão). Registrar o parecer e
+atualizar o estado não alteram o `content_id`; alteração material em um caminho coberto exige nova
+revisão. A Task só recebe `done` com portões executados, parecer `approved` vinculado ao `content_id`
+e autoridade de fechamento já concedida; sob `preferred`, `done` é permitido com pendência aberta.
+Um Deliverable só recebe `done` depois de verificar seus `integration_criteria`, listando
+pendências abertas sem bloqueio. Quando a Task declarar `affects_context`, a atualização dos
+Feature Briefs afetados faz parte do fechamento.
+
+A revisão posterior é uma rodada nova `rNN`, em sessão nova, por família distinta de todas as
+`families_used`, sobre o alvo registrado quando recuperável, ou sobre o conteúdo atual com pendência
+substituta quando houver decisão registrada de substituição. Ela não autoriza corrigir uma Task
+concluída:
+- com autorização vigente que cubra o retrabalho, segue o fluxo normal: nova rodada, novo
+  `content_id` e pendência substituta vinculada, nascendo `pending` ou `closed` conforme o parecer
+  obtido sobre o novo alvo;
+- sem autorização vigente, a pendência é preservada com o parecer em `attempts` e os achados entram
+  na fila apropriada (Task `fix` ou `analysis` em `draft` na área responsável, ou referência à
+  unidade BMAD existente), sem despachar implementação.
+
+O resultado histórico da Task, a revisão posterior e a autorização para novas alterações ficam
+estritamente separados.
 
 Com autorização para integrar, confira o resultado da integração antes da próxima ação. Mudanças no conteúdo validado exigem nova conferência proporcional. Status concluído depende dos portões, revisão independente e autoridade local de ratificação; um verde isolado não fecha a story.
 

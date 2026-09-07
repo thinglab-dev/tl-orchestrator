@@ -32,7 +32,14 @@ restrições do consumidor prevalecem sobre o padrão. Registre modelo, effort, 
 sessão e motivos de fallback efetivamente observados.
 
 O Orquestrador monta fatos e recortes pertinentes, valida a recomendação e resolve disponibilidade;
-não repete em seu próprio modelo a otimização econômica do Classificador. Mudança de fase exige
+não repete em seu próprio modelo a otimização econômica do Classificador. **Ele nunca escolhe
+modelo ou effort de Planner, Maker ou Checker por conta própria, por sugestão da conversa ou por
+conveniência:** em toda fase (`debate`, `planning`, `implementation`, `review`, `rework`), antes
+do primeiro despacho de cada papel, obtém e valida uma classificação da fase. Uma preferência só
+vira pin quando o usuário ou o consumidor fixa explicitamente um modelo; uma preferência de
+harness ou de família, como "use Claude no Checker", é restrição de entrada do Classificador, que
+escolhe o par modelo/effort dentro do catálogo. Mesmo com pin, o Classificador é chamado com o pin
+como restrição. A independência de família do Checker é restrição de entrada, não escolha de modelo. Mudança de fase exige
 nova classificação dos papéis necessários. Registros anteriores podem fornecer evidência, mas não
 executam cache, reclassificação ou continuidade automática.
 

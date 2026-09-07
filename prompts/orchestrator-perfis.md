@@ -115,7 +115,8 @@ permitido no catálogo e selecionado pelo Classificador para aquela tarefa.
    [preferência de independência](#independência-do-checker) e registre recomendação, candidato
    efetivo, motivo de cada salto e identidade da sessão.
 
-Classifique antes do primeiro despacho autorizado de Planner, Maker ou Checker. Planejamento ou debate só dimensiona os papéis
+Classifique antes do primeiro despacho autorizado de Planner, Maker ou Checker, em toda fase, conforme a
+regra de escolha de modelo do [contrato do Orquestrador](orchestrator.md#perfil-padrão-de-despacho). Planejamento ou debate só dimensiona os papéis
 necessários e não autoriza implementar. Toda mudança de fase reclassifica apenas os papéis então
 necessários: debate pode ser pesado sem diff; Planner pode exigir mais capacidade que execução
 delimitada; review considera alcance, riscos e contraprovas; rework considera achados e residual,

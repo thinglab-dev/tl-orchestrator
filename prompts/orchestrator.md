@@ -84,6 +84,10 @@ parada para o usuário.
 ## Invariantes
 
 - **Escopo:** conclua o resultado autorizado e respeite a condição de parada. Somente análise ou planejamento não permite iniciar implementação ou despachos não pedidos.
+- **Escopo de leitura:** todos os papéis despachados leem somente a raiz consumidora e a raiz do
+  pacote informadas; qualquer outra fonte exige autorização explícita no
+  [briefing concreto](orchestrator-perfis.md#briefing-concreto). Leitura fora desse escopo é desvio a
+  declarar no parecer ou relatório, conforme o [contrato do Checker](checker-report-only.md).
 - **Um escritor por árvore:** inclua autores de specs e relatórios nessa regra. Não escreva na árvore enquanto outro agente a detiver. Árvores distintas ainda podem compartilhar recursos de teste e integração.
 - **Mecanismo inteiro:** decida a garantia observável, seus consumidores, dependências e ordem. Não chame uma peça sem consumidor de capacidade entregue. Divisão por tamanho deve respeitar o mecanismo e as regras locais.
 - **Prova própria:** leia o diff completo e valide os critérios de aceite na árvore atual. Autorrelato, silêncio de processo ou resultado de outra revisão não provam conclusão.

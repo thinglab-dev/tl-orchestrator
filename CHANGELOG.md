@@ -4,6 +4,27 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+### Corrigido
+
+- Regras de condução do método para convergência, confinamento e limites probatórios: escalonamento
+  consultivo após N rodadas de rework (padrão 3, configurável no perfil do consumidor) com achados
+  centrais da mesma classe, classificando fase consultiva (`debate`) para diagnosticar
+  manifestações do mesmo problema versus requisitos a consolidar antes de novo retrabalho; tabela
+  normativa de procedência por tipo de informação e conteúdo que sustenta o valor no briefing
+  (`story_id`, fase e papéis solicitados da solicitação ou spec com valor literal; catálogo, pins e
+  cadeias da política autorizada em `PROJECT.md`; autoria efetiva e famílias do registro de
+  `Agent runs` efetivo; evidências de custo e capacidade de `docs/MODEL_ROUTING.md`; medição local
+  com ID na primeira coluna; julgamento vinculado por hash com veredito explícito), fixando que
+  localização que resolve não basta e rejeitando fonte incompatível com o tipo ou com o valor,
+  além de rejeitar listas compostas na hora ou fontes genéricas como "um arquivo existente", com
+  entrega ao Classificador apenas de IDs com origem; limite declarado das provas mecânicas, em que
+  conferência mecânica e vinculação por hash comprovam correspondência e integridade, não correção
+  ou pertinência ao workload, mantendo adequação e alcance econômico como julgamento registrado; e
+  escopo de leitura dos papéis confinado à raiz consumidora e à raiz do pacote informadas, exigindo
+  autorização explícita no briefing para qualquer outra fonte e declaração obrigatória de desvio no
+  parecer ou relatório. Motivado pela análise em T009 e pela condução com retrabalhos sucessivos e
+  leitura fora da raiz sem autorização.
+
 ## [0.5.0] - 2026-09-07
 
 ### Adicionado

@@ -180,6 +180,13 @@ substantivas no trabalho residual exigem reclassificação. O Orquestrador perma
 selecionada pelo usuário; seu próprio esgotamento exige retomada pelo usuário ou pelo harness,
 não uma promessa de continuidade automática do pacote.
 
+Após N rodadas de rework (N padrão 3; o consumidor pode fixar outro valor em `PROJECT.md`) em que o
+Checker aponte achados centrais da mesma classe, o Orquestrador classifica uma fase consultiva (fase
+`debate`, papéis conforme o risco) e despacha um consultor com a pergunta "estamos corrigindo
+manifestações do mesmo problema ou descobrindo requisitos que precisam ser consolidados antes de
+continuar?". A orientação é consolidada (spec, abordagem ou critérios) antes de classificar outro
+rework; correções delimitadas seguem o fluxo normal.
+
 ## Independência do Checker
 
 Use sempre uma **nova sessão**, somente leitura, sem reutilizar a sessão de Maker, Classificador
@@ -217,6 +224,24 @@ separadamente. Confira acesso aos dois. Para Planner, Maker e Checker, inclua:
   [modelo de trabalho](../docs/WORK_MODEL.md#carregamento-e-envelhecimento): `CONTEXT.md`, índice,
   briefs das features afetadas e dependências diretas, unidade ativa e decisões referenciadas. O
   tipo da Task não entra no briefing do Classificador como sinal de tier.
+
+Cada informação do briefing declara a fonte do seu tipo e o conteúdo dessa fonte sustenta o valor
+declarado, conforme a tabela normativa de procedência:
+
+| Tipo de informação | Fonte autorizada | Conteúdo que sustenta o valor e conferência |
+| :--- | :--- | :--- |
+| `story_id`, fase e papéis solicitados | solicitação ou spec da Task/fase | o registro citado contém o valor literal |
+| catálogo (harness/modelo/effort), pins e cadeias | política autorizada do consumidor (PROJECT.md) | a tabela ou seção cita exatamente o par, o pin ou a cadeia |
+| autoria efetiva e famílias | registro de `Agent runs` efetivo | a linha citada declara harness, modelo e família usados |
+| evidências de custo e capacidade | [docs/MODEL_ROUTING.md](../docs/MODEL_ROUTING.md) | pertinência ao modelo e, para proxy de custo, afirmação de custo por tarefa no cartão |
+| medição local | linha de tabela estruturada em evidência do projeto | ID na primeira coluna |
+| julgamento | registro documental vinculado por hash ao objeto e às entradas | hash coincide e veredito explícito |
+
+Localização que resolve (arquivo existe, âncora resolve, linha existe) não basta; fonte existente
+mas incompatível com o tipo ou com o valor é rejeitada. Listas compostas na hora ou fontes genéricas
+como "um arquivo existente" não valem como origem e são rejeitadas; o Classificador só recebe IDs
+com origem. A autorização de fontes além das raízes informadas segue o
+[escopo de leitura](orchestrator.md#invariantes).
 
 Em **Debater**, use o dossiê comum e os limites do
 [playbook consultivo](orchestrator-playbook.md#debater); não forneça schema de aprovação.

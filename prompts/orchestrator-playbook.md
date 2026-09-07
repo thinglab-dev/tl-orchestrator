@@ -257,11 +257,14 @@ combine objetos para tornar válido um parecer inválido.
 Confira a estrutura contra o [schema canônico](../schemas/review-result.schema.json) com
 ferramenta existente, se disponível; sem validador, declare a conferência manual e sua limitação.
 Sintaxe JSON não prova conformidade ao schema, e conformidade não prova correção do produto.
-Campos extras e inconsistência entre `verdict` e `action_items` também exigem correção pelo
-Checker. Enquanto o parecer estiver ausente, inválido ou ambíguo, não o trate como aprovação.
-Faça no máximo uma solicitação de correção de formato ao mesmo Checker, apontando os defeitos
-estruturais sem sugerir o veredito. Se a nova resposta também for inválida, encerre essa revisão
-como `parecer válido não obtido`; não repita até conseguir aprovação.
+Conferência mecânica e vinculação por hash comprovam correspondência e integridade (o objeto e as
+entradas conferidos são estes), não correção nem pertinência; pertinência ao workload, adequação do
+esforço e alcance econômico são julgamento registrado, com quem julgou e sobre o quê. Campos extras
+e inconsistência entre `verdict` e `action_items` também exigem correção pelo Checker. Enquanto o
+parecer estiver ausente, inválido ou ambíguo, não o trate como aprovação. Faça no máximo uma
+solicitação de correção de formato ao mesmo Checker, apontando os defeitos estruturais sem sugerir o
+veredito. Se a nova resposta também for inválida, encerre essa revisão como `parecer válido não
+obtido`; não repita até conseguir aprovação.
 
 Atribua os achados: correção no escopo ao Maker, spec inconsistente ao Planner, decisão de intenção ao usuário. Registre trabalho fora do escopo sem corrigi-lo silenciosamente. Depois de mudança material, renove as provas afetadas e obtenha nova revisão independente da árvore final.
 

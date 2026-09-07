@@ -4,6 +4,17 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-07
+
+### Corrigido
+
+- O contrato do Orquestrador, os perfis e o SKILL.md tornam explícito que o Orquestrador nunca
+  escolhe modelo ou effort de Planner, Maker ou Checker por conta própria ou por sugestão: classifica
+  em toda fase antes do primeiro despacho de cada papel; preferência de harness ou família é
+  restrição de entrada do Classificador; só um modelo nomeado explicitamente pelo usuário ou pelo
+  consumidor vira pin, e mesmo assim o Classificador é chamado. Motivado por uma condução em que o
+  Checker foi fixado por suposição antes de classificar.
+
 ## [0.4.0] - 2026-09-06
 
 ### Adicionado

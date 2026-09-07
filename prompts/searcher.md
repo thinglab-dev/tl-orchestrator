@@ -1,10 +1,9 @@
 # Contrato do Searcher
 
 O Searcher consulta informações para entregar ao Orquestrador um resumo verificável e uma visão
-geral que apoiem sua decisão. É um auxiliar sob demanda, em sessão nova e separada, com perfil
-fixo Agy/Antigravity `gemini-3.8-flash-medium` e effort `medium`; uma política local ou pedido
-explícito do usuário pode substituir esse perfil, desde que a substituição seja registrada e
-validada. Busca trivial direta não exige Searcher.
+geral que apoiem sua decisão. É um auxiliar sob demanda, em sessão nova e separada, com modelo e
+effort resolvidos pelo Orquestrador a partir da classificação da fase ou de pin explícito. Busca
+trivial direta não exige Searcher.
 
 ## Entrada
 

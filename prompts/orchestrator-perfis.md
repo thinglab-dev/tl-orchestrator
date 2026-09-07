@@ -5,12 +5,12 @@ o Orquestrador valida a recomendação e executa a cadeia de despacho autorizada
 
 ## Searcher sob demanda
 
-O Searcher é auxiliar de consulta, não papel classificado por tier e não integrante do schema de
-papéis classificados. Quando necessário, use sessão nova com Agy/Antigravity
-`gemini-3.8-flash-medium` / `medium`; política local ou pedido explícito do usuário pode substituir
-esse perfil após validação e registro. Não chame o Classificador para cada busca. O Searcher não
-decide, implementa, aprova ou despacha, e devolve apenas o resumo verificável previsto em
-[seu contrato](searcher.md). Busca trivial direta não exige agente.
+O Searcher é auxiliar de consulta. Quando necessário, use sessão nova: o Searcher recebe modelo e
+effort da classificação da fase (papel auxiliar searcher, que usa a mesma estrutura dos demais
+papéis e cujo tier dimensiona a consulta) ou de pin explícito do usuário ou do consumidor, ainda assim
+passado ao Classificador como restrição. A classificação da fase cobre as buscas daquela fase (não se reclassifica a cada busca). O Searcher não decide,
+implementa, aprova ou despacha, e devolve apenas o resumo verificável previsto em
+[seu contrato](searcher.md). Busca trivial direta continua sem agente.
 
 ## Perfil-padrão
 
@@ -231,17 +231,19 @@ declarado, conforme a tabela normativa de procedência:
 | Tipo de informação | Fonte autorizada | Conteúdo que sustenta o valor e conferência |
 | :--- | :--- | :--- |
 | `story_id`, fase e papéis solicitados | solicitação ou spec da Task/fase | o registro citado contém o valor literal |
-| catálogo (harness/modelo/effort), pins e cadeias | política autorizada do consumidor (PROJECT.md) | a tabela ou seção cita exatamente o par, o pin ou a cadeia |
+| catálogo (harness/modelo/effort), pins e cadeias | fontes de política conforme a [precedência vigente](#perfil-padrão) (instrução atual do usuário registrada; configuração do consumidor em `PROJECT.md`; ou o perfil publicado quando não há configuração local) | o registro citado cita exatamente o par, o pin ou a cadeia |
 | autoria efetiva e famílias | registro de `Agent runs` efetivo | a linha citada declara harness, modelo e família usados |
 | evidências de custo e capacidade | [docs/MODEL_ROUTING.md](../docs/MODEL_ROUTING.md) | pertinência ao modelo e, para proxy de custo, afirmação de custo por tarefa no cartão |
 | medição local | linha de tabela estruturada em evidência do projeto | ID na primeira coluna |
 | julgamento | registro documental vinculado por hash ao objeto e às entradas | hash coincide e veredito explícito |
 
 Localização que resolve (arquivo existe, âncora resolve, linha existe) não basta; fonte existente
-mas incompatível com o tipo ou com o valor é rejeitada. Listas compostas na hora ou fontes genéricas
-como "um arquivo existente" não valem como origem e são rejeitadas; o Classificador só recebe IDs
-com origem. A autorização de fontes além das raízes informadas segue o
-[escopo de leitura](orchestrator.md#invariantes).
+mas incompatível com o tipo ou com o valor é rejeitada. Listas compostas na hora sem procedência por
+entrada ou fontes genéricas como "um arquivo existente" não valem como origem e são rejeitadas; o
+Classificador só recebe IDs com origem. Um catálogo montado para a chamada é legítimo quando cada
+entrada deriva de uma dessas fontes com procedência verificável; rejeita-se a entrada sem
+procedência, não o catálogo montado; isso preserva projetos sem perfil persistido. A autorização de
+fontes além das raízes informadas segue o [escopo de leitura](orchestrator.md#invariantes).
 
 Em **Debater**, use o dossiê comum e os limites do
 [playbook consultivo](orchestrator-playbook.md#debater); não forneça schema de aprovação.

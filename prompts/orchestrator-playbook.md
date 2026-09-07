@@ -5,7 +5,10 @@ Complemento do [contrato do Orquestrador](orchestrator.md). As raízes e os port
 ## Searcher sob demanda
 
 Quando faltar contexto factual para uma decisão, o Orquestrador pode consultar o Searcher antes ou
-durante preparação, debate ou classificação, respeitando pergunta concreta, fontes autorizadas,
+durante preparação, debate ou classificação, desde que o próprio Searcher já esteja classificado ou
+fixado por pin conforme os [perfis](orchestrator-perfis.md#searcher-sob-demanda); uma consulta
+necessária antes de qualquer outra classificação começa pela classificação da fase com o papel
+`searcher`. Respeite pergunta concreta, fontes autorizadas,
 frescor e limites de tempo, chamadas e resposta. Registre cobertura, lacunas e acessos; falha de
 ferramenta ou permissão fica explícita como parcial/bloqueada. O Searcher usa sessão separada e seu
 resumo é evidência orientadora, não prova única nem substituto de leitura obrigatória.
@@ -196,7 +199,7 @@ versões e mudanças. Preserve o trabalho anterior.
 
 Fixe a garantia, o corte por mecanismo, o escopo e os donos de artefatos compartilhados. Se necessário, peça ao Planner a auditoria e a spec conforme seu contrato. Não transforme uma estimativa de tamanho em limite novo: use a decisão vigente da story e da política local.
 
-Antes de cada papel classificado (Planner, Maker ou Checker), siga a classificação e a resolução dos
+Antes de cada papel classificado (Planner, Maker, Checker ou Searcher), siga a classificação e a resolução dos
 [perfis](orchestrator-perfis.md#classificar-e-resolver). Dimensionar Maker e Checker não autoriza
 seu despacho quando o pedido se limita a planejamento. Depois de esclarecer a spec, reclassifique
 os papéis requeridos pela nova fase, ainda que riscos, garantias e restrições pareçam iguais. Um

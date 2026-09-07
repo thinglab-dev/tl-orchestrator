@@ -1,0 +1,62 @@
+{
+  "schema_version": 2,
+  "story_id": "T005",
+  "phase": "review",
+  "context_revision": "tl-orchestrator@7923d9c+T005-spec-s1+maker-result-7923d9c22d1c4fe74cf07049e61810db0f36a14f:a74e2ff883eebde7",
+  "catalog_revision": "PROJECT.md-perfil-de-despacho-2026-09-07",
+  "confidence": "high",
+  "facts": [
+    "Caso de controle das regras preservadas: demonstra que independência é filtro de resolução (e não critério de validade do objeto) e que cost_basis: unknown com lista vazia é legítimo.",
+    "A autoria efetiva é da família Google (agy), e a política de independência é preferred.",
+    "O terceiro candidato pertence à mesma família da autoria (Google) e deve ser aceito no objeto, marcado como elegível só com indisponibilidade comprovada.",
+    "O pin do piloto é codex/gpt-6-astra/high."
+  ],
+  "uncertainties": [
+    "O acesso efetivo a codex/gpt-6-astra ainda não foi comprovado até a primeira chamada.",
+    "Não há evidência pertinente para agy/gemini-3.1-pro-high; seu custo permanece desconhecido."
+  ],
+  "reclassify_when": [
+    "Se codex/gpt-6-astra/high não estiver disponível no harness, reclassificar usando o próximo candidato válido da cadeia.",
+    "Se houver necessidade de fallback que viole a independência requerida em caso de política estrita."
+  ],
+  "roles": {
+    "checker": {
+      "tier": "heavy",
+      "reason": "Revisão independente com validação de regras preservadas de independência e cost_basis unknown.",
+      "candidates": [
+        {
+          "harness": "codex",
+          "model": "gpt-6-astra",
+          "effort": "high",
+          "evidence_ids": [
+            "price-astra",
+            "transport-openai",
+            "astra-coding"
+          ],
+          "cost_basis": "official_task_proxy",
+          "reason": "Pin explícito do piloto, família distinta (OpenAI vs Google)."
+        },
+        {
+          "harness": "claude",
+          "model": "sonnet",
+          "effort": "high",
+          "evidence_ids": [
+            "price-sonnet",
+            "transport-claude",
+            "sonnet-effort"
+          ],
+          "cost_basis": "token_price_only",
+          "reason": "Fallback válido de família distinta (Anthropic vs Google)."
+        },
+        {
+          "harness": "agy",
+          "model": "gemini-3.1-pro-high",
+          "effort": "high",
+          "evidence_ids": [],
+          "cost_basis": "unknown",
+          "reason": "Controle de regras preservadas: candidato de mesma família da autoria (Google) sob política preferred, listado como fallback; deve ser aceito no objeto de classificação e marcado elegível apenas com indisponibilidade comprovada (same_family_fresh_session), com cost_basis unknown e lista de evidências vazia aceita sem penalização."
+        }
+      ]
+    }
+  }
+}

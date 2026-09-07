@@ -1,0 +1,84 @@
+{
+  "_provenance": {
+    "description": "Sonda R1: local-fake declarado local com _tl-orc/project/evidence/T009-mechanical-check.py:999999.",
+    "catalog_source": "_tl-orc/PROJECT.md#perfil-de-despacho",
+    "evidence_source": "docs/MODEL_ROUTING.md"
+  },
+  "story_id": {
+    "value": "T005",
+    "source": "_tl-orc/project/tasks/T005-review-followups-e-agent-runs.md#L1"
+  },
+  "phase": {
+    "value": "review",
+    "source": "_tl-orc/project/evidence/T005-classification.md#L22"
+  },
+  "context_revision": {
+    "value": "tl-orchestrator@7923d9c+T005-spec-s1+maker-result-7923d9c22d1c4fe74cf07049e61810db0f36a14f:a74e2ff883eebde7",
+    "source": "_tl-orc/project/evidence/T005-classification.md#L23"
+  },
+  "catalog_revision": {
+    "value": "PROJECT.md-perfil-de-despacho-2026-09-07",
+    "source": "_tl-orc/PROJECT.md#perfil-de-despacho"
+  },
+  "roles": {
+    "value": [
+      "checker"
+    ],
+    "source": "_tl-orc/PROJECT.md#perfil-de-despacho"
+  },
+  "chains": {
+    "checker": {
+      "value": [
+        "codex",
+        "claude",
+        "agy"
+      ],
+      "source": "_tl-orc/PROJECT.md#cadeias-preferência-operacional-fallbacks-autorizados-preservados"
+    }
+  },
+  "pins": {
+    "checker": {
+      "value": [
+        "codex",
+        "gpt-6-astra",
+        "high"
+      ],
+      "source": "_tl-orc/PROJECT.md#piloto-de-avaliação-do-astra-como-checker"
+    }
+  },
+  "proxy_ids": {
+    "astra-coding": {
+      "source": "docs/MODEL_ROUTING.md#astra-coding--terminal-engenharia-e-migrações"
+    }
+  },
+  "local_ids": {
+    "local-fake": {
+      "source": "_tl-orc/project/evidence/T009-mechanical-check.py:999999"
+    }
+  },
+  "families": {
+    "value": {
+      "gpt-6-astra": "OpenAI",
+      "gpt-5.6-terra": "OpenAI",
+      "sonnet": "Anthropic",
+      "claude-opus-5": "Anthropic",
+      "gemini-3.1-pro-high": "Google",
+      "gemini-3.8-flash-high": "Google"
+    },
+    "source": "docs/MODEL_ROUTING.md#preços-e-capacidades-de-transporte"
+  },
+  "authors": {
+    "value": [
+      "Google"
+    ],
+    "source": "_tl-orc/project/evidence/T005-r01.md#L12"
+  },
+  "policy": {
+    "value": "required",
+    "source": "_tl-orc/project/tasks/T005-review-followups-e-agent-runs.md#L32"
+  },
+  "judgment": {
+    "source": "_tl-orc/project/evidence/T005-classification.md:32",
+    "anchor": "Validação pelo Orquestrador"
+  }
+}

@@ -3,15 +3,15 @@ type: fix
 deliverable: none
 standalone: true
 method: native
-status: done
-state_revision: 9
+status: in_progress
+state_revision: 10
 depends_on: [T009]
 blocked_by: []
 origin: user (2026-09-07, durante T009: "se for necessário, salva no prompt do orchestrator")
 decisions: []
 spec_author: orchestrator
-spec_revision: 815f98e598b30729 (s4; s3 8ca85b60ef1c1002 revisada em r04; s2 8ecaf0f6b411ac26 aprovada em r03; s1 eb1c10c039d4d8e6 aprovada em r02)
-rework_round: 4
+spec_revision: 8775848ce7280c47 (s5; s4 815f98e598b30729 aprovada em r06; s3 revisada em r04; s2 aprovada em r03; s1 aprovada em r02)
+rework_round: 5
 affects_context: []
 content_paths: [prompts/orchestrator.md, prompts/orchestrator-perfis.md, prompts/orchestrator-playbook.md, prompts/checker-report-only.md, prompts/searcher.md, prompts/classifier.md, schemas/classification-result.schema.json, CHANGELOG.md]
 content_id: 4ede3a982a12cee02cc7e652b6e43c4a60c0de92:21768d877bbc9055
@@ -39,6 +39,7 @@ AC04 Escopo de leitura: em `checker-report-only.md` e na regra geral de `orchest
 AC05 Coerência: nenhuma contradição com reclassificação por fase, independência (preferred/required), regra de que o Orquestrador nunca escolhe modelo/effort, e com o escopo de T007/T008 (que permanecem separadas); SKILL.md e demais arquivos só remetem.
 AC06 Portões: validador verde; manifesto e schemas inalterados; CHANGELOG em Unreleased sem menção a ferramenta ou autoria; sondas por leitura: (a) briefing com origem genérica → o texto o rejeita; (b) quarto rework com achado da mesma classe → o texto manda escalar; (c) Checker que leu fora da raiz sem autorização → o texto manda declarar desvio.
 AC07 Searcher classificado: a regra "nunca escolhe modelo ou effort por conta própria" cobre também o Searcher sob demanda: `orchestrator-perfis.md#searcher-sob-demanda`, o parágrafo do Searcher em `orchestrator.md` e `prompts/searcher.md` deixam de fixar perfil; o Searcher recebe modelo e effort de uma classificação da fase ou de pin explícito do usuário ou do consumidor, ainda assim passado ao Classificador como restrição; a classificação da fase cobre as buscas daquela fase; busca trivial direta continua sem agente; a única exceção de inicialização com perfil fixo é a do próprio Classificador, dita explicitamente. O papel `searcher` entra no schema de classificação de forma aditiva (`schema_version` 2, `additionalProperties: false` preservado) com a MESMA estrutura dos demais papéis, inclusive `tier`, cuja semântica para o Searcher é o dimensionamento da consulta (abrangência, risco de fonte e custo da busca), não um tier de trabalho; `prompts/classifier.md` entra no escopo para remover a exclusão do Searcher de `requested_roles` e da saída e para definir essa semântica do `tier`; a solicitação pode pedir `searcher` sozinho ou junto dos demais papéis. (s4 em 2026-09-07 após o parecer r04: classifier.md no escopo; tier do Searcher definido.)
+AC08 Cadeia padrão do Searcher e compatibilidade do schema: a tabela de cadeias em `orchestrator-perfis.md#perfil-padrão` ganha a linha do Searcher (cadeia operacional Agy → Claude → Codex, com modelo e effort escolhidos pelo Classificador), para que uma consulta inicial em projeto sem configuração local e sem pin tenha cadeia definida pelo perfil publicado; o catálogo publicado por omissão fica claro para esse papel. O CHANGELOG registra a compatibilidade unidirecional do schema (objetos anteriores continuam válidos; objetos com `searcher` exigem o schema desta revisão) e que a revisão efetiva do contrato e do schema é identificada pela release, prevista como menor (v0.6.0) por capacidade nova de classificação, mantendo `schema_version` 2. Sonda: consulta inicial sem perfil local e sem pin → o texto fornece a cadeia do Searcher e exige classificação; nada fica indefinido. (s5 em 2026-09-07 pela conferência do maintainer sobre o head 6d33c48.)
 ### Verification profile
 `fix` de texto normativo: sondas contrafactuais por leitura (AC06) e Checker report-only de família distinta de toda autoria efetiva, com hipótese rejeitada por critério.
 ## Result
@@ -48,5 +49,6 @@ Quatro regras consolidadas no contrato distribuído, com a procedência conforme
 `evidence/T010-classification.md`, `T010-maker-report.md`, `T010-r01.md` (changes_requested, duplicação), `T010-r02.md` (approved, spec s1), `T010-r03.md` (approved, spec s2 com a tabela de procedência).
 
 ## Review
+Reaberta em 20260908T001021Z pela conferência do maintainer sobre o head 6d33c48: falta a cadeia padrão do Searcher no perfil publicado (consulta inicial sem perfil local e sem pin ficaria indefinida) e a nota de compatibilidade unidirecional do schema com release menor v0.6.0. Spec s5 (AC08); rework 5 classificado; nova revisão exigida.
 Reaberta em 20260907T232537Z antes da integração do PR #26, por conferência do maintainer: (1) a tabela de procedência restringia catálogo, pins e cadeias a PROJECT.md, contradizendo a precedência vigente (instrução do usuário → configuração do consumidor → perfil publicado) e o caso de projeto sem perfil persistido; (2) o Searcher sob demanda ainda usava perfil fixo sem Classificador. Spec s3; rework 3 classificado; r04 changes_requested → spec s4; r05 changes_requested (playbook) → correção própria; r06 `approved` (T010-r06-checker-1); `done` em 20260907T235648Z. Histórico: r04 em 20260907T233909Z; rework 4 classificado.
 r01 changes_requested → rework 1; r02 approved (s1); spec ampliada para s2 por T009-c01; r03 approved (Checker codex gpt-6-astra high, run T010-r03-checker-1), com desvio de leitura autodeclarado pelo Checker (metadados Git via gitdir do worktree). `done` em 20260907T231408Z após o fechamento de T009 (depends_on satisfeito); conteúdo distribuído publicado no PR #26 sem merge. 20260907T230926Z.

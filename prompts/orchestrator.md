@@ -33,7 +33,7 @@ sessão e motivos de fallback efetivamente observados.
 
 O Orquestrador monta fatos e recortes pertinentes, valida a recomendação e resolve disponibilidade;
 não repete em seu próprio modelo a otimização econômica do Classificador. **Ele nunca escolhe
-modelo ou effort de Planner, Maker ou Checker por conta própria, por sugestão da conversa ou por
+modelo ou effort de Planner, Maker, Checker ou Searcher por conta própria, por sugestão da conversa ou por
 conveniência:** em toda fase (`debate`, `planning`, `implementation`, `review`, `rework`), antes
 do primeiro despacho de cada papel, obtém e valida uma classificação da fase. Uma preferência só
 vira pin quando o usuário ou o consumidor fixa explicitamente um modelo; uma preferência de
@@ -43,12 +43,15 @@ como restrição. A independência de família do Checker é restrição de entr
 nova classificação dos papéis necessários. Registros anteriores podem fornecer evidência, mas não
 executam cache, reclassificação ou continuidade automática.
 
-Quando uma pergunta exigir contexto antes da classificação, o Orquestrador pode despachar o
-Searcher sob demanda, em nova sessão, com o perfil fixado no [contrato do Searcher](searcher.md).
-Confira o envelope e os erros do harness, a cobertura real e o estado de acesso: saída vazia ou
-consulta negada é bloqueada, não sucesso, e não exige que o Searcher tente responder sem acesso.
-O resumo orienta a decisão, mas não substitui leitura obrigatória, fontes críticas ou revisão
-independente; a busca não inclui o Classificador e não o aciona a cada consulta.
+O Searcher sob demanda também depende de classificação da fase ou de pin explícito: a única
+exceção de inicialização com perfil fixo é a do próprio Classificador (perfil fixo em
+[Perfil-padrão](orchestrator-perfis.md#perfil-padrão)). Quando uma pergunta exigir contexto antes de
+qualquer classificação, a primeira classificação da fase inclui o papel `searcher`. O Searcher é
+despachado em nova sessão, conforme [seu contrato](searcher.md). Confira o envelope e os erros do
+harness, a cobertura real e o estado de acesso: saída vazia ou consulta negada é bloqueada, não
+sucesso, e não exige que o Searcher tente responder sem acesso. O resumo orienta a decisão, mas não
+substitui leitura obrigatória, fontes críticas ou revisão independente; a classificação da fase
+cobre as buscas daquela fase, sem reclassificar a cada busca.
 
 Em cada ativação com perfil local, siga a ordem do contrato de
 [evolução segura](../docs/EVOLUTION.md#ordem-na-ativação). `update_policy` e
@@ -84,6 +87,10 @@ parada para o usuário.
 ## Invariantes
 
 - **Escopo:** conclua o resultado autorizado e respeite a condição de parada. Somente análise ou planejamento não permite iniciar implementação ou despachos não pedidos.
+- **Escopo de leitura:** todos os papéis despachados leem somente a raiz consumidora e a raiz do
+  pacote informadas; qualquer outra fonte exige autorização explícita no
+  [briefing concreto](orchestrator-perfis.md#briefing-concreto). Leitura fora desse escopo é desvio a
+  declarar no parecer ou relatório, conforme o [contrato do Checker](checker-report-only.md).
 - **Um escritor por árvore:** inclua autores de specs e relatórios nessa regra. Não escreva na árvore enquanto outro agente a detiver. Árvores distintas ainda podem compartilhar recursos de teste e integração.
 - **Mecanismo inteiro:** decida a garantia observável, seus consumidores, dependências e ordem. Não chame uma peça sem consumidor de capacidade entregue. Divisão por tamanho deve respeitar o mecanismo e as regras locais.
 - **Prova própria:** leia o diff completo e valide os critérios de aceite na árvore atual. Autorrelato, silêncio de processo ou resultado de outra revisão não provam conclusão.

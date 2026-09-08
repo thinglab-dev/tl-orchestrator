@@ -5,12 +5,12 @@ o Orquestrador valida a recomendação e executa a cadeia de despacho autorizada
 
 ## Searcher sob demanda
 
-O Searcher é auxiliar de consulta, não papel classificado por tier e não integrante do schema de
-papéis classificados. Quando necessário, use sessão nova com Agy/Antigravity
-`gemini-3.8-flash-medium` / `medium`; política local ou pedido explícito do usuário pode substituir
-esse perfil após validação e registro. Não chame o Classificador para cada busca. O Searcher não
-decide, implementa, aprova ou despacha, e devolve apenas o resumo verificável previsto em
-[seu contrato](searcher.md). Busca trivial direta não exige agente.
+O Searcher é auxiliar de consulta. Quando necessário, use sessão nova: o Searcher recebe modelo e
+effort da classificação da fase (papel auxiliar searcher, que usa a mesma estrutura dos demais
+papéis e cujo tier dimensiona a consulta) ou de pin explícito do usuário ou do consumidor, ainda assim
+passado ao Classificador como restrição. A classificação da fase cobre as buscas daquela fase (não se reclassifica a cada busca). O Searcher não decide,
+implementa, aprova ou despacha, e devolve apenas o resumo verificável previsto em
+[seu contrato](searcher.md). Busca trivial direta continua sem agente.
 
 ## Perfil-padrão
 
@@ -37,13 +37,18 @@ A ordem de preferência dos harnesses é operacional:
 | Planner | Claude → Codex → Agy |
 | Maker | Codex → Claude → Agy |
 | Checker report-only | Agy → Claude → Codex, priorizando família diferente da identidade Maker aplicável |
+| Searcher | Agy → Claude → Codex |
 
-Essas cadeias publicadas autorizam fallback dentro dos seus limites. Uma instrução atual do
-usuário prevalece sobre a configuração do consumidor, que prevalece sobre o perfil publicado.
-Escolhas fixadas explicitamente para um papel continuam restrições do Classificador; não as
-transforme em mera capacidade observada. O padrão por tier não fixa Terra, Sonnet ou Gemini como
-modelo de trabalho de todos os tiers. Diversidade adicional do Planner é desejável, mas não basta
-sozinha para reordenar sua cadeia nem revogar uma preferência.
+Essas cadeias publicadas autorizam fallback dentro dos seus limites. A linha do Searcher é a cadeia
+por omissão quando não há configuração local nem pin, de modo que uma consulta inicial em projeto
+sem perfil persistido tem cadeia definida pelo perfil publicado; modelo e effort continuam
+escolhidos pelo Classificador dentro do catálogo em vigor (o publicado, na ausência de configuração
+local), nunca inferidos da cadeia (veja [Searcher sob demanda](#searcher-sob-demanda)). Uma
+instrução atual do usuário prevalece sobre a configuração do consumidor, que prevalece sobre o
+perfil publicado. Escolhas fixadas explicitamente para um papel continuam restrições do
+Classificador; não as transforme em mera capacidade observada. O padrão por tier não fixa Terra,
+Sonnet ou Gemini como modelo de trabalho de todos os tiers. Diversidade adicional do Planner é
+desejável, mas não basta sozinha para reordenar sua cadeia nem revogar uma preferência.
 
 ## Catálogo permitido
 
@@ -180,6 +185,13 @@ substantivas no trabalho residual exigem reclassificação. O Orquestrador perma
 selecionada pelo usuário; seu próprio esgotamento exige retomada pelo usuário ou pelo harness,
 não uma promessa de continuidade automática do pacote.
 
+Após N rodadas de rework (N padrão 3; o consumidor pode fixar outro valor em `PROJECT.md`) em que o
+Checker aponte achados centrais da mesma classe, o Orquestrador classifica uma fase consultiva (fase
+`debate`, papéis conforme o risco) e despacha um consultor com a pergunta "estamos corrigindo
+manifestações do mesmo problema ou descobrindo requisitos que precisam ser consolidados antes de
+continuar?". A orientação é consolidada (spec, abordagem ou critérios) antes de classificar outro
+rework; correções delimitadas seguem o fluxo normal.
+
 ## Independência do Checker
 
 Use sempre uma **nova sessão**, somente leitura, sem reutilizar a sessão de Maker, Classificador
@@ -217,6 +229,26 @@ separadamente. Confira acesso aos dois. Para Planner, Maker e Checker, inclua:
   [modelo de trabalho](../docs/WORK_MODEL.md#carregamento-e-envelhecimento): `CONTEXT.md`, índice,
   briefs das features afetadas e dependências diretas, unidade ativa e decisões referenciadas. O
   tipo da Task não entra no briefing do Classificador como sinal de tier.
+
+Cada informação do briefing declara a fonte do seu tipo e o conteúdo dessa fonte sustenta o valor
+declarado, conforme a tabela normativa de procedência:
+
+| Tipo de informação | Fonte autorizada | Conteúdo que sustenta o valor e conferência |
+| :--- | :--- | :--- |
+| `story_id`, fase e papéis solicitados | solicitação ou spec da Task/fase | o registro citado contém o valor literal |
+| catálogo (harness/modelo/effort), pins e cadeias | fontes de política conforme a [precedência vigente](#perfil-padrão) (instrução atual do usuário registrada; configuração do consumidor em `PROJECT.md`; ou o perfil publicado quando não há configuração local) | o registro citado cita exatamente o par, o pin ou a cadeia |
+| autoria efetiva e famílias | registro de `Agent runs` efetivo | a linha citada declara harness, modelo e família usados |
+| evidências de custo e capacidade | [docs/MODEL_ROUTING.md](../docs/MODEL_ROUTING.md) | pertinência ao modelo e, para proxy de custo, afirmação de custo por tarefa no cartão |
+| medição local | linha de tabela estruturada em evidência do projeto | ID na primeira coluna |
+| julgamento | registro documental vinculado por hash ao objeto e às entradas | hash coincide e veredito explícito |
+
+Localização que resolve (arquivo existe, âncora resolve, linha existe) não basta; fonte existente
+mas incompatível com o tipo ou com o valor é rejeitada. Listas compostas na hora sem procedência por
+entrada ou fontes genéricas como "um arquivo existente" não valem como origem e são rejeitadas; o
+Classificador só recebe IDs com origem. Um catálogo montado para a chamada é legítimo quando cada
+entrada deriva de uma dessas fontes com procedência verificável; rejeita-se a entrada sem
+procedência, não o catálogo montado; isso preserva projetos sem perfil persistido. A autorização de
+fontes além das raízes informadas segue o [escopo de leitura](orchestrator.md#invariantes).
 
 Em **Debater**, use o dossiê comum e os limites do
 [playbook consultivo](orchestrator-playbook.md#debater); não forneça schema de aprovação.

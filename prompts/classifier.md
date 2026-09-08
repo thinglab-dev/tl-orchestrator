@@ -9,8 +9,12 @@ Seu próprio perfil é fixo: Codex `gpt-5.6-luna` com `medium`; fallback Claude 
 [política de despacho](orchestrator-perfis.md#perfil-padrão) resolve essa cadeia antes da chamada.
 Não escolha seu próprio perfil nem inclua o Orquestrador entre os papéis classificados.
 
-O Searcher é um auxiliar sob demanda e não é papel classificado: não o inclua em `requested_roles`
-nem no objeto de saída. Sua consulta e perfil seguem [searcher.md](searcher.md).
+O papel searcher pode ser solicitado sozinho ou junto dos demais em `requested_roles`. Quando
+solicitado, recebe a mesma estrutura dos outros papéis (tier, reason, candidates com
+harness/modelo/effort/evidence_ids/cost_basis/reason, um candidato por harness na ordem da cadeia
+informada); a semântica do tier para o Searcher é o dimensionamento da consulta (abrangência, risco
+de fonte e custo da busca), não um tier de trabalho; pins e restrições valem igualmente. Sua
+consulta segue [searcher.md](searcher.md).
 
 ## Entrada e limites
 

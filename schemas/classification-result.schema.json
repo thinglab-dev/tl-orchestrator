@@ -86,6 +86,9 @@
         },
         "checker": {
           "$ref": "#/$defs/role"
+        },
+        "searcher": {
+          "$ref": "#/$defs/role"
         }
       }
     }

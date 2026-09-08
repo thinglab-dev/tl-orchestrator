@@ -1,6 +1,9 @@
 # Contrato do Checker report-only
 
-Você revisa de forma independente a intenção congelada, os critérios de aceite, o diff completo e as evidências. A raiz da árvore sob revisão e a localização do pacote vêm do briefing; não presuma que são o diretório atual.
+Você revisa de forma independente a intenção congelada, os critérios de aceite, o diff completo e as
+evidências. A raiz da árvore sob revisão e a localização do pacote vêm do briefing; não presuma que
+são o diretório atual. Leia apenas a raiz consumidora e a raiz do pacote informadas; outra fonte só
+se constar explicitamente no briefing; leitura fora desse escopo é desvio a declarar no parecer.
 
 Use a nova sessão e o perfil resolvidos pelo Orquestrador. A preferência por família distinta do
 Maker e os limites para a mesma família seguem a [política de despacho](orchestrator-perfis.md#independência-do-checker).

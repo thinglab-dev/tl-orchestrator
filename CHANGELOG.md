@@ -4,6 +4,46 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+### Corrigido
+
+- Regras de condução do método para convergência, confinamento e limites probatórios: escalonamento
+  consultivo após N rodadas de rework (padrão 3, configurável no perfil do consumidor) com achados
+  centrais da mesma classe, classificando fase consultiva (`debate`) para diagnosticar
+  manifestações do mesmo problema versus requisitos a consolidar antes de novo retrabalho; tabela
+  normativa de procedência por tipo de informação e conteúdo que sustenta o valor no briefing
+  (`story_id`, fase e papéis solicitados da solicitação ou spec com valor literal; catálogo, pins e
+  cadeias de fontes de política conforme a precedência vigente — instrução atual do usuário
+  registrada, configuração do consumidor em `PROJECT.md` ou perfil publicado na ausência de
+  configuração local —, legitimando catálogo montado para a chamada quando cada entrada tem
+  procedência verificável e rejeitando a entrada sem procedência, preservando projetos sem perfil
+  persistido; autoria efetiva e famílias do registro de `Agent runs` efetivo; evidências de custo e
+  capacidade de `docs/MODEL_ROUTING.md`; medição local com ID na primeira coluna; julgamento
+  vinculado por hash com veredito explícito), fixando que localização que resolve não basta e
+  rejeitando fonte incompatível com o tipo ou com o valor, além de rejeitar listas compostas na hora
+  sem procedência por entrada ou fontes genéricas como "um arquivo existente", com entrega ao
+  Classificador apenas de IDs com origem; limite declarado das provas mecânicas, em que conferência
+  mecânica e vinculação por hash comprovam correspondência e integridade, não correção ou
+  pertinência ao workload, mantendo adequação e alcance econômico como julgamento registrado; escopo
+  de leitura dos papéis confinado à raiz consumidora e à raiz do pacote informadas, exigindo
+  autorização explícita no briefing para qualquer outra fonte e declaração obrigatória de desvio no
+  parecer ou relatório; Searcher classificado sob demanda recebendo modelo e effort da
+  classificação da fase (papel auxiliar `searcher`, com a mesma estrutura dos demais papéis e tier
+  que dimensiona a consulta) ou de pin explícito passado como restrição, cobrindo as buscas daquela
+  fase sem reclassificar a cada consulta, cadeia por omissão do Searcher (Agy → Claude → Codex) no
+  perfil publicado, e tornando explícito que a única exceção de inicialização com perfil fixo é a do
+  próprio Classificador; admissão aditiva da propriedade opcional `searcher` em `roles` no schema de
+  resultado de classificação (versão 2 mantida); e contrato do Classificador que passa a admitir o
+  papel searcher com tier de consulta. Motivado pela análise em T009 e pela condução com retrabalhos
+  sucessivos e leitura fora da raiz sem autorização.
+
+### Alterado
+
+- Compatibilidade unidirecional do schema de resultado de classificação — objetos com os papéis
+  anteriores continuam válidos no schema desta revisão; objetos com `roles.searcher` são rejeitados
+  por schemas anteriores; `schema_version` permanece 2 e a revisão efetiva do contrato e do schema é
+  identificada pela release, prevista como menor (v0.6.0) por capacidade nova de classificação;
+  consumidores devem atualizar o pacote antes de classificar com o papel searcher.
+
 ## [0.5.0] - 2026-09-07
 
 ### Adicionado

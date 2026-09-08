@@ -3,8 +3,8 @@ type: fix
 deliverable: none
 standalone: true
 method: native
-status: in_progress
-state_revision: 10
+status: done
+state_revision: 11
 depends_on: [T009]
 blocked_by: []
 origin: user (2026-09-07, durante T009: "se for necessário, salva no prompt do orchestrator")
@@ -43,12 +43,12 @@ AC08 Cadeia padrão do Searcher e compatibilidade do schema: a tabela de cadeias
 ### Verification profile
 `fix` de texto normativo: sondas contrafactuais por leitura (AC06) e Checker report-only de família distinta de toda autoria efetiva, com hipótese rejeitada por critério.
 ## Result
-Quatro regras consolidadas no contrato distribuído, com a procedência conforme a precedência de fontes de política (s3) e o Searcher classificado com tier de consulta e schema aditivo (s4): escalonamento consultivo após N reworks (`orchestrator-perfis.md`, Fallback e interrupção); origem por tipo e conteúdo com tabela normativa de seis tipos (`orchestrator-perfis.md`, Briefing concreto); limite das provas mecânicas (`orchestrator-playbook.md`, Revisão externa); escopo de leitura confinado (`orchestrator.md`, invariantes; `checker-report-only.md`). CHANGELOG em Unreleased. Texto único por assunto com remissões.
+Quatro regras consolidadas no contrato distribuído, com a procedência conforme a precedência de fontes de política (s3) e o Searcher classificado com tier de consulta, schema aditivo (s4) e cadeia por omissão no perfil publicado com nota de compatibilidade unidirecional do schema e release menor prevista (s5): escalonamento consultivo após N reworks (`orchestrator-perfis.md`, Fallback e interrupção); origem por tipo e conteúdo com tabela normativa de seis tipos (`orchestrator-perfis.md`, Briefing concreto); limite das provas mecânicas (`orchestrator-playbook.md`, Revisão externa); escopo de leitura confinado (`orchestrator.md`, invariantes; `checker-report-only.md`). CHANGELOG em Unreleased. Texto único por assunto com remissões.
 
 ## Evidence
-`evidence/T010-classification.md`, `T010-maker-report.md`, `T010-r01.md` (changes_requested, duplicação), `T010-r02.md` (approved, spec s1), `T010-r03.md` (approved, spec s2 com a tabela de procedência).
+`evidence/T010-classification.md`, `T010-maker-report.md`, `T010-r01.md` (changes_requested, duplicação), `T010-r02.md` (approved, spec s1), `T010-r03.md` (approved, spec s2 com a tabela de procedência), `T010-r04.md`, `T010-r05.md` (changes_requested), `T010-r06.md` (approved, spec s4), `T010-r07.md` (approved, spec s5).
 
 ## Review
-Reaberta em 20260908T001021Z pela conferência do maintainer sobre o head 6d33c48: falta a cadeia padrão do Searcher no perfil publicado (consulta inicial sem perfil local e sem pin ficaria indefinida) e a nota de compatibilidade unidirecional do schema com release menor v0.6.0. Spec s5 (AC08); rework 5 classificado; nova revisão exigida.
+Reaberta em 20260908T001021Z pela conferência do maintainer sobre o head 6d33c48: falta a cadeia padrão do Searcher no perfil publicado (consulta inicial sem perfil local e sem pin ficaria indefinida) e a nota de compatibilidade unidirecional do schema com release menor v0.6.0. Spec s5 (AC08); rework 5 classificado (Maker Google); r07 `approved` (T010-r07-checker-1, sonda de consulta inicial sem perfil local e sem pin resolvida); `done` em 20260908T002447Z.
 Reaberta em 20260907T232537Z antes da integração do PR #26, por conferência do maintainer: (1) a tabela de procedência restringia catálogo, pins e cadeias a PROJECT.md, contradizendo a precedência vigente (instrução do usuário → configuração do consumidor → perfil publicado) e o caso de projeto sem perfil persistido; (2) o Searcher sob demanda ainda usava perfil fixo sem Classificador. Spec s3; rework 3 classificado; r04 changes_requested → spec s4; r05 changes_requested (playbook) → correção própria; r06 `approved` (T010-r06-checker-1); `done` em 20260907T235648Z. Histórico: r04 em 20260907T233909Z; rework 4 classificado.
 r01 changes_requested → rework 1; r02 approved (s1); spec ampliada para s2 por T009-c01; r03 approved (Checker codex gpt-6-astra high, run T010-r03-checker-1), com desvio de leitura autodeclarado pelo Checker (metadados Git via gitdir do worktree). `done` em 20260907T231408Z após o fechamento de T009 (depends_on satisfeito); conteúdo distribuído publicado no PR #26 sem merge. 20260907T230926Z.

@@ -1,0 +1,15 @@
+sessão: 01a07e9c-46f3-7a50-9412-53ae8b2f9516
+início/fim UTC: 20260908T012246Z → 20260908T012317Z
+## Saída literal: python3 T002-cases/tools/check_struct.py schemas/classification-result.schema.json T002-cases/resposta-minimo-2.json
+ESTRUTURA: válida
+## Saída literal: python3 T002-cases/tools/mech_check.py T002-cases/resposta-minimo-2.json T002-cases/tools/expected-medicao.json (executado na raiz do repositório fonte; só se aplica a JSON válido)
+   ('planner', ('claude', 'sonnet', 'medium'), True, [], 'token_price_only', True, True, 'elegível', True)
+   ('planner', ('codex', 'gpt-5.6-terra', 'medium'), True, [], 'token_price_only', True, True, 'elegível', True)
+   ('planner', ('agy', 'gemini-3.1-pro-high', 'high'), True, [], 'unknown', True, True, 'elegível', True)
+   ('maker', ('agy', 'gemini-3.8-flash-high', 'high'), True, [], 'local_observed', True, True, 'elegível', True)
+   ('maker', ('codex', 'gpt-5.6-terra', 'medium'), True, [], 'token_price_only', True, True, 'elegível', True)
+   ('maker', ('claude', 'sonnet', 'medium'), True, [], 'token_price_only', True, True, 'elegível', True)
+   ('checker', ('codex', 'gpt-6-astra', 'high'), True, [], 'local_observed', True, True, 'elegível', True)
+   ('checker', ('claude', 'sonnet', 'high'), True, [], 'token_price_only', True, True, 'elegível', True)
+   ('checker', ('agy', 'gemini-3.1-pro-high', 'high'), True, [], 'unknown', True, True, 'elegível', True)
+RESULT: ACEITA

@@ -1,0 +1,8 @@
+sessão: 01a07e9b-2a73-7d53-8c91-7be8cf144f20
+início/fim UTC: 20260908T012132Z → 20260908T012212Z
+## Saída literal: python3 T002-cases/tools/check_struct.py schemas/classification-result.schema.json T002-cases/resposta-prosa-3.json
+JSON inválido: Extra data: line 1 column 2917 (char 2916)
+## Saída literal: python3 T002-cases/tools/mech_check.py T002-cases/resposta-prosa-3.json T002-cases/tools/expected-medicao.json (executado na raiz do repositório fonte; só se aplica a JSON válido)
+não executado: JSON inválido
+## Interpretação do Orquestrador (não é saída do validador)
+O texto contém um objeto JSON encerrado prematuramente seguido de ',"confidence":"high"}': fechamento prematuro (não truncamento). No primeiro objeto: chave 'version' em vez de 'schema_version'; 'context_revision' e 'catalog_revision' ausentes; 'confidence' fora do objeto; tiers ['medium', 'high', 'high'] fora do enum.

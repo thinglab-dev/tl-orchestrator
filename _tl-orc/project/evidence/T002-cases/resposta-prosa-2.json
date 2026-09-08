@@ -1,0 +1,112 @@
+{
+  "version": 2,
+  "story_id": null,
+  "phase": "debate",
+  "roles": {
+    "planner": {
+      "tier": "medium",
+      "reason": "Orçamento moderado e consulta curta, sem autoria efetiva anterior.",
+      "candidates": [
+        {
+          "harness": "claude",
+          "model": "sonnet",
+          "effort": "medium",
+          "evidence_ids": ["price-sonnet", "sonnet-effort", "transport-claude"],
+          "cost_basis": "token_price_only",
+          "reason": "Par autorizado, econômico e adequado ao debate consultivo."
+        },
+        {
+          "harness": "codex",
+          "model": "gpt-5.6-terra",
+          "effort": "medium",
+          "evidence_ids": ["price-terra", "gpt56-coding", "transport-openai"],
+          "cost_basis": "token_price_only",
+          "reason": "Par autorizado e compatível com consulta de baixo risco."
+        },
+        {
+          "harness": "agy",
+          "model": "gemini-3.1-pro-high",
+          "effort": "high",
+          "evidence_ids": [],
+          "cost_basis": "unknown",
+          "reason": "Único par autorizado do harness, mas sem evidência pertinente."
+        }
+      ]
+    },
+    "maker": {
+      "tier": "medium",
+      "reason": "Preferência do usuário fixada no Maker Gemini Flash; execução é apenas consultiva.",
+      "candidates": [
+        {
+          "harness": "agy",
+          "model": "gemini-3.8-flash-high",
+          "effort": "high",
+          "evidence_ids": ["local-t009-maker-gemini", "local-t010-maker-gemini", "price-flash", "transport-flash", "flash-deepswe"],
+          "cost_basis": "local_observed",
+          "reason": "Pin autorizado e sustentado por medições locais pertinentes."
+        },
+        {
+          "harness": "codex",
+          "model": "gpt-5.6-terra",
+          "effort": "medium",
+          "evidence_ids": ["price-terra", "gpt56-coding", "transport-openai"],
+          "cost_basis": "token_price_only",
+          "reason": "Fallback autorizado e adequado ao orçamento moderado."
+        },
+        {
+          "harness": "claude",
+          "model": "sonnet",
+          "effort": "medium",
+          "evidence_ids": ["price-sonnet", "sonnet-effort", "transport-claude"],
+          "cost_basis": "token_price_only",
+          "reason": "Fallback autorizado para opinião curta."
+        }
+      ]
+    },
+    "checker": {
+      "tier": "high",
+      "reason": "Checker independente preferido e pin do piloto Astra exige esforço high.",
+      "candidates": [
+        {
+          "harness": "codex",
+          "model": "gpt-6-astra",
+          "effort": "high",
+          "evidence_ids": ["local-t005-checker-astra", "local-t009-checker-astra", "price-astra", "astra-coding", "astra-domain", "transport-openai"],
+          "cost_basis": "local_observed",
+          "reason": "Pin autorizado, independente e validado por medições locais."
+        },
+        {
+          "harness": "claude",
+          "model": "sonnet",
+          "effort": "high",
+          "evidence_ids": ["price-sonnet", "sonnet-effort", "transport-claude"],
+          "cost_basis": "token_price_only",
+          "reason": "Fallback autorizado com esforço exigido pelo catálogo."
+        },
+        {
+          "harness": "agy",
+          "model": "gemini-3.1-pro-high",
+          "effort": "high",
+          "evidence_ids": [],
+          "cost_basis": "unknown",
+          "reason": "Fallback autorizado, sem evidência econômica pertinente."
+        }
+      ]
+    }
+  },
+  "facts": [
+    "Debate consultivo sem story, diff ou escrita.",
+    "Papéis solicitados: planner, maker e checker.",
+    "Maker e checker possuem pins autorizados."
+  ],
+  "uncertainties": [
+    "Não há pin para o planner.",
+    "Não há evidência pertinente para gemini-3.1-pro-high."
+  ],
+  "reclassify_when": [
+    "Surgir diff ou necessidade de escrita.",
+    "For criada uma story ou houver autoria efetiva anterior.",
+    "O orçamento ou os pins forem alterados."
+  ],
+  "confidence": "high"
+}

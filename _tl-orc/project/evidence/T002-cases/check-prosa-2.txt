@@ -1,0 +1,24 @@
+sessão: 01a07e9a-67fa-7233-8d3d-8c6869649da1
+início/fim UTC: 20260908T012043Z → 20260908T012132Z
+## Saída literal: python3 T002-cases/tools/check_struct.py schemas/classification-result.schema.json T002-cases/resposta-prosa-2.json
+ESTRUTURA: INVÁLIDA
+ - $: campo obrigatório ausente 'schema_version'
+ - $: campo obrigatório ausente 'context_revision'
+ - $: campo obrigatório ausente 'catalog_revision'
+ - $: propriedade extra 'version'
+ - $.roles.planner.tier: 'medium' fora do enum ['simple', 'normal', 'heavy']
+ - $.roles.maker.tier: 'medium' fora do enum ['simple', 'normal', 'heavy']
+ - $.roles.checker.tier: 'high' fora do enum ['simple', 'normal', 'heavy']
+## Saída literal: python3 T002-cases/tools/mech_check.py T002-cases/resposta-prosa-2.json T002-cases/tools/expected-medicao.json (executado na raiz do repositório fonte; só se aplica a JSON válido)
+   ('planner', ('claude', 'sonnet', 'medium'), True, [], 'token_price_only', True, True, 'elegível', True)
+   ('planner', ('codex', 'gpt-5.6-terra', 'medium'), True, [], 'token_price_only', True, True, 'elegível', True)
+   ('planner', ('agy', 'gemini-3.1-pro-high', 'high'), True, [], 'unknown', True, True, 'elegível', True)
+   ('maker', ('agy', 'gemini-3.8-flash-high', 'high'), True, [], 'local_observed', True, True, 'elegível', True)
+   ('maker', ('codex', 'gpt-5.6-terra', 'medium'), True, [], 'token_price_only', True, True, 'elegível', True)
+   ('maker', ('claude', 'sonnet', 'medium'), True, [], 'token_price_only', True, True, 'elegível', True)
+   ('checker', ('codex', 'gpt-6-astra', 'high'), True, [], 'local_observed', True, True, 'elegível', True)
+   ('checker', ('claude', 'sonnet', 'high'), True, [], 'token_price_only', True, True, 'elegível', True)
+   ('checker', ('agy', 'gemini-3.1-pro-high', 'high'), True, [], 'unknown', True, True, 'elegível', True)
+RESULT: REJEITADA
+   - context_revision: esperado 'tl-orchestrator@c873846+T002-medicao-AC03', obtido None
+   - catalog_revision: esperado 'PROJECT.md-perfil-de-despacho-2026-09-07', obtido None

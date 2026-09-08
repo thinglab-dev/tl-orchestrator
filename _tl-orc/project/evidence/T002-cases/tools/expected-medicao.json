@@ -1,0 +1,6 @@
+{"story_id":null,"phase":"debate","context_revision":"tl-orchestrator@c873846+T002-medicao-AC03","catalog_revision":"PROJECT.md-perfil-de-despacho-2026-09-07","roles":["planner","maker","checker"],
+ "chains":{"planner":["claude","codex","agy"],"maker":["agy","codex","claude"],"checker":["codex","claude","agy"]},
+ "pins":{"maker":["agy","gemini-3.8-flash-high","high"],"checker":["codex","gpt-6-astra","high"]},
+ "local_ids":["local-t009-maker-gemini","local-t010-maker-gemini","local-t005-checker-astra","local-t009-checker-astra"],"proxy_ids":["astra-coding","flash-deepswe"],
+ "families":{"gemini-3.8-flash-high":"Google","gemini-3.1-pro-high":"Google","gpt-5.6-terra":"OpenAI","gpt-5.6-luna":"OpenAI","gpt-6-astra":"OpenAI","sonnet":"Anthropic","claude-opus-5":"Anthropic"},
+ "authors":[],"policy":"preferred"}

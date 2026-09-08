@@ -379,3 +379,85 @@ classifier.md, orchestrator-perfis.md e CHANGELOG.md alterados; exclusão do Sea
 
 ## Correção própria do Orquestrador após r05 (autoria Anthropic, declarada)
 prompts/orchestrator-playbook.md: seção Searcher sob demanda condicionada à classificação prévia ou pin, com remissão aos perfis, e enumeração de papéis classificados incluindo o Searcher; validador exit 0. content_id r06: 4ede3a982a12cee02cc7e652b6e43c4a60c0de92:21768d877bbc9055.
+
+## Rework 5 — Maker agy gemini-3.8-flash-high (20260908T001456Z → 20260908T001742Z, exit 0), spec s5, fase classificada (T010-r07-classifier-1), conversa Agy 87ddee1f-c711-4212-94ca-36db18fa7266
+
+# Relatório do Maker — Task Native T010 (Rework 5)
+
+## 1. Arquivos e trechos alterados
+
+### A. [`prompts/orchestrator-perfis.md`](prompts/orchestrator-perfis.md#L40-L46)
+- **Linha 40**: inclusão da linha do Searcher na tabela de cadeias operacionais de preferência e fallback:
+  ```markdown
+  | Searcher | Agy → Claude → Codex |
+  ```
+- **Linhas 42-46**: explicitação da cadeia por omissão do Searcher no perfil publicado e remissão normativa para modelo e effort:
+  ```markdown
+  Essas cadeias publicadas autorizam fallback dentro dos seus limites. A linha do Searcher é a cadeia
+  por omissão quando não há configuração local nem pin, de modo que uma consulta inicial em projeto
+  sem perfil persistido tem cadeia definida pelo perfil publicado; modelo e effort continuam
+  escolhidos pelo Classificador dentro do catálogo em vigor (o publicado, na ausência de configuração
+  local), nunca inferidos da cadeia (veja [Searcher sob demanda](#searcher-sob-demanda)). Uma
+  instrução atual do usuário prevalece sobre a configuração do consumidor, que prevalece sobre o
+  perfil publicado.
+  ```
+
+### B. [`CHANGELOG.md`](CHANGELOG.md#L32-L45)
+- **Linhas 32-33**: inclusão da frase recomendada em `### Corrigido` sob `## [Unreleased]`:
+  ```markdown
+  fase sem reclassificar a cada consulta, cadeia por omissão do Searcher (Agy → Claude → Codex) no
+  perfil publicado, e tornando explícito que a única exceção de inicialização com perfil fixo é a do
+  ```
+- **Linhas 39-45**: acréscimo da subseção `### Alterado` em `## [Unreleased]`:
+  ```markdown
+  ### Alterado
+
+  - Compatibilidade unidirecional do schema de resultado de classificação — objetos com os papéis
+    anteriores continuam válidos no schema desta revisão; objetos com `roles.searcher` são rejeitados
+    por schemas anteriores; `schema_version` permanece 2 e a revisão efetiva do contrato e do schema é
+    identificada pela release, prevista como menor (v0.6.0) por capacidade nova de classificação;
+    consumidores devem atualizar o pacote antes de classificar com o papel searcher.
+  ```
+
+---
+
+## 2. Resultado do validador
+
+Comando executado: `python3 scripts/validate_repository.py`
+Diretório: `<caminho local>`
+Exit code: `0`
+
+Saída:
+```text
+OK: 17 package files; JSON, frontmatter, links, export and hashes validated
+NOTE: structural checks do not prove method behavior
+```
+Nenhum diretório `scripts/__pycache__` foi gerado ou deixado no repositório.
+
+---
+
+## 3. Sonda por leitura
+
+**Cenário contrafactual:** Um Orquestrador em projeto sem `_tl-orc/PROJECT.md` de perfil e sem pin explícito do usuário precisa realizar uma consulta inicial sob demanda ao Searcher.
+
+Como o Orquestrador resolve a operação exclusivamente com o texto publicado:
+
+1. **Definição da cadeia de preferência e fallback:**
+   - Em [`prompts/orchestrator-perfis.md:L40`](prompts/orchestrator-perfis.md#L40), a tabela do Perfil-padrão fornece a cadeia operacional explícita: `Searcher | Agy → Claude → Codex`.
+   - Em [`prompts/orchestrator-perfis.md:L42-L48`](prompts/orchestrator-perfis.md#L42-L48), a regra fixa que essa linha é a cadeia por omissão quando não há configuração local nem pin, respaldada pela ordem de precedência em que, na ausência de instrução do usuário e de configuração do consumidor, vigora o perfil publicado.
+   - Nada fica indefinido quanto à ordem de harnesses para o Searcher.
+
+2. **Necessidade mandatória de classificação (nunca inferida da cadeia):**
+   - Em [`prompts/orchestrator.md:L35-L38`](prompts/orchestrator.md#L35-L38), o contrato impõe: *"Ele nunca escolhe modelo ou effort de Planner, Maker, Checker ou Searcher por conta própria, por sugestão da conversa ou por conveniência: em toda fase (...) antes do primeiro despacho de cada papel, obtém e valida uma classificação da fase."*
+   - Em [`prompts/orchestrator.md:L46-L50`](prompts/orchestrator.md#L46-L50), reforça: *"O Searcher sob demanda também depende de classificação da fase ou de pin explícito: a única exceção de inicialização com perfil fixo é a do próprio Classificador (...) Quando uma pergunta exigir contexto antes de qualquer classificação, a primeira classificação da fase inclui o papel `searcher`."*
+   - Em [`prompts/orchestrator-perfis.md:L8-L11`](prompts/orchestrator-perfis.md#L8-L11) e [`prompts/orchestrator-perfis.md:L44-L46`](prompts/orchestrator-perfis.md#L44-L46), o texto publicado veda terminantemente inferir modelo ou effort a partir da cadeia, remetendo a que modelo e effort continuam selecionados pelo Classificador.
+
+3. **Resolução da classificação com o catálogo publicado:**
+   - Em [`prompts/orchestrator-perfis.md:L20-L27`](prompts/orchestrator-perfis.md#L20-L27), o Classificador é chamado em sessão curta com seu perfil fixo publicado (`Codex gpt-5.6-luna medium` → `Claude sonnet medium` → `Agy gemini-3.8-flash-medium`).
+   - Em [`prompts/orchestrator-perfis.md:L85-L86`](prompts/orchestrator-perfis.md#L85-L86), a regra estabelece que: *"Ausência de perfil local não impede usar o padrão publicado depois de conferir as capacidades necessárias."*
+   - O briefing enviado ao Classificador inclui a cadeia publicada (`Agy → Claude → Codex`), o catálogo de modelos permitidos em vigor (publicado) e solicita o papel `searcher` com seu tier de dimensionamento de consulta ([`prompts/orchestrator-perfis.md:L8-11`](prompts/orchestrator-perfis.md#L8-L11)).
+   - O Classificador devolve pares modelo/effort para cada harness da cadeia do Searcher.
+   - O Orquestrador valida o JSON retornado contra o schema versão 2 (que possui a propriedade opcional `roles.searcher`), confere os vínculos e despacha a sessão nova do Searcher com o primeiro harness utilizável da cadeia (`Agy`, ou fallback `Claude`, depois `Codex`) nos exatos modelo e effort definidos pela classificação ([`prompts/orchestrator-perfis.md:L107-L110`](prompts/orchestrator-perfis.md#L107-L110)).
+
+## Conferência do Orquestrador sobre o rework 5
+Somente prompts/orchestrator-perfis.md (linha `Searcher | Agy → Claude → Codex` e parágrafo após a tabela, com remissão a Searcher sob demanda) e CHANGELOG.md (frase no item de Corrigido; subseção Alterado com a compatibilidade unidirecional e a release menor prevista) alterados; validador exit 0; sem caminhos privados. content_id r07: 6d33c4861358f06014798a10f184ce9c8d08fbc2:97d7164ece647598 (commit publicado 6d33c48 + sha256 do diff --binary de content_paths).

@@ -1,14 +1,14 @@
 format_version: 1
 work_method: native
-active_work_ref: native/task/T002@_tl-orc/project/tasks/T002-esqueleto-do-schema-no-briefing.md
-current_role: orchestrator
-next_action: lote autorizado (T002 fonte + T002 platform): classificar implementation de T002 e despachar Maker no worktree; medição com Luna; Checker Astra
+active_work_ref: none
+current_role: none
+next_action: T002 done (briefing mínimo definido; delta em rascunho); lote continua na T002 do platform (smokes com o briefing mínimo); aplicar o delta ao pacote exige Task fix autorizada
 coordinator:
   harness: claude
   session: claude-code-b1467fdf
   started_at: 20260907T210307Z
-  last_write_at: 20260908T011218Z
-  released: false
+  last_write_at: 20260908T022340Z
+  released: true
 review_followups: []
 next_task_id: 12
 next_deliverable_id: 1
@@ -20,7 +20,7 @@ open_discussions: []
 | id | type | deliverable | status | depends_on | blocked_by | state_revision | last_evidence |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | T001 | fix | none | draft | [] | [] | 0 | - |
-| T002 | analysis | none | in_progress | [] | [] | 1 | - |
+| T002 | analysis | none | done | [] | [] | 2 | evidence/T002-r04.md |
 | T003 | analysis | none | draft | [] | [] | 0 | - |
 | T004 | fix | none | done | [] | [] | 3 | evidence/T004-r02.md |
 | T005 | feat | none | done | [T004] | [] | 4 | evidence/T005-r02.md |

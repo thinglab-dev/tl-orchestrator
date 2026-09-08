@@ -3,8 +3,8 @@ type: analysis
 deliverable: none
 standalone: true
 method: native
-status: in_progress
-state_revision: 1
+status: done
+state_revision: 2
 depends_on: []
 blocked_by: []
 origin: platform v0.4.0 update evidence (smokes r03–r07, 2026-09-06/07)
@@ -35,10 +35,10 @@ AC06 Portões: `python3 scripts/validate_repository.py` verde; nenhum arquivo di
 `analysis`: premissas, alternativas e o que mudaria a conclusão (AC05); medição reproduzível (AC03, AC06); Checker report-only de família distinta de toda autoria efetiva, com hipótese rejeitada e citação por critério (pin do piloto do fonte: `gpt-6-astra/high`, restrição `required` específica desta revisão).
 
 ## Result
-(pendente)
+Briefing mínimo do Classificador definido (`evidence/T002-briefing-template.md`) e derivável do schema por protótipo não distribuído (`evidence/T002-briefing-skeleton.py`, com interrupção clara fora da cobertura declarada); diagnóstico das ocorrências com citações verificadas; medição em smoke sintético com Luna medium: prosa 0/3 válidas na primeira resposta, briefing mínimo 3/3 (N=3 por condição; esqueleto e regras alterados juntos; sem generalização); delta normativo em rascunho com prescrição única em `classifier.md` e remissão em `orchestrator-perfis.md`, distribuição e release fora do escopo (Task `fix` própria, se autorizada).
 
 ## Evidence
-(pendente)
+`evidence/T002-analysis.md`, `T002-briefing-template.md`, `T002-briefing-skeleton.py`, `T002-cases/` (briefings, respostas literais, conferências, RESULTS.md, tools/), `T002-classification.md`, `T002-maker-report.md`, `T002-r01.md` (changes_requested, 8), `T002-r02.md` (changes_requested, 4), `T002-r03.md` (changes_requested, 1), `T002-r04.md` (approved).
 
 ## Review
-(pendente)
+r01 changes_requested (oito achados; três contra registros do Orquestrador, corrigidos por ele); rework 1 do Maker (interrompido por timeout da CLI do Agy e retomado na mesma conversa); r02 changes_requested (quatro itens parciais); rework 2; r03 changes_requested (um item: garantia do protótipo, terceira rodada da mesma classe) → correção própria do Orquestrador com contraprovas; r04 `approved` (T002-r04-checker-1). `done` em 20260908T022340Z. Todas as fases classificadas (Luna: duas correções únicas por `official_task_proxy` sem evidência pertinente).

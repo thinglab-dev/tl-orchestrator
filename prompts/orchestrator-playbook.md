@@ -235,6 +235,8 @@ Registre o comando literal, diretório, resultado e exit code real. Um pipe para
 
 Antes de chamar um vermelho de regressão, leia o teste e investigue o caminho causal, dependências e ambiente. Compare com a base apropriada sob condições equivalentes. A ausência de edição no arquivo que falhou não prova que a mudança é inocente. Se não puder atribuir, registre como não atribuído. Não repita indefinidamente até obter verde nem descarte amostras ruins.
 
+Ao atingir o limite de rodadas ou turnos sem concluir, registre uma parada honesta: um checkpoint em disco com o estado alcançado, a evidência parcial e a causa observada, para reconciliação. Isso não é sucesso e não deve disparar sozinho um novo loop automático.
+
 ## Revisão externa
 
 Esta seção e seu schema regem a revisão de entrega. As opiniões consultivas de

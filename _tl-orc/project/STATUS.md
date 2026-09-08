@@ -1,14 +1,14 @@
 format_version: 1
 work_method: native
-active_work_ref: none
-current_role: none
-next_action: T010 publicada na 0.6.0; atualizar o platform para v0.6.0 e repetir os smokes pendentes (platform T001); T001–T003, T006–T008, T011 em draft aguardam autorização
+active_work_ref: native/task/T002@_tl-orc/project/tasks/T002-esqueleto-do-schema-no-briefing.md
+current_role: orchestrator
+next_action: lote autorizado (T002 fonte + T002 platform): classificar implementation de T002 e despachar Maker no worktree; medição com Luna; Checker Astra
 coordinator:
   harness: claude
   session: claude-code-b1467fdf
   started_at: 20260907T210307Z
-  last_write_at: 20260908T003000Z
-  released: true
+  last_write_at: 20260908T011218Z
+  released: false
 review_followups: []
 next_task_id: 12
 next_deliverable_id: 1
@@ -20,7 +20,7 @@ open_discussions: []
 | id | type | deliverable | status | depends_on | blocked_by | state_revision | last_evidence |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | T001 | fix | none | draft | [] | [] | 0 | - |
-| T002 | analysis | none | draft | [] | [] | 0 | - |
+| T002 | analysis | none | in_progress | [] | [] | 1 | - |
 | T003 | analysis | none | draft | [] | [] | 0 | - |
 | T004 | fix | none | done | [] | [] | 3 | evidence/T004-r02.md |
 | T005 | feat | none | done | [T004] | [] | 4 | evidence/T005-r02.md |

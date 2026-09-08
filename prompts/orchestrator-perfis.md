@@ -37,13 +37,18 @@ A ordem de preferência dos harnesses é operacional:
 | Planner | Claude → Codex → Agy |
 | Maker | Codex → Claude → Agy |
 | Checker report-only | Agy → Claude → Codex, priorizando família diferente da identidade Maker aplicável |
+| Searcher | Agy → Claude → Codex |
 
-Essas cadeias publicadas autorizam fallback dentro dos seus limites. Uma instrução atual do
-usuário prevalece sobre a configuração do consumidor, que prevalece sobre o perfil publicado.
-Escolhas fixadas explicitamente para um papel continuam restrições do Classificador; não as
-transforme em mera capacidade observada. O padrão por tier não fixa Terra, Sonnet ou Gemini como
-modelo de trabalho de todos os tiers. Diversidade adicional do Planner é desejável, mas não basta
-sozinha para reordenar sua cadeia nem revogar uma preferência.
+Essas cadeias publicadas autorizam fallback dentro dos seus limites. A linha do Searcher é a cadeia
+por omissão quando não há configuração local nem pin, de modo que uma consulta inicial em projeto
+sem perfil persistido tem cadeia definida pelo perfil publicado; modelo e effort continuam
+escolhidos pelo Classificador dentro do catálogo em vigor (o publicado, na ausência de configuração
+local), nunca inferidos da cadeia (veja [Searcher sob demanda](#searcher-sob-demanda)). Uma
+instrução atual do usuário prevalece sobre a configuração do consumidor, que prevalece sobre o
+perfil publicado. Escolhas fixadas explicitamente para um papel continuam restrições do
+Classificador; não as transforme em mera capacidade observada. O padrão por tier não fixa Terra,
+Sonnet ou Gemini como modelo de trabalho de todos os tiers. Diversidade adicional do Planner é
+desejável, mas não basta sozinha para reordenar sua cadeia nem revogar uma preferência.
 
 ## Catálogo permitido
 

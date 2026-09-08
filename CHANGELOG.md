@@ -27,13 +27,22 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   de leitura dos papéis confinado à raiz consumidora e à raiz do pacote informadas, exigindo
   autorização explícita no briefing para qualquer outra fonte e declaração obrigatória de desvio no
   parecer ou relatório; Searcher classificado sob demanda recebendo modelo e effort da
-  classificação da fase (papel auxiliar `searcher`, com a mesma estrutura dos demais papéis e tier que dimensiona a consulta) ou de pin explícito
-  passado como restrição, cobrindo as buscas daquela fase sem reclassificar a cada consulta, e
-  tornando explícito que a única exceção de inicialização com perfil fixo é a do próprio
-  Classificador; admissão aditiva da propriedade opcional `searcher` em `roles` no schema de
+  classificação da fase (papel auxiliar `searcher`, com a mesma estrutura dos demais papéis e tier
+  que dimensiona a consulta) ou de pin explícito passado como restrição, cobrindo as buscas daquela
+  fase sem reclassificar a cada consulta, cadeia por omissão do Searcher (Agy → Claude → Codex) no
+  perfil publicado, e tornando explícito que a única exceção de inicialização com perfil fixo é a do
+  próprio Classificador; admissão aditiva da propriedade opcional `searcher` em `roles` no schema de
   resultado de classificação (versão 2 mantida); e contrato do Classificador que passa a admitir o
   papel searcher com tier de consulta. Motivado pela análise em T009 e pela condução com retrabalhos
   sucessivos e leitura fora da raiz sem autorização.
+
+### Alterado
+
+- Compatibilidade unidirecional do schema de resultado de classificação — objetos com os papéis
+  anteriores continuam válidos no schema desta revisão; objetos com `roles.searcher` são rejeitados
+  por schemas anteriores; `schema_version` permanece 2 e a revisão efetiva do contrato e do schema é
+  identificada pela release, prevista como menor (v0.6.0) por capacidade nova de classificação;
+  consumidores devem atualizar o pacote antes de classificar com o papel searcher.
 
 ## [0.5.0] - 2026-09-07
 

@@ -4,6 +4,8 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-08
+
 ### Corrigido
 
 - Regras de condução do método para convergência, confinamento e limites probatórios: escalonamento

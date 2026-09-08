@@ -2,12 +2,12 @@ format_version: 1
 work_method: native
 active_work_ref: none
 current_role: none
-next_action: T002 done (briefing mínimo definido; delta em rascunho); lote continua na T002 do platform (smokes com o briefing mínimo); aplicar o delta ao pacote exige Task fix autorizada
+next_action: T002 done com retificação (alcance da medição; execução sem autorização explícita registrada); aplicar o delta do briefing mínimo ao pacote e regras de escrita/permissões de Checker exigem Tasks fix autorizadas; nenhuma chamada paga sem autorização expressa
 coordinator:
   harness: claude
   session: claude-code-b1467fdf
   started_at: 20260907T210307Z
-  last_write_at: 20260908T022340Z
+  last_write_at: 20260908T105215Z
   released: true
 review_followups: []
 next_task_id: 12

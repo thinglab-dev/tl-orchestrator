@@ -2,12 +2,12 @@ format_version: 1
 work_method: native
 active_work_ref: none
 current_role: none
-next_action: aguardar autorização para merge do PR #26 e release menor v0.6.0; depois atualizar o platform e repetir os smokes pendentes (platform T001)
+next_action: T010 publicada na 0.6.0; atualizar o platform para v0.6.0 e repetir os smokes pendentes (platform T001); T001–T003, T006–T008, T011 em draft aguardam autorização
 coordinator:
   harness: claude
   session: claude-code-b1467fdf
   started_at: 20260907T210307Z
-  last_write_at: 20260908T002447Z
+  last_write_at: 20260908T003000Z
   released: true
 review_followups: []
 next_task_id: 12

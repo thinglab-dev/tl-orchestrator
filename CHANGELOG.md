@@ -19,6 +19,15 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   `usage_source`, `cache_io`, `machine_scope` e `capability_detection`, lendo qualquer campo ausente como
   desconhecido e não como desconformidade) e para tratar parada honesta com checkpoint como pendência,
   não aprovação implícita.
+- Regra de admissão de saída de ferramenta no playbook, com reflexo nos contratos do Maker e do
+  Searcher: o custo de uma leitura é seu tamanho multiplicado por quantas requisições ela
+  sobrevive no contexto, então a decisão que importa é o que deixar entrar, não o que remover
+  depois — remoção posterior no meio do histórico invalida o prefixo de cache dali para frente e
+  cobra reescrita. Saída volumosa fica em artefato e o contexto recebe localizador com resumo,
+  preferindo a forma de ferramenta que devolve localizador em vez de conteúdo; o recorte é sobre o
+  que permanece no contexto, não sobre o que se verifica, e conferência do diff inteiro, leitura de
+  fonte para prova crítica e revisão independente continuam exigidas. Saída não preservada é limite
+  explícito, nunca recorte silencioso.
 
 ## [0.6.0] - 2026-09-08
 

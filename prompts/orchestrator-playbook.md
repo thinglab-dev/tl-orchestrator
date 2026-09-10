@@ -2,6 +2,27 @@
 
 Complemento do [contrato do Orquestrador](orchestrator.md). As raízes e os portões vêm do [projeto consumidor](../docs/PROJECT_CONFIGURATION.md).
 
+## Admissão de saída de ferramenta
+
+O modelo não guarda estado entre requisições: o que entra no contexto é reenviado em todas as
+seguintes. Um bloco admitido no início de uma sessão longa é relido dezenas ou centenas de vezes,
+e o custo de uma leitura é o seu tamanho multiplicado por quantas requisições ela sobrevive, não
+o tamanho isolado. Portanto a decisão que importa é de **admissão**: o que deixar entrar, não o
+que remover depois. Remoção posterior no meio do histórico invalida o prefixo de cache dali para
+frente e cobra reescrita, o que costuma custar mais do que economiza.
+
+Trate saída volumosa como artefato em disco e admita no contexto um localizador com resumo:
+caminho, faixa de linhas ou hash, mais o resultado estruturado. Prefira a forma da ferramenta que
+devolve localizador em vez de conteúdo — buscar onde algo está não exige receber cada linha que
+casou; listar arquivos não exige receber cada caminho sem teto; ler um trecho não exige o arquivo
+inteiro. Qual ferramenta importa menos que o recorte: em medição num consumidor, a mesma tarefa de
+busca custou cerca de uma ordem de grandeza mais quando a saída veio sem recorte, e leitura de
+arquivo inteiro custou várias vezes a leitura por faixa, com a mesma ferramenta.
+
+Isto não autoriza truncar evidência. O artefato bruto permanece íntegro e recuperável, e prova
+crítica, leitura obrigatória e revisão independente continuam exigindo a fonte, não o resumo. Uma
+saída que não pôde ser preservada é limite explícito, não recorte silencioso.
+
 ## Searcher sob demanda
 
 Quando faltar contexto factual para uma decisão, o Orquestrador pode consultar o Searcher antes ou

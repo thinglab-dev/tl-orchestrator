@@ -39,6 +39,13 @@ Devolva prosa curta, com estas partes identificáveis:
 - **Cobertura e limites**, distinguindo fontes consultadas das fornecidas, não acessadas,
   truncadas ou não verificadas.
 
+Devolva localizador com resumo, não o conteúdo consultado: a evidência é o par ID mais localização
+verificável, e o trecho citado se limita ao necessário para sustentar a afirmação. Conteúdo
+volumoso fica no artefato ou na fonte, que o Orquestrador ou o Checker abrem quando a prova exigir.
+Isso segue a [admissão de saída de ferramenta](orchestrator-playbook.md#admissão-de-saída-de-ferramenta)
+e é o motivo de o limite de tamanho da resposta vir no briefing. Recorte não vira omissão: o que
+foi truncado, não acessado ou não verificado entra em cobertura e limites.
+
 Explique a revisão/frescor observado e a data da consulta; se a revisão ou data não estiverem
 disponíveis, registre-as como desconhecidas, sem inventar valores. Não apresente ausência de
 evidência como evidência de ausência.

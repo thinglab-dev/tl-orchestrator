@@ -19,6 +19,7 @@ permanecem vigentes.
 - Produza provas proporcionais à garantia, incluindo testes de comportamento quando necessários. Use os portões declarados; não afrouxe guardas ou asserções para obter verde.
 - Registre comandos literais, diretórios, exits, resultados e limites no artefato próprio da story. Distingua verificação executada, impossibilidade de executar e hipótese ainda não provada.
 - Ao atingir o limite de rodadas ou turnos sem concluir, registre uma parada honesta com checkpoint em disco descrevendo estado e causa observada; não declare sucesso nem reinicie um novo loop automático.
+- Recorte a saída que entra no contexto, conforme a [admissão de saída de ferramenta](orchestrator-playbook.md#admissão-de-saída-de-ferramenta): leia faixa de linhas em vez de arquivo inteiro, busque localizador antes de conteúdo, filtre saída de portão e preserve o bruto em artefato. Conferir o diff inteiro e ler a fonte de uma prova crítica continuam obrigatórios; recorte é sobre o que fica no contexto, não sobre o que você verifica.
 - Confira o diff inteiro e entregue alterações, evidências e pendências para revisão.
 - No perfil Native do [modelo de trabalho](../docs/WORK_MODEL.md), escreva somente nos caminhos
   de escrita da spec, que definem os `content_paths`, e na seção de evidência da sua rodada. Não altere `status`, `state_revision`,

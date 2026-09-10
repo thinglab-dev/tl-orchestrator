@@ -136,7 +136,8 @@ requested_roles: <somente os papéis desta fase>
 evidence_ids: <IDs pertinentes fornecidos ao Classificador>
 cost_basis: <local_observed|official_task_proxy|token_price_only|unknown>
 call_id: <identificador único da chamada, quando o adaptador expuser; usado para deduplicar
-  registros repetidos do mesmo efeito, nunca para inferir contagem quando ausente>
+  registros repetidos da mesma chamada identificada, preservando chamadas distintas, retries e
+  tentativas interrompidas; nunca para inferir contagem quando ausente>
 usage_source: <official_sdk|estimated|unknown>
 cache_io: <leitura|escrita|ambos|nenhum, conforme o adaptador reportar>
 machine_scope: <chave tipada estável entre versões do harness; ausência não implica zero nem

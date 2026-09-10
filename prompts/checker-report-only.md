@@ -51,6 +51,12 @@ integração local ou do projeto consumidor. Não pesquise, prepare ou altere ch
 issue ou pull request; não edite o consumidor ou o pacote instalado. O encaminhamento externo
 pertence ao Orquestrador e depende da autorização do usuário.
 
+Quando a evidência incluir registros de medição, confira que chamadas repetidas do mesmo efeito
+são deduplicadas por `call_id`, que `usage_source` e os limites por adaptador estão declarados e
+não presumidos, e que campo ausente como `machine_scope` é lido como desconhecido, nunca como zero
+ou falha. Uma parada honesta com checkpoint em disco, registrada pelo Maker ao atingir limite de
+rodadas ou turnos, não é sucesso; trate-a como pendência real, não como aprovação implícita.
+
 ## Parecer
 
 O [schema JSON](../schemas/review-result.schema.json) é a única fonte da estrutura, dos campos e dos valores permitidos. Leia-o a partir do pacote entregue. A semântica do parecer é: `approved` exige ausência de ações necessárias; `changes_requested` identifica ao menos uma ação concreta. Nunca aprove pela ausência de informação.

@@ -135,6 +135,13 @@ classification_schema_version: 2
 requested_roles: <somente os papéis desta fase>
 evidence_ids: <IDs pertinentes fornecidos ao Classificador>
 cost_basis: <local_observed|official_task_proxy|token_price_only|unknown>
+call_id: <identificador único da chamada, quando o adaptador expuser; usado para deduplicar
+  registros repetidos do mesmo efeito, nunca para inferir contagem quando ausente>
+usage_source: <official_sdk|estimated|unknown>
+cache_io: <leitura|escrita|ambos|nenhum, conforme o adaptador reportar>
+machine_scope: <chave tipada estável entre versões do harness; ausência não implica zero nem
+  falha, apenas campo desconhecido>
+capability_detection: <observado|assumido|unknown>
 
 ## Medições por tentativa
 <tentativa; papel/fase; par solicitado e efetivo; revisões de briefing/catálogo/contrato;
@@ -146,7 +153,10 @@ retrabalho decorrente>
 Mantenha tentativas falhas na amostra e as unidades de cada contador. `official_task_proxy`
 fundamenta uma estimativa comparável, não o custo exato desta story. Com zero entregas aceitas não
 há custo finito por sucesso a declarar. O perfil registra fatos; o pacote não coleta telemetria,
-executa experimento ou mantém cache automático.
+executa experimento ou mantém cache automático. Os campos `call_id`, `usage_source`, `cache_io`,
+`machine_scope` e `capability_detection` são opcionais e explicitam o que já era implícito; nenhum
+registro anterior deixa de ser conforme por omiti-los. Um registro que valida contra uma versão de
+schema anterior compatível, no dialeto aceito pelo harness, não precisa ser reescrito.
 
 `INSTALLATION.md` registra a URL de origem, versão ou tag quando houver, referência móvel
 acompanhada, commit instalado, hashes dos 17 arquivos, destinos de skill, se cada destino é link

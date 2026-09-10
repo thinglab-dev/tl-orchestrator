@@ -6,16 +6,19 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ### Adicionado
 
-- Campos opcionais do registro conceitual de medição: `call_id` (dedup de chamadas repetidas do
-  mesmo efeito), `usage_source`, `cache_io`, `machine_scope` (chave tipada estável entre versões,
-  ausência não implica zero) e `capability_detection`; nenhum passa a obrigatório e nenhum registro
-  anterior deixa de ser conforme.
+- Campos opcionais do registro conceitual de medição: `call_id` (dedup de registros repetidos da
+  mesma chamada identificada, preservando chamadas distintas, retries e tentativas interrompidas),
+  `usage_source`, `cache_io`, `machine_scope` (chave tipada estável entre versões, ausência não
+  implica zero) e `capability_detection`; nenhum passa a obrigatório e nenhum registro anterior
+  deixa de ser conforme.
 - Parada honesta com checkpoint em disco ao atingir limite de rodadas/turnos sem concluir (playbook
   e contrato do Maker), complementando a regra existente de não repetir indefinidamente até obter
   verde; não é sucesso e não dispara novo loop automático.
-- Critério do Checker para revisar registros de medição (dedup por `call_id`, `usage_source` e
-  limites por adaptador declarados, campo ausente lido como desconhecido) e para tratar parada
-  honesta com checkpoint como pendência, não aprovação implícita.
+- Critério do Checker para revisar registros de medição (conferir os cinco campos opcionais definidos
+  em configuração de projeto quando presentes, como dedup por `call_id` de registros da mesma chamada,
+  `usage_source`, `cache_io`, `machine_scope` e `capability_detection`, lendo qualquer campo ausente como
+  desconhecido e não como desconformidade) e para tratar parada honesta com checkpoint como pendência,
+  não aprovação implícita.
 
 ## [0.6.0] - 2026-09-08
 

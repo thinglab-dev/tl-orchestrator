@@ -51,13 +51,15 @@ integração local ou do projeto consumidor. Não pesquise, prepare ou altere ch
 issue ou pull request; não edite o consumidor ou o pacote instalado. O encaminhamento externo
 pertence ao Orquestrador e depende da autorização do usuário.
 
-Quando a evidência incluir registros de medição, confira esses campos quando presentes: que
-registros repetidos da mesma chamada identificada sejam deduplicados por `call_id` (preservando
+Quando a evidência incluir registros de medição, confira os campos opcionais definidos na configuração
+do projeto (`call_id`, `usage_source`, `cache_io`, `machine_scope` e `capability_detection`) quando presentes:
+que registros repetidos da mesma chamada identificada sejam deduplicados por `call_id` (preservando
 chamadas distintas, retries e tentativas interrompidas), e que `usage_source` e os limites por
-adaptador sejam lidos do registro e não presumidos. A ausência de qualquer um desses campos ou de
-`machine_scope` significa informação desconhecida, nunca custo zero, falha ou desconformidade apenas
-pela omissão. Uma parada honesta com checkpoint em disco, registrada pelo Maker ao atingir limite de
-rodadas ou turnos, não é sucesso; trate-a como pendência real, não como aprovação implícita.
+adaptador sejam lidos do registro e não presumidos. A ausência de qualquer um desses cinco campos
+significa informação desconhecida, nunca custo zero, falha ou desconformidade apenas pela omissão,
+preservando a compatibilidade de registros anteriores. Uma parada honesta com checkpoint em disco,
+registrada pelo Maker ao atingir limite de rodadas ou turnos, não é sucesso; trate-a como pendência real,
+não como aprovação implícita.
 
 ## Parecer
 

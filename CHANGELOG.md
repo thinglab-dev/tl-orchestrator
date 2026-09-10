@@ -14,10 +14,11 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 - Parada honesta com checkpoint em disco ao atingir limite de rodadas/turnos sem concluir (playbook
   e contrato do Maker), complementando a regra existente de não repetir indefinidamente até obter
   verde; não é sucesso e não dispara novo loop automático.
-- Critério do Checker para revisar registros de medição (conferir campos opcionais quando presentes,
-  como dedup por `call_id` de registros da mesma chamada, `usage_source` e limites por adaptador,
-  lendo campo ausente como desconhecido e não como desconformidade) e para tratar parada honesta com
-  checkpoint como pendência, não aprovação implícita.
+- Critério do Checker para revisar registros de medição (conferir os cinco campos opcionais definidos
+  em configuração de projeto quando presentes, como dedup por `call_id` de registros da mesma chamada,
+  `usage_source`, `cache_io`, `machine_scope` e `capability_detection`, lendo qualquer campo ausente como
+  desconhecido e não como desconformidade) e para tratar parada honesta com checkpoint como pendência,
+  não aprovação implícita.
 
 ## [0.6.0] - 2026-09-08
 

@@ -4,6 +4,8 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-11
+
 ### Adicionado
 
 - Regra de admissão de saída de ferramenta: em sessão longa a quantidade de requisições pesa tanto

@@ -4,13 +4,16 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-10
+
 ### Alterado
 
 - Ordem padrão do Classificador: Agy Gemini 3.8 Flash medium → Codex Luna medium → Claude Sonnet
   medium, preservando os pares, a validação e as regras de fallback e de precedência local.
   As demais referências à cadeia remetem ao perfil publicado, e referências legadas à ordem do
-  Classificador e ao Searcher no `README.md` e em `docs/PROJECT_CONFIGURATION.md` foram alinhadas ao
-  perfil publicado e à inclusão do papel no schema e aos papéis da fase.
+  Classificador e ao Searcher no `README.md` e em `docs/PROJECT_CONFIGURATION.md` foram tratadas
+  como harmonização documental de uma regra existente de inclusão do papel no schema e aos papéis
+  da fase.
 
 ### Adicionado
 

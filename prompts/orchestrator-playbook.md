@@ -23,6 +23,14 @@ Isto não autoriza truncar evidência. O artefato bruto permanece íntegro e rec
 crítica, leitura obrigatória e revisão independente continuam exigindo a fonte, não o resumo. Uma
 saída que não pôde ser preservada é limite explícito, não recorte silencioso.
 
+Na mesma sessão, prefira reutilizar contratos, políticas e fontes já admitidos no contexto,
+evitando releituras repetidas quando o conteúdo não tiver mudado. Releia a fonte quando mudar a fonte
+relevante, sua revisão ou o contexto necessário para interpretá-la, ou diante de perda de contexto
+por compactação, truncamento anterior, dúvida factual concreta ou exigência explícita do contrato ou
+do harness. Em interrupção ou retomada de sessão, a obrigação de reler as fontes, a unidade oficial
+e o estado real na árvore ([Fechamento ou interrupção](#fechamento-ou-interrupção)) permanece
+integral; o registro anterior orienta a reconciliação, mas não substitui essa verificação.
+
 ## Searcher sob demanda
 
 Quando faltar contexto factual para uma decisão, o Orquestrador pode consultar o Searcher antes ou
@@ -33,6 +41,14 @@ necessária antes de qualquer outra classificação começa pela classificação
 frescor e limites de tempo, chamadas e resposta. Registre cobertura, lacunas e acessos; falha de
 ferramenta ou permissão fica explícita como parcial/bloqueada. O Searcher usa sessão separada e seu
 resumo é evidência orientadora, não prova única nem substituto de leitura obrigatória.
+
+Para questão factual pontual cuja leitura direta pelo Orquestrador seja curta, de baixo custo e
+risco reduzido, consulte diretamente a fonte pertinente, sem despachar agente. Quando o
+levantamento exigir varredura mais ampla, prefira o Searcher sob demanda a despachar Planner apenas
+para coleta de informações: o Searcher levanta fatos, citações e localizadores para apoiar a
+decisão, enquanto o Planner atua na arquitetura, decomposição, dependências e especificação. Essa
+consulta não dispensa a classificação prévia da fase, inclusive quando houver pin, fornecido ao
+Classificador como restrição, nem transfere ao Searcher a tomada de decisão.
 
 ## Evolução na ativação
 

@@ -28,6 +28,10 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   que permanece no contexto, não sobre o que se verifica, e conferência do diff inteiro, leitura de
   fonte para prova crítica e revisão independente continuam exigidas. Saída não preservada é limite
   explícito, nunca recorte silencioso.
+- Diretrizes de reuso condicionado de leituras na mesma sessão (com exceções para mudança de fonte,
+  revisão, contexto, compactação, truncamento ou exigência contratual) e distinção operacional entre
+  Searcher (levantamento factual) e Planner (arquitetura e especificação), preservando a leitura
+  direta proporcional e a classificação com pin como restrição.
 
 ## [0.6.0] - 2026-09-08
 

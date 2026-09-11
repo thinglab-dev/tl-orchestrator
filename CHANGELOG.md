@@ -4,7 +4,19 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+### Alterado
+
+- Ordem padrão do Classificador: Agy Gemini 3.8 Flash medium → Codex Luna medium → Claude Sonnet
+  medium, preservando os pares, a validação e as regras de fallback e de precedência local.
+  As demais referências à cadeia remetem ao perfil publicado, e referências legadas à ordem do
+  Classificador e ao Searcher no `README.md` e em `docs/PROJECT_CONFIGURATION.md` foram alinhadas ao
+  perfil publicado e à inclusão do papel no schema e aos papéis da fase.
+
 ### Adicionado
+
+- Próximos passos numerados no fechamento ou na devolução de uma decisão ao usuário, com ação e
+  limites explícitos. Resposta numérica seleciona somente a opção do último menu válido, sem
+  autorizações implícitas, execução por silêncio ou pausas adicionais em lotes já autorizados.
 
 - Campos opcionais do registro conceitual de medição: `call_id` (dedup de registros repetidos da
   mesma chamada identificada, preservando chamadas distintas, retries e tentativas interrompidas),

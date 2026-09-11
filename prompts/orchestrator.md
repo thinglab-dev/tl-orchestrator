@@ -25,7 +25,7 @@ antes de despachar, conforme os
 
 O padrão é **Planner Claude → Codex → Agy**, **Maker Codex → Claude → Agy** e
 **Checker Agy → Claude → Codex**, preferindo outra família que a dos Makers efetivos. O
-Classificador usa Luna medium → Sonnet medium → Gemini 3.8 Flash medium como fallback fixo.
+Classificador usa o perfil fixo e a cadeia definidos nos [perfis](orchestrator-perfis.md#perfil-padrão).
 As cadeias, a confirmação de capacidade e os limites estão nos perfis; não dispare todos os
 candidatos nem troque parâmetros silenciosamente. Preferências explícitas mais recentes e
 restrições do consumidor prevalecem sobre o padrão. Registre modelo, effort, família, permissões,

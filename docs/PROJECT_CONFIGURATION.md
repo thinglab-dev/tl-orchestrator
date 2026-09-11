@@ -80,13 +80,13 @@ task_types: <opcional: tipos adicionais ao núcleo do modelo de trabalho>
 <comando ou inspeção, diretório e origem>
 
 ## Preferências operacionais
-<Orquestrador fixo; cadeia do Classificador; Searcher sob demanda (Agy gemini-3.8-flash-medium/medium); ordem dos harnesses por papel; escolhas fixadas; política de independência; origem e última conferência>
+<Orquestrador fixo; cadeia do Classificador; cadeia ou pin do Searcher sob demanda; ordem dos harnesses por papel; escolhas fixadas; política de independência; origem e última conferência>
 
 ## Catálogo permitido
 <harness, IDs e famílias, efforts aceitos, capacidade por papel, limites de custo/quota e disponibilidade com evidência>
 
 ## Classificação e despacho
-<story, fase, revisões de contexto/catálogo/contrato, resultado v2 do Classificador, evidências e base de custo, perfis recomendados, modelo/effort efetivos, sessão, medições e motivos de fallback; Searcher registrado separadamente, fora de requested_roles e do schema>
+<story, fase, revisões de contexto/catálogo/contrato, resultado v2 do Classificador, evidências e base de custo, perfis recomendados, modelo/effort efetivos, sessão, medições e motivos de fallback; Searcher coberto na classificação da fase ou por pin como restrição>
 
 ## Adoção operacional
 <revisão synchronized; operational_verified ou operational_pending por harness; fresh load, smoke test, evidência e limites>
@@ -169,12 +169,12 @@ aponta para instruções, stories ou tickets, portões e destino das evidências
 autoritativos; e
 registra preferências operacionais declaradas e capacidades observadas, com origem e última
 conferência. O [perfil-padrão](../prompts/orchestrator-perfis.md#perfil-padrão) mantém o
-Orquestrador na seleção do usuário e usa um Classificador separado: Luna medium → Sonnet medium →
-Gemini 3.8 Flash medium. Esse Classificador escolhe modelo e effort por papel/harness; o Searcher
-pode ser acionado sob demanda com Agy gemini-3.8-flash-medium/medium, fora do schema de
-classificação; as cadeias
-de trabalho são Planner Claude → Codex → Agy, Maker Codex → Claude → Agy e Checker
-Agy → Claude → Codex, preferindo outra família que a dos Makers efetivos.
+Orquestrador na seleção do usuário e define a cadeia fixa do Classificador separado.
+Esse Classificador escolhe modelo e effort por papel/harness; a consulta do Searcher sob demanda
+segue a classificação da fase (com cadeia por omissão do perfil publicado ou pin como restrição); as cadeias
+de trabalho são Planner Claude → Codex → Agy, Maker Codex → Claude → Agy, Checker
+Agy → Claude → Codex, preferindo outra família que a dos Makers efetivos, e Searcher
+Agy → Claude → Codex.
 
 Registre `routing_mode: classifier` quando essa política estiver adotada. Mantenha quatro coisas
 distintas: preferências e escolhas fixadas pelo usuário, catálogo autorizado com capacidade

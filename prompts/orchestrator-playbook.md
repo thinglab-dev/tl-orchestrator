@@ -31,6 +31,14 @@ do harness. Em interrupção ou retomada de sessão, a obrigação de reler as f
 e o estado real na árvore ([Fechamento ou interrupção](#fechamento-ou-interrupção)) permanece
 integral; o registro anterior orienta a reconciliação, mas não substitui essa verificação.
 
+Numa sessão longa, a quantidade de requisições pesa tanto quanto o recorte de um despejo isolado:
+cada ida e volta reenvia todo o contexto já admitido, então o custo total cresce com o número de
+turnos, não só com o tamanho do que foi admitido em cada um. Em medição num consumidor, uma sessão
+de centenas de requisições teve o custo dominado pela quantidade de turnos, não por um único
+despejo grande. Quando chamadas de ferramenta forem independentes entre si — o resultado de uma
+não decide os parâmetros da outra —, agrupe-as na mesma requisição em vez de serializar uma por
+turno; isso reduz turnos sem soltar o recorte do que é admitido no contexto.
+
 ## Searcher sob demanda
 
 Quando faltar contexto factual para uma decisão, o Orquestrador pode consultar o Searcher antes ou

@@ -4,6 +4,13 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+### Adicionado
+
+- Regra de admissão de saída de ferramenta: em sessão longa a quantidade de requisições pesa tanto
+  quanto o recorte de um despejo isolado, porque cada ida e volta reenvia todo o contexto já
+  admitido; agrupar chamadas de ferramenta independentes entre si na mesma requisição reduz turnos
+  sem soltar o recorte já exigido do que é admitido no contexto.
+
 ## [0.7.0] - 2026-09-10
 
 ### Alterado

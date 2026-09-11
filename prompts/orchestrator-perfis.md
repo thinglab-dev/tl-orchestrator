@@ -21,9 +21,9 @@ O **Classificador** usa uma sessão auxiliar curta, somente leitura, com esta ca
 
 | Prioridade | Harness | Modelo | Effort |
 | :--- | :--- | :--- | :--- |
-| 1 | Codex | `gpt-5.6-luna` | `medium` |
-| 2 | Claude | `sonnet` | `medium` |
-| 3 | Agy/Antigravity | `gemini-3.8-flash-medium` | `medium`, incorporado ao ID |
+| 1 | Agy/Antigravity | `gemini-3.8-flash-medium` | `medium`, incorporado ao ID |
+| 2 | Codex | `gpt-5.6-luna` | `medium` |
+| 3 | Claude | `sonnet` | `medium` |
 
 Chame apenas o primeiro candidato utilizável; a lista é fallback, não um painel de três consultas.
 Confirme o modelo concreto resolvido por aliases como `sonnet`. O Classificador não escolhe seu

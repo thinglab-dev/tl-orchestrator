@@ -40,7 +40,7 @@ em `Agent runs`) são coisas diferentes; nenhuma delas prova a outra.
 
 | Papel | Cadeia |
 | :--- | :--- |
-| Classificador | Codex → Claude → Agy (perfil fixo publicado) |
+| Classificador | Agy → Codex → Claude (perfil fixo publicado) |
 | Planner | Claude → Codex → Agy |
 | Maker | Agy → Codex → Claude |
 | Checker report-only | Codex → Claude → Agy, respeitando a autoria efetiva |

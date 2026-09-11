@@ -5,8 +5,8 @@ Um método documental para planejar, debater decisões, implementar e revisar mu
 O Orquestrador mantém o harness/modelo/effort selecionado pelo usuário. Um **Classificador
 econômico separado** escolhe modelo e effort dos papéis necessários em cada fase, por harness,
 dentro do catálogo permitido. Ele recebe apenas o briefing e um recorte identificado da
-[evidência de roteamento](docs/MODEL_ROUTING.md). Seu perfil fixo é Luna medium → Sonnet medium →
-Gemini 3.8 Flash medium, em fallback sequencial.
+[evidência de roteamento](docs/MODEL_ROUTING.md). Seu perfil fixo e cadeia de fallback seguem os
+[perfis publicados](prompts/orchestrator-perfis.md#perfil-padrão).
 
 As cadeias dos papéis são **Planner Claude → Codex → Agy**, **Maker Codex → Claude → Agy** e
 **Checker Agy → Claude → Codex**, preferindo família diferente da do Maker e sempre em sessão
@@ -17,8 +17,8 @@ roteamento satisfaz primeiro o risco e depois busca o menor custo esperado por e
 há tabela fixa tier → modelo nem promessa de economia ou precisão baseada só em benchmark.
 
 O **Searcher** é um auxiliar sob demanda para contexto factual: consulta fontes autorizadas e
-devolve resumo, evidências, inferências, lacunas e limites em sessão separada. Usa Agy
-`gemini-3.8-flash-medium` / `medium` por padrão, fora do schema e do roteamento por tier; não
+devolve resumo, evidências, inferências, lacunas e limites em sessão separada. Sua consulta é
+coberta pela classificação da fase (com cadeia padrão do perfil publicado ou pin como restrição); não
 implementa, aprova ou substitui prova e leitura obrigatórias.
 
 Criado por **Albertiano**. Distribuído sob a [licença MIT](LICENSE), que permite uso, modificação e distribuição, inclusive comercial, com preservação do aviso de copyright e da licença nas cópias ou partes substanciais do material.
@@ -155,8 +155,8 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 6. Registre em `_tl-orc/PROJECT.md` o perfil-padrão publicado, salvo decisão vigente diferente no
    projeto:
    - Orquestrador: harness, modelo e effort selecionados pelo usuário na sessão;
-   - Classificador: Codex gpt-5.6-luna medium → Claude sonnet medium →
-     Agy gemini-3.8-flash-medium, em sessões auxiliares somente leitura;
+   - Classificador: Agy gemini-3.8-flash-medium medium → Codex gpt-5.6-luna medium →
+     Claude sonnet medium, em sessões auxiliares somente leitura;
    - Planner: Claude → Codex → Agy;
    - Maker: Codex → Claude → Agy;
    - Checker report-only: Agy → Claude → Codex, preferindo família diferente dos Makers.

@@ -344,3 +344,28 @@ estritamente separados.
 Com autorização para integrar, confira o resultado da integração antes da próxima ação. Mudanças no conteúdo validado exigem nova conferência proporcional. Status concluído depende dos portões, revisão independente e autoridade local de ratificação; um verde isolado não fecha a story.
 
 Se o pedido era somente planejamento, entregue o plano e encerre aí. Se houve interrupção, registre o ponto de retomada e preserve a árvore. A próxima sessão relê as fontes e o estado real; o registro ajuda a retomar, não executa continuidade por si só. No perfil Native, o encerramento normal grava `released: true` no registro `coordinator`, e a retomada começa pelo cabeçalho global, que aponta a unidade corrente mesmo quando ela pertence a um módulo, relê a unidade oficial e só então reconcilia cabeçalhos atrasados, na ordem unidade, projeções do módulo, visão global, aplicando a [tabela de recuperação](../docs/WORK_MODEL.md#transição-e-recuperação): tabela atrasada é reconstruída, referência ativa já concluída é reparada após conferir as evidências, unidade não encontrada é procurada antes de perguntar, e só estados incompatíveis ou evidência insuficiente interrompem a execução afetada.
+
+### Próximos passos numerados
+
+Ao fechar um ciclo ou devolver ao usuário uma decisão pendente, informe o resultado, o estado real
+e os próximos passos pertinentes em lista numerada, com até três opções e no máximo uma marcada
+como **Recomendado**. A regra vale em Native e BMAD, com ou sem módulos. Se não houver próximo
+passo pertinente, informe isso sem inventar opções.
+
+- Cada opção declara a ação concreta, o projeto e a unidade ou área quando aplicável, o escopo,
+  os efeitos autorizáveis e o ponto de parada. Diferencie preparação, implementação, commit,
+  push, PR, merge e release. Se houver chamadas a agentes, declare o teto do lote; correções,
+  retomadas, fallback e consultas consomem esse mesmo teto, sem prometer conclusão dentro dele.
+- Uma resposta do usuário contendo somente o número seleciona e autoriza exclusivamente a ação
+  descrita naquela opção do último menu apresentado pelo Orquestrador. Registre essa origem
+  conforme as regras de evidência e autoridade vigentes. Texto adicional do usuário delimita a
+  escolha; ambiguidades materiais exigem esclarecimento antes da ação afetada.
+- Na retomada, releia o menu e confira o estado real. Se o menu não estiver disponível, o número
+  não existir ou houver mudança material que invalide o escopo da opção, apresente opções
+  atualizadas em vez de inferir autorização. Não transporte a escolha para outra unidade.
+- Apresentar ou recomendar uma opção não autoriza executá-la. Silêncio e passagem de tempo não
+  selecionam opções. A escolha não dispensa classificação dos papéis aplicáveis, validações,
+  coordenação, revisão nem permissões exigidas pelo método e pelo consumidor.
+- Não interrompa uma fila ou lote já autorizado apenas para obter um número após cada Task.
+  Continue as ações cobertas pela autorização vigente; solicite escolha apenas na condição de
+  parada ou diante de uma decisão ainda não autorizada.

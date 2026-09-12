@@ -4,20 +4,23 @@ Complemento do [contrato do Orquestrador](orchestrator.md). As raízes e os port
 
 ## Admissão de saída de ferramenta
 
-O modelo não guarda estado entre requisições: o que entra no contexto é reenviado em todas as
-seguintes. Um bloco admitido no início de uma sessão longa é relido dezenas ou centenas de vezes,
-e o custo de uma leitura é o seu tamanho multiplicado por quantas requisições ela sobrevive, não
-o tamanho isolado. Portanto a decisão que importa é de **admissão**: o que deixar entrar, não o
-que remover depois. Remoção posterior no meio do histórico invalida o prefixo de cache dali para
-frente e cobra reescrita, o que costuma custar mais do que economiza.
+O modelo não guarda estado entre requisições: o que entra no contexto tende a ser reenviado nas
+seguintes, então um bloco admitido cedo numa sessão longa pesa o seu tamanho multiplicado por
+quantas requisições ele sobrevive, não o tamanho isolado. Quanto disso vira custo depende do
+harness, do modelo e do cache em uso; use isto como critério de admissão, não como fórmula de
+economia, e não prometa porcentagem sem medir no ambiente real. A decisão que importa é de
+**admissão**: o que deixar entrar, não o que remover depois. Onde houver cache de prefixo, remoção
+posterior no meio do histórico invalida o prefixo dali para frente e cobra reescrita, o que
+costuma custar mais do que economiza.
 
 Trate saída volumosa como artefato em disco e admita no contexto um localizador com resumo:
 caminho, faixa de linhas ou hash, mais o resultado estruturado. Prefira a forma da ferramenta que
 devolve localizador em vez de conteúdo — buscar onde algo está não exige receber cada linha que
 casou; listar arquivos não exige receber cada caminho sem teto; ler um trecho não exige o arquivo
-inteiro. Qual ferramenta importa menos que o recorte: em medição num consumidor, a mesma tarefa de
-busca custou cerca de uma ordem de grandeza mais quando a saída veio sem recorte, e leitura de
-arquivo inteiro custou várias vezes a leitura por faixa, com a mesma ferramenta.
+inteiro. Qual ferramenta importa menos que o recorte: numa medição pontual em um consumidor, a
+mesma tarefa de busca custou cerca de uma ordem de grandeza mais quando a saída veio sem recorte,
+e a leitura de arquivo inteiro custou várias vezes a leitura por faixa, com a mesma ferramenta.
+Essas observações são daquele ambiente e não são taxa transferível.
 
 Isto não autoriza truncar evidência. O artefato bruto permanece íntegro e recuperável, e prova
 crítica, leitura obrigatória e revisão independente continuam exigindo a fonte, não o resumo. Uma
@@ -32,12 +35,21 @@ e o estado real na árvore ([Fechamento ou interrupção](#fechamento-ou-interru
 integral; o registro anterior orienta a reconciliação, mas não substitui essa verificação.
 
 Numa sessão longa, a quantidade de requisições pesa tanto quanto o recorte de um despejo isolado:
-cada ida e volta reenvia todo o contexto já admitido, então o custo total cresce com o número de
-turnos, não só com o tamanho do que foi admitido em cada um. Em medição num consumidor, uma sessão
-de centenas de requisições teve o custo dominado pela quantidade de turnos, não por um único
-despejo grande. Quando chamadas de ferramenta forem independentes entre si — o resultado de uma
-não decide os parâmetros da outra —, agrupe-as na mesma requisição em vez de serializar uma por
-turno; isso reduz turnos sem soltar o recorte do que é admitido no contexto.
+cada ida e volta reenvia o contexto já admitido, então o total cresce com o número de turnos, não
+só com o tamanho admitido em cada um. Numa medição pontual em um consumidor, uma sessão de
+centenas de requisições teve o custo dominado pela quantidade de turnos, não por um único despejo
+grande; o quanto isso vale em outro harness precisa ser medido lá. Quando chamadas de ferramenta
+forem independentes entre si — o resultado de uma não decide os parâmetros da outra —, agrupe-as
+na mesma requisição em vez de serializar uma por turno; isso reduz turnos sem soltar o recorte do
+que é admitido no contexto.
+
+Pelo mesmo motivo, não gaste turno com progresso repetido. Um papel despachado trabalha por
+artefatos e devolve um recibo compacto; o que merece um turno é um evento significativo — mudança
+de estado que altera a próxima ação, exceção material ou resultado terminal. O despacho de uma
+unidade sem conversa de acompanhamento está no
+[protocolo de execução](../docs/EXECUTION_PROTOCOL.md): a unidade padrão de topo é a story inteira
+com sua cadeia autorizada, e os recibos de Maker, portões e Checker ficam internos ao condutor. Job
+por papel é opcional e quebrar a story em microjobs não autoriza turnos de acompanhamento.
 
 ## Searcher sob demanda
 
@@ -111,7 +123,12 @@ Antes de cada ativação, leia `_tl-orc/QUEUE.md` e as fontes autoritativas que 
 deve declarar o módulo ou escopo único, o board que define a ordem, uma árvore ou branch dedicada,
 o limite de correções e os efeitos locais autorizados. Sem esses dados, com árvore compartilhada
 ocupada, com alterações preexistentes fora da fila ou com fonte ambígua, pare e informe o ponto de
-retomada. Não varra todos os backlogs nem escolha uma story apenas pela data.
+retomada.
+
+A fila só considera candidatas da **allowlist autorizada**: o conjunto de stories que o board
+declarado enumera dentro do escopo declarado. Uma story fora dessa lista não entra por
+proximidade, data, nome de arquivo, sugestão da conversa ou por estar bloqueando outra; ampliar a
+lista é decisão do usuário. Não varra backlogs nem escolha uma story apenas pela data.
 
 Uma ativação processa **no máximo uma** story. Considere a primeira story não concluída na ordem
 declarada pelo board e prossiga somente se ela estiver pronta, com dependências satisfeitas e sem
@@ -262,9 +279,17 @@ Despache Maker para implementar somente quando a spec estiver executável e a im
 
 ## Conferir a entrega
 
-Leia todos os acréscimos e remoções, incluindo arquivos novos que um diff de rastreados omite. Compare o resultado com os critérios de aceite e verifique os consumidores do comportamento alterado. Em uma retirada, confira ausência de dependências e preservação do material que deveria ficar.
+A leitura linha a linha do diff integral é do Checker. Como condutor, confira a cobertura: que a revisão avaliada é a árvore final, que o conjunto de mudanças abrange acréscimos, remoções e arquivos novos que um diff de rastreados omite, e que nada saiu dos caminhos autorizados. Compare o resultado com os critérios de aceite e verifique os consumidores do comportamento alterado. Em uma retirada, confira ausência de dependências e preservação do material que deveria ficar.
+
+Leia dirigido na árvore o trecho de que o aceite depende e a fonte de uma prova, em vez de repetir a leitura integral do Checker. Para sondagem independente adicional, despache um verificador; não peça o parecer integral de volta ao seu contexto. Cobertura não conferida e parecer não lido por ninguém não viram aprovação.
 
 Derive a verificação dos riscos e contratos afetados, inclusive quem constrói ou consome tipos/configurações alterados. Execute os portões existentes definidos para a tarefa; uma alteração documental pode ser comprovada por inspeção, comparação de originais, referências e exportação. Não invente uma suíte de programação para validar documentos.
+
+Um resultado de portão ou suíte só vale para a mesma revisão da árvore e a mesma definição do
+portão: qualquer escrita posterior, mudança de comando, de escopo ou de ambiente invalida o
+resultado anterior, que não é reaproveitado como prova. Quando um portão falhar, isole primeiro o
+caso que falhou e execute-o dirigido; repita a suíte inteira depois de entender a falha, e uma vez
+por revisão final. Repetir a suíte para ver se muda não é diagnóstico.
 
 Antes do Checker, classifique a fase `review` pelo alcance do mecanismo, riscos e contraprovas
 necessárias, não apenas pelo tamanho do diff. O Checker continua sempre em sessão nova, somente
@@ -351,7 +376,7 @@ estritamente separados.
 
 Com autorização para integrar, confira o resultado da integração antes da próxima ação. Mudanças no conteúdo validado exigem nova conferência proporcional. Status concluído depende dos portões, revisão independente e autoridade local de ratificação; um verde isolado não fecha a story.
 
-Se o pedido era somente planejamento, entregue o plano e encerre aí. Se houve interrupção, registre o ponto de retomada e preserve a árvore. A próxima sessão relê as fontes e o estado real; o registro ajuda a retomar, não executa continuidade por si só. No perfil Native, o encerramento normal grava `released: true` no registro `coordinator`, e a retomada começa pelo cabeçalho global, que aponta a unidade corrente mesmo quando ela pertence a um módulo, relê a unidade oficial e só então reconcilia cabeçalhos atrasados, na ordem unidade, projeções do módulo, visão global, aplicando a [tabela de recuperação](../docs/WORK_MODEL.md#transição-e-recuperação): tabela atrasada é reconstruída, referência ativa já concluída é reparada após conferir as evidências, unidade não encontrada é procurada antes de perguntar, e só estados incompatíveis ou evidência insuficiente interrompem a execução afetada.
+Se o pedido era somente planejamento, entregue o plano e encerre aí. Se houve interrupção, registre o ponto de retomada e preserve a árvore. A próxima sessão relê as fontes e o estado real; o registro ajuda a retomar, não executa continuidade por si só. Use um [checkpoint limitado](../docs/EXECUTION_PROTOCOL.md#contexto-por-papel) validado contra a árvore: resumo de conversa descreve o que foi dito, não o que existe no disco. No perfil Native, o encerramento normal grava `released: true` no registro `coordinator`, e a retomada começa pelo cabeçalho global, que aponta a unidade corrente mesmo quando ela pertence a um módulo, relê a unidade oficial e só então reconcilia cabeçalhos atrasados, na ordem unidade, projeções do módulo, visão global, aplicando a [tabela de recuperação](../docs/WORK_MODEL.md#transição-e-recuperação): tabela atrasada é reconstruída, referência ativa já concluída é reparada após conferir as evidências, unidade não encontrada é procurada antes de perguntar, e só estados incompatíveis ou evidência insuficiente interrompem a execução afetada.
 
 ### Próximos passos numerados
 

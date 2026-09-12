@@ -146,7 +146,7 @@ def validate_export(files: list[str]) -> None:
             destination = export / item
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, destination)
-        exported = sorted(str(path.relative_to(export)) for path in export.rglob("*") if path.is_file())
+        exported = sorted(path.relative_to(export).as_posix() for path in export.rglob("*") if path.is_file())
         if exported != sorted(files):
             fail("exported path set differs from manifest")
         for item in files:

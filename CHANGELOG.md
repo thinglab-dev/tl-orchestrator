@@ -445,6 +445,13 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ### Alterado
 
+- **Condução pelo executor** (playbook, subseção da fila sequencial): o laço da fila pode ser
+  entregue a um condutor determinístico do consumidor, que chama Planner, Orquestrador (ratificar
+  a spec e prova própria por amostra), Maker e Checker em sessões novas e curtas nos pontos de
+  decisão fixos, para com motivo nomeado em vez de julgar, e só produz efeitos externos declarados
+  chave a chave em `QUEUE.md`. Motivado pela medição de um consumidor: a mesma story custou
+  194,7 M tokens lidos do cache com o laço numa sessão conversacional.
+
 - O contrato do Planner exige prova conforme o perfil de verificação: sonda contrafactual
   obrigatória sempre que a garantia for comportamentalmente discriminável, qualquer que seja o
   tipo; verificação por fontes, premissas ou inspeção nos demais tipos. As provas comportamentais

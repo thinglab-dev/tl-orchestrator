@@ -19,3 +19,7 @@ jobs:
           persist-credentials: false
       - name: Validate repository structure
         run: python3 scripts/validate_repository.py
+      - name: Run behavior tests for the optional supervisor
+        # This runner is Linux, so it exercises the POSIX branch of job tree
+        # containment, including the descendant case in ContainmentTest.
+        run: python3 -m unittest discover -s tests -p "test_*.py" -v

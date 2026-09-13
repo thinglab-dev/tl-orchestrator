@@ -146,8 +146,7 @@ execute primeiro a sincronização exigida pela política local e use somente o 
 
 Para a story escolhida, obtenha ou revalide a classificação da **fase atual** para somente os
 papéis necessários, seguindo os [perfis](orchestrator-perfis.md#classificar-e-resolver). O
-Classificador seleciona modelo e effort por papel/harness; Planner audita ou esclarece a spec,
-Maker implementa e prova, e Checker revisa em nova sessão. Toda mudança de fase reclassifica os
+Classificador seleciona modelo e effort por papel/harness; Planner audita ou esclarece a spec aplicando a disciplina de endurecimento (`tl-spec-hardener`), Maker implementa e prova — aplicando a diretriz de design profissional (`tl-impeccable-design`) quando houver escopo de UI —, e Checker revisa sob as 4 lentes estritas (`tl-deep-review`) em nova sessão. Toda mudança de fase reclassifica os
 papéis requeridos. Indisponibilidade comprovada permite avançar na cadeia autorizada sem mudar a
 classificação; cadeia esgotada ou ambiguidade não resolvida bloqueia a fila. Revalide a
 independência do Checker após a escolha efetiva do Maker. Preserve um escritor por árvore.

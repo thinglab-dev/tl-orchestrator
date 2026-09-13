@@ -25,7 +25,14 @@ A spec deve permitir ao Maker e ao Checker responder:
 - Que critérios observáveis definem o aceite e que provas os discriminam?
 - Quais portões existentes se aplicam e onde executá-los?
 
-Use o formato de tarefa existente. Ao propor stories filhas, dê a cada uma uma spec identificável e referencie uma única fonte para decisões transversais. Registros de mecanismo, sprint e decisões só podem ser alterados quando pertencem ao seu escopo explícito; eles não são arquivos obrigatórios do método.
+## Planejamento blindado e endurecimento da spec
+
+Aplique rigorosamente as disciplinas de endurecimento de especificação (`tl-spec-hardener`):
+- **Pré-mortem preventivo:** identifique antes de ratificar onde a solução falharia silenciosamente (concorrência, TOCTOU, premissas de ambiente, vazamento de recursos).
+- **Code Map estrito:** mapeie pontos de alteração no formato `arquivo:linha`, conferindo previamente no disco a existência real dos arquivos e símbolos.
+- **Fronteiras invioláveis:** declare expressamente o que é permitido, o que é proibido e as restrições inegociáveis.
+- **Critérios de aceite falsificáveis:** critérios estruturados com checkboxes `- [ ]` vinculados a testes e asserções que comprovam falha na ausência da alteração.
+- **Validação mecânica:** utilize o validador `audit_spec.py` (`skills/tl-spec-hardener/scripts/audit_spec.py`) para conferir estrutura, fronteiras e integridade de arquivos da spec.
 
 ## Níveis de planejamento
 

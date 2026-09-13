@@ -4,6 +4,16 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-12
+
+### Adicionado
+
+- Disciplinas de engenharia especializadas por papel com validadores determinísticos em `skills/`:
+  - `skills/tl-spec-hardener`: planejamento blindado para o Planner com pré-mortem preventivo de falhas silenciosas, fronteiras invioláveis (permitido/proibido/restrições), mapeamento estrito de pontos de alteração em `arquivo:linha`, critérios de aceite falsificáveis com `- [ ]` e validador determinístico `audit_spec.py`.
+  - `skills/tl-impeccable-design`: diretrizes de design de interface sem AI-slop para o Maker, tipografia e espaçamento em escala modular (4px/8px), tokens semânticos, contraste acessível WCAG AA (>= 4.5:1), cobertura dos 5 estados interativos e validador determinístico `audit_ui.py`.
+  - `skills/tl-deep-review`: quatro lentes estritas de revisão de código para o Checker (Concorrência/TOCTOU, Vazamento de Recursos/Esgotamento, Fail-Closed/Erros e Falsificabilidade de Testes) acompanhadas de validador determinístico de Git diff `audit_diff.py`.
+- Atualização normativa nos contratos dos papéis (`prompts/planner.md`, `prompts/maker.md`, `prompts/checker-report-only.md`) e no playbook (`prompts/orchestrator-playbook.md`) orientando a injeção e o cumprimento dessas disciplinas durante o ciclo de vida da story.
+
 ## [0.8.0] - 2026-09-12
 
 ### Adicionado

@@ -432,6 +432,27 @@ do acoplamento:
 - o recibo entra no contexto do condutor; `stdout.log`, `stderr.log` e relatórios ficam no disco;
 - o condutor só volta ao usuário por exceção material ou resultado terminal.
 
+## Pipelining assíncrono com Git Worktrees e protocolo noturno
+
+Para viabilizar execução autônoma prolongada (overnight) e eliminar o tempo ocioso de espera passiva por CI remoto, o protocolo estende o ciclo de entrega:
+
+1. **Desacoplamento do CI Remoto (Pipelining de Worktrees):**
+   - A fase de entrega (`phase_deliver`) conclui no momento em que os portões locais passam, o commit é realizado e o Pull Request é criado (`gh pr create`).
+   - O condutor NÃO deve bloquear turnos ou pausar a sessão esperando de forma síncrona a conclusão do CI remoto (ex: 10 minutos de GitHub Actions).
+   - O PR é registrado com auto-merge atômico (`gh pr merge --auto --squash --delete-branch`) ou delegado a um supervisor/reaper leve de background.
+   - Imediatamente após a publicação do PR da Story N, a capacidade de desenvolvimento é liberada: se a Story N+1 for independente no grafo de dependências (DAG), ela é despachada imediatamente em um Git worktree isolado (`worktrees/<story-id>`), sobrepondo o tempo de CI de N ao tempo de planejamento/código de N+1.
+
+2. **Heartbeat e Fencing de Leases:**
+   - Leases de sessão e execução registram obrigatoriamente `{pid, start_time, heartbeat_ts}`.
+   - Heartbeats são atualizados periodicamente pelo processo ativo. Se um processo morrer ou for encerrado abruptamente, a lease expirada (heartbeat ausente além do limiar de tolerância) é recuperada atomicamente, eliminando travamentos residuais de locks (`session.lock`) sem intervenção manual do usuário.
+
+3. **Orçamento Estrito de Revisão e Estacionamento (`Parked`):**
+   - O ciclo corretivo Maker ↔ Checker possui teto estrito de 2 rodadas. No 3º desacordo persistente, a story é marcada como `parked` com relatório circunstanciado (`report.md`), a lease é liberada e o condutor avança para a próxima story autorizada na fila, garantindo que a execução noturna nunca trave por uma story isolada.
+   - **Detector de Oscilação de Diff:** Se o hash do diff produzido pelo Maker após uma correção for idêntico a qualquer estado anterior (ciclo oscilatório A → B → A), a story é imediatamente estacionada por ausência de progresso.
+
+4. **Cache de Gates por Hash de Árvore (`tree_sha`):**
+   - Resultados de portões locais obrigatórios são indexados pelo hash da árvore de arquivos (`tree_sha`). Quando um parecer do Checker ou uma conferência não alterar o conteúdo da árvore, a reexecução de gates idempotentes é recuperada do cache local instantaneamente.
+
 ## Limites
 
 O supervisor valida transporte, não mérito. Ele não faz lock distribuído, não certifica portões, não

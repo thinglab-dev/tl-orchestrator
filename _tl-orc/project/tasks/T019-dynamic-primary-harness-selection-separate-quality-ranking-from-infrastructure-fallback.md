@@ -3,19 +3,19 @@ type: feat
 deliverable: none
 standalone: true
 method: native
-status: ready
-state_revision: 0
+status: done
+state_revision: 1
 depends_on: [T018, T024]
 blocked_by: []
 origin: instrução normativa do mantenedor em 2026-09-13 (formalização da seleção dinâmica de primário T019 com R1 a R22)
 decisions: []
 spec_author: orchestrator
 spec_revision: cefc2cfbaba4944c
-rework_round: 0
+rework_round: 5
 affects_context: []
 content_paths: [distribution-manifest.json, README.md, SKILL.md, docs/PROJECT_CONFIGURATION.md, docs/WORK_MODEL.md, prompts/classifier.md, prompts/orchestrator.md, prompts/orchestrator-perfis.md, schemas/classification-result-v3.schema.json, scripts/validate_classification.py, scripts/tests/test_dynamic_primary_selection.py, scripts/tests/test_automatic_mode.py, CHANGELOG.md]
-content_id: unknown até a implementação
-effective_authors: [openai, google, anthropic]
+content_id: f6206f271328c8f6da798f49d9a55cf83c09439b:7f1e4a994e46d32d
+effective_authors: [google, anthropic]
 checker_independence: preferred
 
 ## Finding

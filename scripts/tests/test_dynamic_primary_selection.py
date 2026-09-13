@@ -7,11 +7,14 @@ Covers invariants R1 to R22 and acceptance criteria AC01 to AC10.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 from typing import Any
 
 from scripts.validate_classification import (
+    match_project_priority,
     validate_classification_data,
     validate_classification_file,
 )
@@ -266,7 +269,6 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
 
     def test_r13_and_r20_project_priority_matcher_mechanics(self) -> None:
         """AC05, R13, R20: project_priority matching: 0 matches skip, 1 match resolves, >1 continue."""
-        from scripts.tests.test_dynamic_primary_selection import match_project_priority
 
         candidates = [
             ("codex", "gpt-5.6-terra", "high"),
@@ -361,97 +363,114 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
 
     def test_r03_quota_pressure_does_not_alter_recommended_primary(self) -> None:
         """R3: Quota pressure acts in runtime at dispatch time, not in durable recommended_primary."""
-        # The Classifier must register recommended_primary strictly by quality/cost:
-        recommended = "codex"
-        # In runtime, if codex is under quota pressure, effective_primary falls back to agy:
-        runtime_quota_pressure = {"codex": True, "agy": False}
-        candidates = [
-            {"harness": "codex", "model": "gpt-5.6-terra", "dispatch_role": "primary"},
-            {"harness": "agy", "model": "gemini-3.8-flash-high", "dispatch_role": "fallback"},
-        ]
-        recommended_primary = candidates[0]["harness"]
-        self.assertEqual(recommended_primary, "codex")
+        # 1. Contractual verification: prompts/classifier.md
+        classifier_prompt = (ROOT / "prompts" / "classifier.md").read_text(encoding="utf-8")
+        self.assertIn("Pressão de quota (`quota_pressure`) e disponibilidade factual observada NÃO influenciam o ranking semântico", classifier_prompt)
+        self.assertIn("Ambos pertencem exclusivamente ao Runtime na determinação do `effective_primary`", classifier_prompt)
 
-        effective_primary = None
-        for c in candidates:
-            if not runtime_quota_pressure.get(c["harness"], False):
-                effective_primary = c["harness"]
-                break
-        self.assertEqual(effective_primary, "agy")
-        self.assertNotEqual(recommended_primary, effective_primary)
-        # Durable semantic ranking remains unchanged
-        self.assertEqual(candidates[0]["harness"], "codex")
+        # 2. Contractual verification: prompts/orchestrator.md
+        orchestrator_prompt = (ROOT / "prompts" / "orchestrator.md").read_text(encoding="utf-8")
+        self.assertIn("(`quota_pressure`) é restrição operacional no momento do despacho e **não altera** o ranking semântico", orchestrator_prompt)
+
+        # 3. Structural enforcement: quota_pressure is rejected by schema/validator if passed in classification
+        data = dict(self.base_v3)
+        data["roles"] = {
+            "maker": {
+                "tier": "heavy",
+                "selection_status": "conclusive",
+                "reason": "Valid conclusive selection",
+                "tie_break_applied": None,
+                "evaluations": [
+                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
+                ],
+                "candidates": [
+                    self._make_cand("codex", "gpt-5.6-terra", "high", "primary"),
+                ],
+            }
+        }
+        # Reject quota_pressure inside candidate
+        data["roles"]["maker"]["candidates"][0]["quota_pressure"] = True
+        valid, errors = validate_classification_data(data)
+        self.assertFalse(valid)
+        self.assertTrue(any("unexpected additional property 'quota_pressure'" in e for e in errors))
+
+        # Reject quota_pressure inside evaluation
+        del data["roles"]["maker"]["candidates"][0]["quota_pressure"]
+        data["roles"]["maker"]["evaluations"][0]["quota_pressure"] = True
+        valid, errors = validate_classification_data(data)
+        self.assertFalse(valid)
+        self.assertTrue(any("unexpected additional property 'quota_pressure'" in e for e in errors))
 
     def test_r05_and_ac06_ambiguous_dispatch_blocks_fallback_and_emits_stop(self) -> None:
         """AC06 & R5: DISPATCH_OUTCOME_AMBIGUOUS strictly blocks automatic fallback and emits STOP."""
-        # Simulated dispatch outcome evaluator
-        def evaluate_dispatch(exit_code: int, effects: str, dirty_tree: bool) -> str:
-            if exit_code == 0:
-                return "SUCCESS"
-            if exit_code != 0 and effects == "none" and not dirty_tree:
-                return "DISPATCH_FAILED_PROVEN_NO_EFFECT"
-            if dirty_tree or effects in ("uncertain", "known"):
-                return "DISPATCH_OUTCOME_AMBIGUOUS"
-            return "SEMANTIC_FAILURE"
+        # 1. Contractual verification: docs/WORK_MODEL.md
+        work_model = (ROOT / "docs" / "WORK_MODEL.md").read_text(encoding="utf-8")
+        self.assertIn("`DISPATCH_OUTCOME_AMBIGUOUS`", work_model)
+        self.assertIn("**O fallback automático é terminantemente PROIBIDO.**", work_model)
+        self.assertIn("STOP imediato (`dispatch_outcome_ambiguous`)", work_model)
+        self.assertIn("unrecoverable_harness_failure_or_ambiguous_dispatch", work_model)
 
-        # Ambiguous case: process failed with dirty tree
-        outcome_dirty = evaluate_dispatch(1, "uncertain", dirty_tree=True)
-        self.assertEqual(outcome_dirty, "DISPATCH_OUTCOME_AMBIGUOUS")
+        # 2. Contractual verification: prompts/orchestrator.md
+        orch_prompt = (ROOT / "prompts" / "orchestrator.md").read_text(encoding="utf-8")
+        self.assertIn("`DISPATCH_OUTCOME_AMBIGUOUS`: timeout, crash ou falha deixando árvore de trabalho dirty", orch_prompt)
+        self.assertIn("**O fallback automático é terminantemente PROIBIDO.**", orch_prompt)
+        self.assertIn("O Orquestrador emite\n     STOP imediato, preserva o workspace para reconciliação humana", orch_prompt)
 
-        # Invariant check: fallback is forbidden on DISPATCH_OUTCOME_AMBIGUOUS
-        def allow_fallback(outcome: str) -> bool:
-            if outcome == "DISPATCH_OUTCOME_AMBIGUOUS":
-                return False  # MANDATORY STOP
-            if outcome == "DISPATCH_FAILED_PROVEN_NO_EFFECT":
-                return True
-            return False
-
-        self.assertFalse(allow_fallback(outcome_dirty))
+        # 3. Contractual verification: CHANGELOG.md
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn("bloqueio absoluto de fallback diante de `DISPATCH_OUTCOME_AMBIGUOUS`", changelog)
 
     def test_r14_and_ac07_proven_no_effect_is_rigorous(self) -> None:
         """AC07 & R14: DISPATCH_FAILED_PROVEN_NO_EFFECT requires clean tree, terminal tree and effects: none."""
-        def is_proven_no_effect(proc_tree_ended: bool, git_clean: bool, content_paths_clean: bool, effects: str) -> bool:
-            return proc_tree_ended and git_clean and content_paths_clean and effects == "none"
+        # 1. Contractual verification: docs/WORK_MODEL.md
+        work_model = (ROOT / "docs" / "WORK_MODEL.md").read_text(encoding="utf-8")
+        self.assertIn("`DISPATCH_FAILED_PROVEN_NO_EFFECT`", work_model)
+        self.assertIn("process-tree terminal", work_model)
+        self.assertIn("git status --porcelain", work_model)
+        self.assertIn("content_paths", work_model)
+        self.assertIn("Ausência comprovada de efeitos externos", work_model)
 
-        # All four conditions true
-        self.assertTrue(is_proven_no_effect(True, True, True, "none"))
-        # Any failure disallows proven_no_effect
-        self.assertFalse(is_proven_no_effect(False, True, True, "none"))
-        self.assertFalse(is_proven_no_effect(True, False, True, "none"))
-        self.assertFalse(is_proven_no_effect(True, True, False, "none"))
-        self.assertFalse(is_proven_no_effect(True, True, True, "uncertain"))
+        # 2. Contractual verification: prompts/orchestrator.md
+        orch_prompt = (ROOT / "prompts" / "orchestrator.md").read_text(encoding="utf-8")
+        self.assertIn("`DISPATCH_FAILED_PROVEN_NO_EFFECT`: falha operacional sem efeitos colaterais", orch_prompt)
+        self.assertIn("processo terminado", orch_prompt)
+        self.assertIn("git status", orch_prompt)
+        self.assertIn("content_paths", orch_prompt)
+        self.assertIn("zero efeitos de rede", orch_prompt)
 
     def test_r21_local_vs_remote_preflight_budget_accounting(self) -> None:
         """R21: Local preflight failure releases reservation; remote preflight consumes slot."""
-        def execute_preflight(is_remote: bool, available: bool, budget: int) -> tuple[str, int]:
-            reserved_budget = budget - 1  # write-ahead reservation
-            if not is_remote and not available:
-                # Local preflight failed: reservation released, 0 budget consumed
-                return "PRE_DISPATCH_UNAVAILABLE", budget
-            if is_remote and not available:
-                # Remote request failed: slot consumed
-                return "DISPATCH_FAILED_PROVEN_NO_EFFECT", reserved_budget
-            return "SUCCESS", reserved_budget
+        # 1. Contractual verification: docs/WORK_MODEL.md
+        work_model = (ROOT / "docs" / "WORK_MODEL.md").read_text(encoding="utf-8")
+        self.assertIn("Preflight local", work_model)
+        self.assertIn("`PRE_DISPATCH_UNAVAILABLE`", work_model)
+        self.assertIn("reservation released", work_model)
+        self.assertIn("tentativa formal", work_model)
 
-        # Local failure: budget preserved
-        status_local, budget_local = execute_preflight(is_remote=False, available=False, budget=10)
-        self.assertEqual(status_local, "PRE_DISPATCH_UNAVAILABLE")
-        self.assertEqual(budget_local, 10)
-
-        # Remote failure: budget consumed
-        status_remote, budget_remote = execute_preflight(is_remote=True, available=False, budget=10)
-        self.assertEqual(status_remote, "DISPATCH_FAILED_PROVEN_NO_EFFECT")
-        self.assertEqual(budget_remote, 9)
+        # 2. Contractual verification: prompts/orchestrator.md
+        orch_prompt = (ROOT / "prompts" / "orchestrator.md").read_text(encoding="utf-8")
+        self.assertIn("Preflight local vs remoto (R21):", orch_prompt)
+        self.assertIn("`PRE_DISPATCH_UNAVAILABLE`", orch_prompt)
+        self.assertIn("liberação de reserva", orch_prompt)
+        self.assertIn("tentativa formal", orch_prompt)
 
     def test_r22_and_ac08_fallback_preserves_required_call_reserve(self) -> None:
         """AC08 & R22: Fallback permitted if and only if remaining_budget >= fallback_cost + required_call_reserve."""
-        def can_attempt_fallback(remaining_budget: int, fallback_cost: int, call_reserve: int) -> bool:
-            return remaining_budget >= (fallback_cost + call_reserve)
+        # 1. Contractual verification: docs/WORK_MODEL.md
+        work_model = (ROOT / "docs" / "WORK_MODEL.md").read_text(encoding="utf-8")
+        self.assertIn("required_call_reserve", work_model)
+        self.assertIn("insufficient_budget_for_unit_verification", work_model)
+        self.assertIn("Preservação da reserva mandatória de orçamento", work_model)
 
-        # Budget = 3, fallback = 1, reserve for Checker = 2 -> 1 + 2 = 3 <= 3 -> OK
-        self.assertTrue(can_attempt_fallback(3, 1, 2))
-        # Budget = 2, fallback = 1, reserve for Checker = 2 -> 1 + 2 = 3 > 2 -> STOP (reserve violated)
-        self.assertFalse(can_attempt_fallback(2, 1, 2))
+        # 2. Contractual verification: prompts/orchestrator.md
+        orch_prompt = (ROOT / "prompts" / "orchestrator.md").read_text(encoding="utf-8")
+        self.assertIn("preservação integral da reserva orçamentária", orch_prompt)
+        self.assertIn("required_call_reserve(current_checkpoint)", orch_prompt)
+        self.assertIn("R22", orch_prompt)
+
+        # 3. Contractual verification: CHANGELOG.md
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn("exigência de reserva dinâmica `required_call_reserve` antes de acionar fallback", changelog)
 
     def test_r06_patch_counterproof_candidates_cannot_have_uncertainty_or_extra_properties(self) -> None:
         """Finding R6: candidates[] cannot declare uncertainty or extra properties."""
@@ -614,34 +633,230 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
         valid, errors = validate_classification_data(fixture, expected_story="T019", expected_phase="implementation", expected_version=3)
         self.assertTrue(valid, f"Expected classifier prompt fixture to be valid, got errors: {errors}")
 
+    def test_r07_patch_counterproof_schema_and_validator_state_matrix(self) -> None:
+        """Finding R7: Strict state matrix enforcement in both Draft 2020-12 schema and Python validator."""
+        # 1. Structural inspection of Draft 2020-12 schema
+        schema_path = ROOT / "schemas" / "classification-result-v3.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        role_selection = schema["$defs"]["role_v3"]
+        all_of = role_selection.get("allOf", [])
+        self.assertGreaterEqual(len(all_of), 4, "Expected at least 4 conditional branches in schema allOf")
 
-# Helper function implementing the project_priority matching logic per R13 and R20
-def match_project_priority(
-    candidates: list[tuple[str, str, str]], selectors: list[str]
-) -> tuple[tuple[str, str, str] | None, str | None, str]:
-    """Match candidates against project_priority selectors deterministically per R13/R20.
+        # Branch 0: conclusive
+        conclusive_branch = all_of[0]
+        self.assertEqual(conclusive_branch["if"]["properties"]["selection_status"]["const"], "conclusive")
+        self.assertEqual(
+            conclusive_branch["then"]["properties"]["candidates"]["prefixItems"][0]["properties"]["dispatch_role"]["const"],
+            "primary",
+        )
+        self.assertEqual(
+            conclusive_branch["then"]["properties"]["candidates"]["items"]["properties"]["dispatch_role"]["const"],
+            "fallback",
+        )
 
-    candidates: list of (harness, model, effort)
-    selectors: list of selector patterns, e.g. 'codex/gpt-5.6-terra/high', 'claude/*/*'
-    Returns: (winning_candidate, tie_break_applied, selection_status)
-    """
-    for sel in selectors:
-        parts = sel.split("/")
-        if len(parts) != 3:
-            continue
-        h_pat, m_pat, e_pat = parts
-        matches = [
-            c
-            for c in candidates
-            if (h_pat == "*" or h_pat == c[0])
-            and (m_pat == "*" or m_pat == c[1])
-            and (e_pat == "*" or e_pat == c[2])
-        ]
-        if len(matches) == 1:
-            return matches[0], f"project_priority: {sel}", "underdetermined"
-        # If 0 matches or >1 matches, continue to next selector
-    # End of list without unique match
-    return None, None, "awaiting_operator"
+        # Branch 1: underdetermined
+        underdetermined_branch = all_of[1]
+        self.assertEqual(underdetermined_branch["if"]["properties"]["selection_status"]["const"], "underdetermined")
+        self.assertEqual(
+            underdetermined_branch["then"]["properties"]["candidates"]["prefixItems"][0]["properties"]["dispatch_role"]["const"],
+            "primary",
+        )
+        self.assertEqual(
+            underdetermined_branch["then"]["properties"]["candidates"]["items"]["properties"]["dispatch_role"]["const"],
+            "fallback",
+        )
+        self.assertEqual(
+            underdetermined_branch["then"]["properties"]["tie_break_applied"]["minLength"],
+            1,
+        )
+
+        # Branch 2: awaiting_operator
+        awaiting_branch = all_of[2]
+        self.assertEqual(awaiting_branch["if"]["properties"]["selection_status"]["const"], "awaiting_operator")
+        self.assertEqual(
+            awaiting_branch["then"]["properties"]["candidates"]["items"]["properties"]["dispatch_role"]["const"],
+            "unassigned",
+        )
+        self.assertEqual(awaiting_branch["then"]["properties"]["candidates"]["minItems"], 2)
+
+        # Branch 3: infeasible
+        infeasible_branch = all_of[3]
+        self.assertEqual(infeasible_branch["if"]["properties"]["selection_status"]["const"], "infeasible")
+        self.assertEqual(infeasible_branch["then"]["properties"]["candidates"]["maxItems"], 0)
+
+        # 2. Counterproofs via validator:
+        # 2a. Conclusive with candidates[0].dispatch_role == "fallback"
+        bad_conclusive = dict(self.base_v3)
+        bad_conclusive["roles"] = {
+            "maker": {
+                "tier": "heavy",
+                "selection_status": "conclusive",
+                "reason": "Test",
+                "tie_break_applied": None,
+                "evaluations": [
+                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
+                ],
+                "candidates": [
+                    self._make_cand("codex", "gpt-5.6-terra", "high", "fallback"),
+                ],
+            }
+        }
+        valid, errors = validate_classification_data(bad_conclusive)
+        self.assertFalse(valid)
+        self.assertTrue(any('conclusive status requires candidates[0].dispatch_role == "primary"' in e for e in errors))
+
+        # 2b. Conclusive with candidates[1].dispatch_role == "primary"
+        bad_conclusive_second = dict(self.base_v3)
+        bad_conclusive_second["roles"] = {
+            "maker": {
+                "tier": "heavy",
+                "selection_status": "conclusive",
+                "reason": "Test",
+                "tie_break_applied": None,
+                "evaluations": [
+                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
+                    self._make_eval("agy", "gemini-3.8-flash-high", "high", True, "sufficient", True),
+                ],
+                "candidates": [
+                    self._make_cand("codex", "gpt-5.6-terra", "high", "primary"),
+                    self._make_cand("agy", "gemini-3.8-flash-high", "high", "primary"),
+                ],
+            }
+        }
+        valid, errors = validate_classification_data(bad_conclusive_second)
+        self.assertFalse(valid)
+        self.assertTrue(any('must have dispatch_role == "fallback" in conclusive status' in e for e in errors))
+
+        # 2c. Awaiting operator with candidates[0].dispatch_role == "primary"
+        bad_awaiting = dict(self.base_v3)
+        bad_awaiting["roles"] = {
+            "maker": {
+                "tier": "heavy",
+                "selection_status": "awaiting_operator",
+                "reason": "Test",
+                "tie_break_applied": None,
+                "evaluations": [
+                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
+                    self._make_eval("agy", "gemini-3.8-flash-high", "high", True, "sufficient", True),
+                ],
+                "candidates": [
+                    self._make_cand("codex", "gpt-5.6-terra", "high", "primary"),
+                    self._make_cand("agy", "gemini-3.8-flash-high", "high", "unassigned"),
+                ],
+            }
+        }
+        valid, errors = validate_classification_data(bad_awaiting)
+        self.assertFalse(valid)
+        self.assertTrue(any('must have dispatch_role == "unassigned" in awaiting_operator status' in e for e in errors))
+
+        # 2d. Infeasible with candidate
+        bad_infeasible = dict(self.base_v3)
+        bad_infeasible["roles"] = {
+            "maker": {
+                "tier": "heavy",
+                "selection_status": "infeasible",
+                "reason": "Test",
+                "tie_break_applied": None,
+                "evaluations": [
+                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "insufficient", False),
+                ],
+                "candidates": [
+                    self._make_cand("codex", "gpt-5.6-terra", "high", "primary"),
+                ],
+            }
+        }
+        valid, errors = validate_classification_data(bad_infeasible)
+        self.assertFalse(valid)
+        self.assertTrue(any("infeasible status requires candidates[] to be empty" in e for e in errors))
+
+    def test_r07_patch_counterproof_ajv_draft2020_12_validation(self) -> None:
+        """Finding R7: Test directly via node / AJV Draft 2020-12 if available."""
+        node_bin = shutil.which("node")
+        if not node_bin:
+            self.skipTest("Node.js not found in environment")
+
+        test_script = """
+const fs = require('fs');
+let Ajv2020;
+const paths = [
+  '/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/review-classifier-pref/node_modules/ajv/dist/2020',
+  'ajv/dist/2020'
+];
+for (const p of paths) {
+  try { Ajv2020 = require(p); break; } catch (e) {}
+}
+if (!Ajv2020) {
+  console.log('SKIP');
+  process.exit(0);
+}
+const ajv = new Ajv2020({ allErrors: true });
+const schema = JSON.parse(fs.readFileSync('schemas/classification-result-v3.schema.json', 'utf8'));
+const validate = ajv.compile(schema);
+
+// Counterproof 1: conclusive with candidates[0].dispatch_role == 'fallback'
+const badConclusive = {
+  schema_version: 3,
+  story_id: 'T019',
+  phase: 'implementation',
+  context_revision: 'ctx',
+  catalog_revision: 'cat',
+  confidence: 'high',
+  facts: ['test'],
+  uncertainties: [],
+  reclassify_when: ['test'],
+  roles: {
+    maker: {
+      tier: 'heavy',
+      selection_status: 'conclusive',
+      reason: 'test',
+      tie_break_applied: null,
+      evaluations: [{
+        harness: 'codex', model: 'gpt-5.6-terra', effort: 'high',
+        catalog_eligible: true, technical_adequacy: 'sufficient', dispatchable: true,
+        cost_basis: 'token_price_only', evidence_ids: ['ev-1'], uncertainty: null, reason: 'test'
+      }],
+      candidates: [{
+        harness: 'codex', model: 'gpt-5.6-terra', effort: 'high',
+        dispatch_role: 'fallback', evidence_ids: ['ev-1'], cost_basis: 'token_price_only', reason: 'test'
+      }]
+    }
+  }
+};
+if (validate(badConclusive)) {
+  console.error('AJV accepted invalid conclusive payload with fallback at index 0');
+  process.exit(1);
+}
+
+// Counterproof 2: awaiting_operator with candidates[0].dispatch_role == 'primary'
+const badAwaiting = JSON.parse(JSON.stringify(badConclusive));
+badAwaiting.roles.maker.selection_status = 'awaiting_operator';
+badAwaiting.roles.maker.candidates[0].dispatch_role = 'primary';
+badAwaiting.roles.maker.candidates.push({
+  harness: 'claude', model: 'sonnet', effort: 'high',
+  dispatch_role: 'unassigned', evidence_ids: ['ev-2'], cost_basis: 'token_price_only', reason: 'test'
+});
+badAwaiting.roles.maker.evaluations.push({
+  harness: 'claude', model: 'sonnet', effort: 'high',
+  catalog_eligible: true, technical_adequacy: 'sufficient', dispatchable: true,
+  cost_basis: 'token_price_only', evidence_ids: ['ev-2'], uncertainty: null, reason: 'test'
+});
+if (validate(badAwaiting)) {
+  console.error('AJV accepted invalid awaiting_operator payload with primary');
+  process.exit(1);
+}
+
+console.log('AJV_OK');
+"""
+        proc = subprocess.run(
+            [node_bin, "-e", test_script],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+        )
+        if "SKIP" in proc.stdout:
+            self.skipTest("Ajv2020 module not available in standard paths")
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}\n{proc.stdout}")
+        self.assertIn("AJV_OK", proc.stdout)
 
 
 if __name__ == "__main__":

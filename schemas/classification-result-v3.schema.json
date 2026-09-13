@@ -163,8 +163,26 @@
                 "type": "null"
               },
               "candidates": {
+                "type": "array",
                 "minItems": 1,
-                "type": "array"
+                "prefixItems": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "dispatch_role": {
+                        "const": "primary"
+                      }
+                    }
+                  }
+                ],
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "dispatch_role": {
+                      "const": "fallback"
+                    }
+                  }
+                }
               }
             }
           }
@@ -184,8 +202,26 @@
                 "minLength": 1
               },
               "candidates": {
+                "type": "array",
                 "minItems": 1,
-                "type": "array"
+                "prefixItems": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "dispatch_role": {
+                        "const": "primary"
+                      }
+                    }
+                  }
+                ],
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "dispatch_role": {
+                      "const": "fallback"
+                    }
+                  }
+                }
               }
             }
           }
@@ -201,8 +237,16 @@
           "then": {
             "properties": {
               "candidates": {
+                "type": "array",
                 "minItems": 2,
-                "type": "array"
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "dispatch_role": {
+                      "const": "unassigned"
+                    }
+                  }
+                }
               }
             }
           }
@@ -221,8 +265,8 @@
                 "type": "null"
               },
               "candidates": {
-                "maxItems": 0,
-                "type": "array"
+                "type": "array",
+                "maxItems": 0
               }
             }
           }

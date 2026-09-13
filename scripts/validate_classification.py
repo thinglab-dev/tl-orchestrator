@@ -423,6 +423,38 @@ def validate_classification_file(
     )
 
 
+def match_project_priority(
+    candidates: list[tuple[str, str, str]], selectors: list[str]
+) -> tuple[tuple[str, str, str] | None, str | None, str]:
+    """Match candidates against project_priority selectors deterministically per R13/R20.
+
+    candidates: list of (harness, model, effort) tuples.
+    selectors: list of selector patterns, e.g. 'codex/gpt-5.6-terra/high', 'claude/*/*'.
+
+    Rule R20:
+    For each selector in order:
+    - 0 matches -> ignore and continue;
+    - 1 match -> unique winner! Returns (candidate, f"project_priority: {selector}", "underdetermined");
+    - >1 matches -> non-unique, does not resolve and continues to next selector;
+    - End of list without unique match -> returns (None, None, "awaiting_operator").
+    """
+    for sel in selectors:
+        parts = sel.split("/")
+        if len(parts) != 3:
+            continue
+        h_pat, m_pat, e_pat = parts
+        matches = [
+            c
+            for c in candidates
+            if (h_pat == "*" or h_pat == c[0])
+            and (m_pat == "*" or m_pat == c[1])
+            and (e_pat == "*" or e_pat == c[2])
+        ]
+        if len(matches) == 1:
+            return matches[0], f"project_priority: {sel}", "underdetermined"
+    return None, None, "awaiting_operator"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validate tl-orchestrator classification result (v2 or v3).")
     parser.add_argument("--file", "-f", required=True, help="Path to classification result JSON file")

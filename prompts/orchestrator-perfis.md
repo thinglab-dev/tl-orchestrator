@@ -57,7 +57,7 @@ Sob Schema v2 legado, preserva-se o mapeamento posicional da cadeia física.
 
 A cadeia nominal do Checker (`Codex → Claude → Agy`) permanece **estritamente subordinada a `checker_independence` e à autoria efetiva completa** (incluindo Maker inicial, reworks e correções do Orquestrador): se OpenAI participou da autoria, Codex é inelegível; se Google participou, Agy é inelegível; se Anthropic participou, Claude é inelegível; se Google e OpenAI participaram, Claude é o único elegível.
 
-Essas escolhas são preferências operacionais e econômicas, não pins rígidos: o Classificador pode alterar modelo/effort diante de complexidade, disponibilidade comprovada ou pressão de quota. A hierarquia de autoridade preserva:
+Essas escolhas são preferências operacionais e econômicas, não pins rígidos: sob Schema v2 legado, o Classificador dimensionava modelo/effort respeitando a ordem posicional da cadeia; sob Schema v3, o Classificador elege o primário recomendado puramente por adequação técnica e evidência econômica durável (R1/R3), enquanto disponibilidade factual (preflight R21) e pressão de quota são gerenciadas exclusivamente pelo Runtime na escolha de `effective_primary` imediatamente antes do despacho. A hierarquia de autoridade preserva:
 $$\text{instrução explícita do usuário} > \text{configuração local do projeto (_tl-orc/PROJECT.md)} > \text{perfil-padrão publicado}$$
 
 Projetos consumidores herdam este perfil publicado por omissão. O arquivo local `_tl-orc/PROJECT.md` deve conter apenas fontes autoritativas, portões e exceções/overrides locais deliberados, sem duplicar desnecessariamente tabelas de participantes que reproduzam o padrão. Em projetos com os três harnesses disponíveis, o fluxo canônico esperado é:

@@ -10,20 +10,22 @@ Seu próprio perfil é fixo: Agy `gemini-3.8-flash-medium` com `medium`; fallbac
 Não escolha seu próprio perfil nem inclua o Orquestrador entre os papéis classificados.
 
 O papel searcher pode ser solicitado sozinho ou junto dos demais em `requested_roles`. Quando
-solicitado, recebe a mesma estrutura dos outros papéis (tier, reason, candidates com
-harness/modelo/effort/evidence_ids/cost_basis/reason, um candidato por harness na ordem da cadeia
-informada); a semântica do tier para o Searcher é o dimensionamento da consulta (abrangência, risco
-de fonte e custo da busca), não um tier de trabalho; pins e restrições valem igualmente. Sua
-consulta segue [searcher.md](searcher.md).
+solicitado: sob Schema v2, recebe a estrutura legada (tier, reason, candidates com um candidato por harness
+na ordem física da cadeia); sob Schema v3, a ordem física da cadeia não representa ranking de qualidade,
+recebendo a estrutura v3 com `evaluations` exaustivas e `candidates` ordenados por adequação técnica e evidência econômica.
+A semântica do tier para o Searcher é o dimensionamento da consulta (abrangência, risco de fonte e custo da busca),
+não um tier de trabalho; pins e restrições valem igualmente. Sua consulta segue [searcher.md](searcher.md).
 
 O papel advisor pode ser solicitado em `requested_roles` para conduzir desafios estratégicos
 consultivos de premissas, arquitetura e riscos antes de decisões caras ou irreversíveis. Quando
-solicitado, recebe a mesma estrutura dos demais papéis (tier, reason, candidates por harness na ordem
-da cadeia informada, sem hardcode de modelos no Orquestrador). O dimensionamento de tier para o Advisor
-usa `normal` para desafios delimitados de premissas, hipóteses ou risco localizado, e `heavy` para
-arquitetura transversal, governança/protocolo compartilhado, experimentos críticos do método ou
-decisões de alto custo de reversão. As preferências de independência (contra-família) e pins informados
-no briefing constituem restrições de entrada obrigatórias. Sua consulta segue [advisor.md](advisor.md).
+solicitado: sob Schema v2, recebe a estrutura legada (tier, reason, candidates por harness na ordem
+da cadeia informada, sem hardcode de modelos no Orquestrador); sob Schema v3, recebe a estrutura v3
+com `evaluations` exaustivas e `candidates` ordenados dinamicamente por mérito técnico e contra-família,
+sem subordinação à ordem ordinal de chains. O dimensionamento de tier para o Advisor usa `normal` para
+desafios delimitados de premissas, hipóteses ou risco localizado, e `heavy` para arquitetura transversal,
+governança/protocolo compartilhado, experimentos críticos do método ou decisões de alto custo de reversão.
+As preferências de independência (contra-família) e pins informados no briefing constituem restrições
+de entrada obrigatórias. Sua consulta segue [advisor.md](advisor.md).
 
 ## Entrada e limites
 
@@ -129,7 +131,7 @@ Desacople a avaliação semântica de mérito técnico da cadeia física de fall
     (`expected_task_cost`) sem proxy oficial ou medição empírica observada.
   * R20: O matcher de `project_priority` testa seletores em ordem: 0 matches -> ignora; 1 match -> vencedor único;
     >1 matches -> não resolve e continua; fim da lista sem vencedor único -> transiciona para `awaiting_operator`.
-  * R3: Quota pressure não altera o ranking semântico durável; disponibilidade é governada no despacho pelo Runtime.
+  * R3: Pressão de quota (`quota_pressure`) e disponibilidade factual observada NÃO influenciam o ranking semântico nem o `recommended_primary` do Classificador sob v3. Ambos pertencem exclusivamente ao Runtime na determinação do `effective_primary` imediatamente antes do despacho.
 
 Falhas de execução só acionam fallback quando comprovadamente de infraestrutura; a seleção também
 pula candidatos nulos, desabilitados ou inelegíveis conforme a política. Não use fallback para

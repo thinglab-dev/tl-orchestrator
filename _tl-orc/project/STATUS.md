@@ -40,9 +40,9 @@ open_discussions: []
 | T016 | gov | none | done | [T022] | [] | 2 | evidence/T016-r01.md |
 | T017 | gov | none | done | [T016] | [] | 2 | evidence/T017-r02.md |
 | T018 | feat | none | done | [T017] | [] | 2 | evidence/T018-r05.md |
-| T019 | feat | none | ready | [T018, T024] | [T024] | 0 | - |
+| T019 | feat | none | ready | [T018, T024] | [] | 0 | - |
 | T020 | fix | none | done | [T011] | [] | 2 | evidence/T013-r01.md |
 | T021 | feat | none | done | [T020] | [] | 2 | evidence/T014-r01.md |
 | T022 | feat | none | done | [] | [] | 2 | evidence/T015-r03b.md |
 | T023 | analysis | none | ready | [T010, T021] | [] | 1 | evidence/T012-r01.md |
-| T024 | gov | none | ready | [T015, T018] | [] | 0 | - |
+| T024 | gov | none | done | [T015, T018] | [] | 1 | evidence/T024-r02.md |

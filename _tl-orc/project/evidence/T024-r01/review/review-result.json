@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "verdict": "changes_requested",
+  "action_items": [
+    {
+      "id": "R1",
+      "severity": "high",
+      "category": "bad_spec",
+      "target_role": "planner",
+      "location": "_tl-orc/project/tasks/T024-governance-lineage-reconciliation-and-t018-v011-integration.md:19,86",
+      "problem": "AC25 exige que o próprio commit de integração seja registrado em integration_target, mas o commit alvo contém o placeholder \"unknown até a implementação\". A correção presente apenas na árvore de trabalho não pertence ao target_commit revisado; além disso, um commit Git não pode, de modo praticável, conter seu próprio SHA sem alterar o hash.",
+      "evidence": "git show fffd5fdd...:T024 mostra integration_target: unknown até a implementação na linha 19; AC25 na linha 86 exige o commit reconciliado. A árvore de trabalho diverge do alvo somente ao trocar esse valor por fffd5fdd..., portanto não constitui evidência do conteúdo revisado.",
+      "required_action": "Redefinir AC25 para uma identidade não autorreferente (por exemplo, uma atestação posterior que referencia o commit integrado, ou um identificador derivado do conteúdo) e atualizar a spec/metadados, content_id quando aplicável, evidência e gate para um novo target_commit verificável."
+    },
+    {
+      "id": "R2",
+      "severity": "medium",
+      "category": "patch",
+      "target_role": "maker",
+      "location": "docs/EXECUTION_PROTOCOL.md:512; schemas/batch.schema.json:386",
+      "problem": "A documentação declara que supervisor_state_dir, scope_claim, merge_queue_entry e lease_heartbeat_ts residem em execution.runtime_refs, mas o schema fecha esse objeto e aceita somente worktree_slot, scope_claim_id e merge_queue_id. Um envelope que siga a documentação é rejeitado.",
+      "evidence": "EXECUTION_PROTOCOL.md lista literalmente os cinco identificadores; batch.schema.json define runtime_refs com additionalProperties: false e não declara supervisor_state_dir nem lease_heartbeat_ts, além de usar nomes incompatíveis para scope/merge. O teste AC20 cobre apenas os três nomes do schema e não detecta a divergência.",
+      "required_action": "Alinhar o contrato: adicionar ao schema os identificadores documentados ou corrigir a documentação para os nomes efetivamente aceitos; incluir contraprovas de paridade documentação/schema e de rejeição dos nomes obsoletos."
+    }
+  ],
+  "deferred": [],
+  "rejected": [
+    {
+      "summary": "A guarda relacional não revelou violação operacional de L01–L14.",
+      "evidence": "scripts/audit_lineage.py --format json retornou blockers: []; os avisos L12 são referências históricas textuais às identidades aposentadas, não dependências operacionais."
+    },
+    {
+      "summary": "Não foi encontrado defeito de serialidade declarada, parada fail-closed ou isolamento do digest nas mudanças cobertas.",
+      "evidence": "batch.schema.json exige frozen_scope.batch_concurrency com const 1; test_automatic_mode.py contém contrafactuais para valor ausente/2, parked com continue_independent_after_block false e runtime_refs fora do frozen_scope."
+    },
+    {
+      "summary": "Os blockers do audit_diff.py não são defeitos confirmados no escopo dos 23 content_paths.",
+      "evidence": "A execução contra o diff completo base→target reportou 60 matches, predominantemente em evidências históricas adicionadas e em atribuições Python legítimas como 'blockers, _ = run_audits(...)'; a sonda não distingue esses casos de erro engolido. O código ativo relevante foi inspecionado."
+    }
+  ]
+}

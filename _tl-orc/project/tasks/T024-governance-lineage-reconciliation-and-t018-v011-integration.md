@@ -4,8 +4,8 @@ type: gov
 deliverable: none
 standalone: true
 method: native
-status: ready
-state_revision: 0
+status: done
+state_revision: 1
 depends_on: [T015, T018]
 blocked_by: []
 origin: decisão normativa do mantenedor em 2026-09-13 (aceite da Estratégia D do Advisor — Reseat · Delegate · Serial-by-declaration — com as cinco decisões humanas mandatórias H1 a H5)

@@ -6,7 +6,7 @@ method: native
 status: ready
 state_revision: 0
 depends_on: [T018, T024]
-blocked_by: [T024]
+blocked_by: []
 origin: instrução normativa do mantenedor em 2026-09-13 (formalização da seleção dinâmica de primário T019 com R1 a R22)
 decisions: []
 spec_author: orchestrator

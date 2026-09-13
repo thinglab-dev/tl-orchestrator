@@ -348,6 +348,14 @@ def validate_batch_envelope(instance: dict[str, Any], schema: dict[str, Any] | N
                 extra_rr = set(rrefs.keys()) - rr_props
                 if extra_rr:
                     errors.append(f"Unexpected runtime_refs properties: {sorted(extra_rr)}")
+                for prop, val in rrefs.items():
+                    if prop in rr_props and val is not None:
+                        if prop == "lease_heartbeat_ts":
+                            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                                errors.append(f"execution.runtime_refs.{prop} must be a number or null")
+                        else:
+                            if not isinstance(val, str):
+                                errors.append(f"execution.runtime_refs.{prop} must be a string or null")
 
     # 9. Invariâncias contratuais: advisor_policy e budget
     fscope_obj = instance.get("frozen_scope")
@@ -1851,40 +1859,145 @@ class TestAutomaticModeContract(unittest.TestCase):
         self.assertEqual(decision_advance["batch_status"], "in_progress")
         self.assertEqual(decision_advance["admitted_units"], ["T020"])
 
-    def test_ac20_runtime_refs_mutable_block_and_digest_invariance(self) -> None:
-        """AC20: runtime_refs in execution mutable block, forbidden in frozen_scope, does not alter digest."""
-        envelope = copy.deepcopy(self.valid_batch_frontmatter)
-
-        # 1. Positive: runtime_refs inside execution
-        envelope["execution"]["runtime_refs"] = {
+    def test_ac20_runtime_refs_canonical_properties_acceptance(self) -> None:
+        """AC20: Cada propriedade canônica individual e em conjunto é aceita em execution.runtime_refs."""
+        canonical_props = {
+            "supervisor_state_dir": "/tmp/tl-state/story-123",
             "worktree_slot": "slot_01",
-            "scope_claim_id": "claim_123",
-            "merge_queue_id": None,
+            "scope_claim": "story-123",
+            "merge_queue_entry": "story-123",
+            "lease_heartbeat_ts": 1726245600.5,
         }
-        valid, errors = validate_batch_envelope(envelope, self.schema)
-        self.assertTrue(valid, f"runtime_refs in execution should pass: {errors}")
 
-        # 2. Counterfactual: runtime_refs inside frozen_scope is rejected
-        invalid_fs = copy.deepcopy(self.valid_batch_frontmatter)
-        invalid_fs["frozen_scope"]["runtime_refs"] = {
-            "worktree_slot": "slot_01"
+        # Conjunto completo válido
+        envelope = copy.deepcopy(self.valid_batch_frontmatter)
+        envelope["execution"]["runtime_refs"] = canonical_props
+        valid, errors = validate_batch_envelope(envelope, self.schema)
+        self.assertTrue(valid, f"All canonical runtime_refs should pass: {errors}")
+
+        # Cada propriedade isolada
+        for k, v in canonical_props.items():
+            env_single = copy.deepcopy(self.valid_batch_frontmatter)
+            env_single["execution"]["runtime_refs"] = {k: v}
+            v_ok, errs = validate_batch_envelope(env_single, self.schema)
+            self.assertTrue(v_ok, f"Single property {k} should pass: {errs}")
+
+        # Valores nulos para cada propriedade são aceitos
+        env_null = copy.deepcopy(self.valid_batch_frontmatter)
+        env_null["execution"]["runtime_refs"] = {k: None for k in canonical_props}
+        v_null, errs_null = validate_batch_envelope(env_null, self.schema)
+        self.assertTrue(v_null, f"Null runtime_refs values should pass: {errs_null}")
+
+    def test_ac20_runtime_refs_invalid_types_rejected(self) -> None:
+        """AC20: Tipos inválidos para propriedades canônicas são rejeitados."""
+        invalid_cases = [
+            ("supervisor_state_dir", 12345),
+            ("supervisor_state_dir", ["/dir"]),
+            ("worktree_slot", True),
+            ("worktree_slot", 99),
+            ("scope_claim", 456),
+            ("scope_claim", {"path": "a"}),
+            ("merge_queue_entry", ["item"]),
+            ("merge_queue_entry", 789),
+            ("lease_heartbeat_ts", "not-a-number"),
+            ("lease_heartbeat_ts", True),
+            ("lease_heartbeat_ts", [123]),
+        ]
+        for prop, bad_val in invalid_cases:
+            env = copy.deepcopy(self.valid_batch_frontmatter)
+            env["execution"]["runtime_refs"] = {prop: bad_val}
+            valid, errors = validate_batch_envelope(env, self.schema)
+            self.assertFalse(valid, f"Bad value {bad_val!r} for {prop} should fail")
+            self.assertTrue(
+                any(f"execution.runtime_refs.{prop} must be" in e for e in errors),
+                f"Expected type error for {prop}, got: {errors}",
+            )
+
+    def test_ac20_runtime_refs_obsolete_aliases_rejected(self) -> None:
+        """AC20: Nomes obsoletos e aliases (scope_claim_id, merge_queue_id) são estritamente rejeitados."""
+        obsolete_cases = [
+            {"scope_claim_id": "claim_123"},
+            {"merge_queue_id": "queue_123"},
+            {"worktree": "slot_01"},
+            {"heartbeat_ts": 1726245600.0},
+            {"state_dir": "/tmp/state"},
+            {"unauthorized_property": "val"},
+        ]
+        for bad_rr in obsolete_cases:
+            env = copy.deepcopy(self.valid_batch_frontmatter)
+            env["execution"]["runtime_refs"] = bad_rr
+            valid, errors = validate_batch_envelope(env, self.schema)
+            self.assertFalse(valid, f"Obsolete/unauthorized runtime_refs {bad_rr} must fail")
+            self.assertTrue(
+                any("Unexpected runtime_refs properties" in e for e in errors),
+                f"Expected 'Unexpected runtime_refs properties', got: {errors}",
+            )
+
+    def test_ac20_runtime_refs_doc_schema_parity(self) -> None:
+        """AC20: docs/EXECUTION_PROTOCOL.md e schemas/batch.schema.json possuem exatamente o mesmo conjunto canônico."""
+        import re
+
+        # Extrair identificadores declarados no schema
+        rr_schema = (
+            self.schema.get("properties", {})
+            .get("execution", {})
+            .get("properties", {})
+            .get("runtime_refs", {})
+        )
+        schema_props = set(rr_schema.get("properties", {}).keys())
+        expected_canonical = {
+            "supervisor_state_dir",
+            "worktree_slot",
+            "scope_claim",
+            "merge_queue_entry",
+            "lease_heartbeat_ts",
         }
+        self.assertEqual(
+            schema_props,
+            expected_canonical,
+            f"batch.schema.json runtime_refs props {schema_props} diverge from expected {expected_canonical}",
+        )
+
+        # Extrair identificadores documentados em docs/EXECUTION_PROTOCOL.md
+        exec_proto_path = Path(__file__).resolve().parent.parent.parent / "docs" / "EXECUTION_PROTOCOL.md"
+        self.assertTrue(exec_proto_path.exists(), f"EXECUTION_PROTOCOL.md not found at {exec_proto_path}")
+        content = exec_proto_path.read_text(encoding="utf-8")
+
+        # Procura a declaração de runtime_refs em EXECUTION_PROTOCOL.md
+        match = re.search(r"runtime_refs`\s*do\s*envelope.*?`Bnnn\.md`", content, re.DOTALL)
+        self.assertIsNotNone(match, "Could not find runtime_refs section in EXECUTION_PROTOCOL.md")
+        # Encontrar os identificadores citados entre crases na seção
+        section_snippet = content[max(0, match.start() - 200) : match.end()]
+        declared_in_doc = set(re.findall(r"`([a-z0-9_]+)`", section_snippet))
+        # Deve conter todos os 5 identificadores canônicos
+        for prop in expected_canonical:
+            self.assertIn(
+                prop,
+                declared_in_doc,
+                f"Canonical property '{prop}' missing from EXECUTION_PROTOCOL.md runtime_refs section",
+            )
+        # Nomes obsoletos não devem aparecer na seção
+        self.assertNotIn("scope_claim_id", declared_in_doc)
+        self.assertNotIn("merge_queue_id", declared_in_doc)
+
+    def test_ac20_runtime_refs_forbidden_in_frozen_scope_and_digest_invariant(self) -> None:
+        """AC20: runtime_refs proibido em frozen_scope e isolado do immutable_digest."""
+        # 1. Proibido em frozen_scope
+        invalid_fs = copy.deepcopy(self.valid_batch_frontmatter)
+        invalid_fs["frozen_scope"]["runtime_refs"] = {"worktree_slot": "slot_01"}
         valid_fs, errors_fs = validate_batch_envelope(invalid_fs, self.schema)
         self.assertFalse(valid_fs)
         self.assertTrue(any("Unexpected frozen_scope properties" in e for e in errors_fs))
 
-        # 3. Counterfactual: extra property inside runtime_refs is rejected
-        invalid_rr = copy.deepcopy(envelope)
-        invalid_rr["execution"]["runtime_refs"]["unauthorized_prop"] = "val"
-        valid_rr, errors_rr = validate_batch_envelope(invalid_rr, self.schema)
-        self.assertFalse(valid_rr)
-        self.assertTrue(any("Unexpected runtime_refs properties" in e for e in errors_rr))
+        # 2. Digest invariance: alterar runtime_refs em execution não altera digest do frozen_scope
+        envelope = copy.deepcopy(self.valid_batch_frontmatter)
+        envelope["execution"]["runtime_refs"] = {"worktree_slot": "slot_01"}
+        digest_before = compute_digest(envelope["frozen_scope"])
 
-        # 4. Digest invariance: changing runtime_refs does not alter frozen_scope digest
-        scope_digest_before = compute_digest(envelope["frozen_scope"])
         envelope["execution"]["runtime_refs"]["worktree_slot"] = "slot_99"
-        scope_digest_after = compute_digest(envelope["frozen_scope"])
-        self.assertEqual(scope_digest_before, scope_digest_after)
+        envelope["execution"]["runtime_refs"]["lease_heartbeat_ts"] = 1726249999.0
+        digest_after = compute_digest(envelope["frozen_scope"])
+        self.assertEqual(digest_before, digest_after)
 
 
 if __name__ == "__main__":

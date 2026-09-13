@@ -387,14 +387,20 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "supervisor_state_dir": {
+              "type": ["string", "null"]
+            },
             "worktree_slot": {
               "type": ["string", "null"]
             },
-            "scope_claim_id": {
+            "scope_claim": {
               "type": ["string", "null"]
             },
-            "merge_queue_id": {
+            "merge_queue_entry": {
               "type": ["string", "null"]
+            },
+            "lease_heartbeat_ts": {
+              "type": ["number", "null"]
             }
           }
         }

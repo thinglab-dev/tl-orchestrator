@@ -11,14 +11,14 @@ blocked_by: []
 origin: decisão normativa do mantenedor em 2026-09-13 (aceite da Estratégia D do Advisor — Reseat · Delegate · Serial-by-declaration — com as cinco decisões humanas mandatórias H1 a H5)
 decisions: []
 spec_author: planner
-spec_revision: 948c44332c6f8195
-rework_round: 0
+spec_revision: c1aa4c68fcdd4fe2
+rework_round: 1
 affects_context: []
 provenance: []
 integration_base: 2aca4f42bdd399c943ad4a5afeb403725018f6ae
-integration_target: unknown até a implementação
-integration_content_id: 2aca4f42bdd399c943ad4a5afeb403725018f6ae:651a76ce753ec023
-content_id: 2aca4f42bdd399c943ad4a5afeb403725018f6ae:651a76ce753ec023
+integration_target: recorded_in_evidence
+integration_content_id: 2aca4f42bdd399c943ad4a5afeb403725018f6ae:0549648677c932c6
+content_id: 2aca4f42bdd399c943ad4a5afeb403725018f6ae:0549648677c932c6
 effective_authors: [google, anthropic]
 checker_independence: required
 content_paths: [_tl-orc/project/lineage-map.md, _tl-orc/project/STATUS.md, _tl-orc/project/tasks/T020-regras-contratuais-de-esperas-liveness-e-lote-autorizado.md, _tl-orc/project/tasks/T021-politica-global-de-participantes-e-perfis-padrao.md, _tl-orc/project/tasks/T022-context-economy-selective-retrieval-e-handoff-verificavel.md, _tl-orc/project/tasks/T023-piloto-retomada-curta-entre-ciclos.md, _tl-orc/project/tasks/T024-governance-lineage-reconciliation-and-t018-v011-integration.md, _tl-orc/project/tasks/T016-verification-cadence-targeted-tests-and-major-boundary-integration-gates.md, _tl-orc/project/tasks/T019-dynamic-primary-harness-selection-separate-quality-ranking-from-infrastructure-fallback.md, scripts/audit_lineage.py, scripts/tests/test_audit_lineage.py, schemas/batch.schema.json, scripts/tests/test_automatic_mode.py, docs/EXECUTION_PROTOCOL.md, docs/WORK_MODEL.md, prompts/orchestrator-playbook.md, prompts/orchestrator.md, SKILL.md, README.md, distribution-manifest.json, docs/PROJECT_CONFIGURATION.md, CHANGELOG.md, .github/workflows/validate.yml]
@@ -83,8 +83,8 @@ AC21 (Matriz de delegação documentada): docs/EXECUTION_PROTOCOL.md e docs/WORK
 AC22 (Manifesto unificado em 22 arquivos): distribution-manifest.json com package_file_count: 22 e a união exata (19 upstream + prompts/advisor.md + schemas/advisor-result.schema.json + schemas/batch.schema.json). README sincronizado: lista, string exatamente 22 arquivos, bloco de export e bloco de checksums.
 AC23 (Gate unificado no CI e local): .github/workflows/validate.yml executa, em passos distintos: validate_repository.py; unittest discover -s tests; unittest discover -s scripts/tests -t .; audit_lineage.py. As suítes de scripts/tests/ passam pelo CI.
 AC24 (Regressão integral): Todas as suítes preexistentes passam sem modificação de asserções, exceto as fixtures de test_automatic_mode.py estritamente exigidas por AC18/AC20. Nenhuma asserção é afrouxada.
-AC25 (Identidade de integração): integration_base: 2aca4f42bdd399c943ad4a5afeb403725018f6ae; integration_target = commit de integração reconciliado; integration_content_id = <integration_base>:<hash16 do diff> no formato canônico de docs/WORK_MODEL.md. Distinto do content_id de T018.
-AC26 (Revisão independente): Parecer report-only de família distinta de todos os autores efetivos do diff de T024, sob checker_independence: required, cobrindo os 23 content_paths com spec_revision e integration_content_id do alvo. Evidência em _tl-orc/project/evidence/T024-r01.md.
+AC25 (Identidade de integração): integration_base: 2aca4f42bdd399c943ad4a5afeb403725018f6ae; integration_target: recorded_in_evidence — o commit de integração reconciliado não declara, em seu próprio conteúdo versionado, o próprio SHA (autorreferência de hash de commit é impossível em Git); o SHA real do commit de integração é registrado na evidência formal pós-implementação (_tl-orc/project/evidence/T024-r02.md), produzida depois que o commit existe, e essa evidência é verificável contra o commit (o SHA nela registrado resolve a um commit existente cujo conteúdo corresponde ao diff de T024); integration_content_id = <integration_base>:<hash16 do diff> no formato canônico de docs/WORK_MODEL.md. Distinto do content_id de T018.
+AC26 (Revisão independente): Parecer report-only de família distinta de todos os autores efetivos do diff de T024, sob checker_independence: required, cobrindo os 23 content_paths com spec_revision e integration_content_id do alvo. Evidência em _tl-orc/project/evidence/T024-r02.md.
 AC27 (T019 estritamente bloqueada): T019.depends_on: [T018, T024], T019.blocked_by: [T024], status: ready. Enquanto T024.status != done, T019 é inelegível para despacho.
 
 ## Verification profile

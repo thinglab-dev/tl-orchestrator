@@ -89,6 +89,9 @@
         },
         "searcher": {
           "$ref": "#/$defs/role"
+        },
+        "advisor": {
+          "$ref": "#/$defs/role"
         }
       }
     }

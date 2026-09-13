@@ -1,0 +1,35 @@
+{
+  "bundle_schema_version": 2,
+  "round": "r03b",
+  "description": "Blind comparison bundle for experimental replays across Checkpoints A, B, and C.",
+  "checkpoints": [
+    "A",
+    "B",
+    "C"
+  ],
+  "arms": [
+    "Alpha",
+    "Beta"
+  ],
+  "experimental_protocol": {
+    "model": "claude-sonnet-5",
+    "effort": "medium",
+    "tool_policy": "Read,Glob,Grep,Bash,read_section.py",
+    "harness_gate": "Hardened auditor with realpath confinement, bash command parser, and physical runtime isolation",
+    "paired_replays_count": 6,
+    "isolation": "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1, autoMemoryEnabled=false, physical cwd segregation, 0 external reads"
+  },
+  "findings_summary": {
+    "checkpoint_A": "Valid for comparison. Both treatments reached valid decisions on T009. Treatment with selective section retrieval performed granular inspection across multiple test files (+43.3% delivered bytes, +35.7% turns) versus standard baseline read.",
+    "checkpoint_B": "Valid for comparison. Story 6.0a rework analysis. Treatment with selective retrieval demonstrated substantial delivered byte reduction (-77.4%, from 41.7 kB to 9.4 kB) and latency reduction (-27.3%, from 69.6s to 50.6s).",
+    "checkpoint_C": "Valid for comparison. DW-6.0A-01 catalog/pin violation analysis. Both treatments identified invalid dispatch and proposed clean re-review. Treatment with selective retrieval reduced delivered bytes (-15.8%) with trade-off in turn count (+200.0%) and cache read tokens (+313.0%).",
+    "ac16_confinement": "100% of all 6 arms passed AC15 and AC16 with reads_outside_allowed_set == [], disallowed_external_attempts == [], and failed_read_attempts == []. Zero AutoMemory leakage observed.",
+    "aggregate_efficiency": "Aggregated delivered bytes reduced by -22.9% across all 3 checkpoints (80.755 B vs 104.805 B). Trade-off observed: +77.1% turns and +126.0% cache-read tokens due to iterative section queries."
+  },
+  "sanitization": [
+    "Physical environment paths normalized to <repo-root>",
+    "Session UUIDs and treatment identifiers blinded to Alpha/Beta per checkpoint",
+    "Model parameters and evaluation criteria held constant",
+    "Zero leaked references to source treatments, keys or generator scripts"
+  ]
+}

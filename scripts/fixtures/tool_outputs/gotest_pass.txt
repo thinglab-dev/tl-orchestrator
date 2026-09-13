@@ -1,0 +1,5 @@
+=== RUN   TestLogin
+--- PASS: TestLogin (0.01s)
+=== RUN   TestUser
+--- PASS: TestUser (0.02s)
+ok  	github.com/thinglab/auth	0.035s

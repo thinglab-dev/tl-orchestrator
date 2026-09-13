@@ -1,0 +1,18 @@
+{
+  "bundle_schema_version": 1,
+  "description": "Blind comparison bundle for T015 experimental replays across Checkpoints A, B, and C.",
+  "checkpoints": [
+    "A",
+    "B",
+    "C"
+  ],
+  "arms": [
+    "Alpha",
+    "Beta"
+  ],
+  "sanitization": [
+    "Physical environment paths normalized to <repo-root>",
+    "Session UUIDs and treatment identifiers blinded to Alpha/Beta",
+    "Model parameters (Claude Sonnet, effort medium, read-only tools) and evaluation criteria held constant"
+  ]
+}

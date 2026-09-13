@@ -35,20 +35,28 @@ A ordem de preferência dos harnesses é operacional:
 | Papel | Cadeia de preferência e fallback |
 | :--- | :--- |
 | Planner | Claude → Codex → Agy |
-| Maker | Codex → Claude → Agy |
-| Checker report-only | Agy → Claude → Codex, priorizando família diferente da identidade Maker aplicável |
+| Maker | Agy → Codex → Claude |
+| Checker report-only | Codex → Claude → Agy, priorizando família diferente de toda a autoria efetiva |
 | Searcher | Agy → Claude → Codex |
+| Advisor | Cross-family preferido em relação à proposta desafiada (contra-família) |
 
-Essas cadeias publicadas autorizam fallback dentro dos seus limites. A linha do Searcher é a cadeia
-por omissão quando não há configuração local nem pin, de modo que uma consulta inicial em projeto
-sem perfil persistido tem cadeia definida pelo perfil publicado; modelo e effort continuam
-escolhidos pelo Classificador dentro do catálogo em vigor (o publicado, na ausência de configuração
-local), nunca inferidos da cadeia (veja [Searcher sob demanda](#searcher-sob-demanda)). Uma
-instrução atual do usuário prevalece sobre a configuração do consumidor, que prevalece sobre o
-perfil publicado. Escolhas fixadas explicitamente para um papel continuam restrições do
-Classificador; não as transforme em mera capacidade observada. O padrão por tier não fixa Terra,
-Sonnet ou Gemini como modelo de trabalho de todos os tiers. Diversidade adicional do Planner é
-desejável, mas não basta sozinha para reordenar sua cadeia nem revogar uma preferência.
+Essas cadeias publicadas constituem a política global padrão do pacote quando os três harnesses (Agy, Claude e Codex) estão disponíveis:
+- **Classifier**: Agy `gemini-3.8-flash-medium` (`medium`) → Codex `gpt-5.6-luna` (`medium`) → Claude `sonnet` (`medium`).
+- **Planner**: Claude `sonnet` (`medium` ou `high`) → Codex `gpt-5.6-terra` (`medium` ou `high`) → Agy Gemini (`high`).
+- **Maker**: Agy `gemini-3.8-flash-high` (`high`) → Codex `gpt-5.6-terra` (`high` ou `xhigh` conforme classificação) → Claude `sonnet` (`high`).
+- **Checker report-only**: Codex `gpt-5.6-terra` (`high`) → Claude `sonnet` ou `claude-opus-5` (`high`) → Agy Gemini (`high`, quando elegível).
+- **Searcher**: Agy `gemini-3.8-flash-medium` (`medium`) → Claude → Codex.
+- **Advisor**: Cross-family preferido em sessão limpa (`fresh_session: required`), subordinado a `advisor_independence` (preferred vs required) e contra-família da proposta desafiada.
+
+A cadeia nominal do Checker (`Codex → Claude → Agy`) permanece **estritamente subordinada a `checker_independence` e à autoria efetiva completa** (incluindo Maker inicial, reworks e correções do Orquestrador): se OpenAI participou da autoria, Codex é inelegível; se Google participou, Agy é inelegível; se Anthropic participou, Claude é inelegível; se Google e OpenAI participaram, Claude é o único elegível.
+
+Essas escolhas são preferências operacionais e econômicas, não pins rígidos: o Classificador pode alterar modelo/effort diante de complexidade, disponibilidade comprovada ou pressão de quota. A hierarquia de autoridade preserva:
+$$\text{instrução explícita do usuário} > \text{configuração local do projeto (_tl-orc/PROJECT.md)} > \text{perfil-padrão publicado}$$
+
+Projetos consumidores herdam este perfil publicado por omissão. O arquivo local `_tl-orc/PROJECT.md` deve conter apenas fontes autoritativas, portões e exceções/overrides locais deliberados, sem duplicar desnecessariamente tabelas de participantes que reproduzam o padrão. Em projetos com os três harnesses disponíveis, o fluxo canônico esperado é:
+- Com planejamento: `Gemini 3.8 Medium Classifier → Claude Planner → Gemini 3.8 High Maker → Codex Terra High Checker`.
+- Sem planejamento: `Gemini 3.8 Medium Classifier → Gemini 3.8 High Maker → Codex Terra High Checker`.
+Quando algum dos harnesses estiver ausente no ambiente, a cadeia é filtrada deterministicamente pelos harnesses disponíveis, conservando a independência estrita do Checker.
 
 ## Catálogo permitido
 
@@ -166,11 +174,19 @@ Distinga os estados:
 A disponibilidade se comprova por evidência recente pertinente (run registrado no mesmo harness,
 mesma conta e mesma sessão de trabalho) ou pela própria chamada autorizada ao papel. Uma sonda
 separada só cabe para resolver dúvida concreta quando o estado permanecer `unknown` após a
-chamada normal. Quota explicitamente esgotada, autenticação recusada ou harness ausente podem
-comprovar indisponibilidade e acionar o fallback. Um timeout isolado, saída vazia ou processo ainda
-vivo não comprovam isso nem erro de capacidade do modelo. Não confunda falta de quota com falha de
-raciocínio e não promova ou rebaixe tier/effort para contorná-la. Toda chamada, inclusive a que
-falhou, tentativas descartadas e sondas, entra na tabela `Agent runs`
+chamada normal. Quotas explicitamente esgotadas, autenticação recusada ou harness ausente podem
+comprovar indisponibilidade e acionar o fallback. Diante de ausência de saída ou suspeita de processo
+sem avanço após o intervalo de liveness configurado (`liveness_probe_after`), realize investigação
+mecânica proporcional do subprocesso (inspecionando estado do processo, CPU, streams e descritores/pipes
+de I/O de forma agnóstica ao sistema operacional, garantindo que `stdin` recebeu EOF / `< /dev/null` e
+não há bloqueio local) antes de qualquer inferência de latência de agente. Comandos e utilitários
+específicos (como `ps`, `lsof`, APIs de plataforma ou cmdlets) são apenas adaptadores de sistema
+operacional. Falhas mecânicas simples de invocação devem ser corrigidas localmente nos limites da
+autorização vigente e registradas na contabilidade de esforço da amostra. Um timeout isolado, saída
+vazia, falha repetida de invocação ou processo ainda vivo não comprovam indisponibilidade nem autorizam
+troca de modelo ou família. Não confunda falta de quota com falha de raciocínio e não promova ou
+rebaixe tier/effort para contorná-la. Toda chamada, inclusive a que falhou, tentativas descartadas e
+sondas, entra na tabela `Agent runs`
 ([docs/WORK_MODEL.md#registro-de-revisão](../docs/WORK_MODEL.md#registro-de-revisão)). Se uma quota
 compartilhada foi comprovadamente esgotada, marque somente os candidatos cobertos por essa mesma
 quota; não presuma que outro harness usa a mesma conta. Não tente uma cadeia circular. Todos
@@ -199,7 +215,7 @@ ou debate. As famílias que escreveram a entrega são todas as famílias efetiva
 do artefato, incluindo Maker inicial, reworks, experimentos comparativos e correção feita pelo
 próprio Orquestrador. Por padrão, `checker_independence: preferred`: tente primeiro candidatos de
 família diferente de todas as famílias efetivas que escreveram a entrega, preservando a ordem
-Agy → Claude → Codex dentro desse grupo. Se nenhum for utilizável e a indisponibilidade estiver
+Codex → Claude → Agy dentro desse grupo. Se nenhum for utilizável e a indisponibilidade estiver
 comprovada, tente os de mesma família, também na ordem configurada, em sessão nova; registre
 `same_family_fresh_session` como limitação da revisão e abra uma pendência de revisão por outra
 família no bloco `## RF-<unit_id>-rNN` na evidência da unidade
@@ -211,6 +227,43 @@ distinta bloqueia a revisão com ponto de retomada, sem abrir bloco de pendênci
 indisponibilidade comprovada nunca converte `required` em `preferred`. Uma política local estrita
 continua vigente até mudança autorizada. Não apresente revisão de mesma família como diversidade de
 modelos nem revisão própria como Checker externo.
+
+## Independência do Advisor
+
+Use sempre uma **nova sessão limpa** (`fresh_session: required`), somente leitura (`report_only: true`),
+sem reutilizar contextos anteriores.
+A independência do Advisor é calculada em relação ao **conjunto completo de famílias autoras materiais**
+que contribuíram para a proposta, plano ou artefato sob desafio (`challenged_author_families`), e não
+meramente em relação a uma única família ou ao último autor:
+```text
+challenged_author_families = conjunto completo das famílias que contribuíram materialmente para o artefato desafiado
+eligible_cross_family = famílias disponíveis - challenged_author_families
+```
+
+Resolução obrigatória:
+- **Casos com 1 família autora:**
+  * `[google]` → OpenAI (Codex) ou Anthropic (Claude);
+  * `[openai]` → Google (Agy) ou Anthropic (Claude);
+  * `[anthropic]` → Google (Agy) ou OpenAI (Codex).
+- **Casos com pares de famílias autoras materiais:**
+  * `[google, openai]` → obrigatoriamente Anthropic (Claude) quando disponível; não pode depender do último autor;
+  * `[google, anthropic]` → obrigatoriamente OpenAI (Codex);
+  * `[openai, anthropic]` → obrigatoriamente Google (Agy).
+- **Caso extremo com as 3 famílias (`[google, openai, anthropic]`):**
+  * Sob `advisor_independence: required`: nenhuma família independente disponível (`eligible_cross_family = ∅`), bloqueia terminantemente o despacho do Advisor (`blocked`) com emissão de impedimento formal e ponto de retomada.
+  * Sob `advisor_independence: preferred`: admite fallback na mesma família em sessão nova, obrigatoriamente registrado como `advisor_independence: degraded_same_family`, com `fallback_reason` obrigatório não vazio detalhando todas as famílias conflitantes.
+
+Por padrão, vigora `advisor_independence: preferred`:
+- O Orquestrador busca primeiro candidatos em `eligible_cross_family` recomendados na classificação.
+- Se todas as opções de famílias alternativas estiverem comprovadamente indisponíveis (falta de quota,
+  autenticação recusada ou harness ausente), admite-se o despacho do Advisor em sessão nova,
+  como fallback degradado com registro mandatório na evidência (`advisor_independence: degraded_same_family`,
+  `fallback_reason: <motivo>`).
+
+Sob `advisor_independence: required`:
+- A indisponibilidade de famílias alternativas em `eligible_cross_family` bloqueia terminantemente o despacho
+  do Advisor com emissão de impedimento formal e ponto de retomada. Indisponibilidade comprovada nunca converte
+  `required` em `preferred`.
 
 ## Briefing concreto
 
@@ -252,6 +305,8 @@ fontes além das raízes informadas segue o [escopo de leitura](orchestrator.md#
 
 Em **Debater**, use o dossiê comum e os limites do
 [playbook consultivo](orchestrator-playbook.md#debater); não forneça schema de aprovação.
+Agentes subordinados atuam instruindo e analisando alternativas, prós e contras; nunca possuem
+autoridade para conceder autorizações de escopo, orçamento ou ações restritas em nome do usuário.
 Configure permissões com capacidades verificadas. Instrução report-only não equivale a trava
 técnica. Traduza effort para flags somente depois de conferir o transporte local; passe modelo e
 effort explicitamente para evitar herdar um default caro, e registre qualquer divergência.
@@ -260,5 +315,11 @@ effort explicitamente para evitar herdar um default caro, e registre qualquer di
 
 Use o mecanismo de acompanhamento fornecido pela ferramenta. Preserve identificador, resposta
 original, resultado e exit observado; processo vivo, log crescente e exit zero isolado não provam
-conclusão. Respeite limites de tempo e custo do briefing. Não prometa ser acordado depois de
+conclusão. O Orquestrador exerce a autonomia técnica já delegada pelo escopo da unidade e da spec,
+executando diretamente escolhas técnicas rotineiras sem paradas desnecessárias. Quando formular
+perguntas ao usuário, o cômputo do prazo humano inicia-se estritamente no evento tecnicamente
+observável `question_emitted_at` (retorno bem-sucedido de emissão pelo runtime; `transport_ack_at`
+é admitido se fornecido pelo canal); é terminantemente proibido presumir leitura ou cognição humana.
+A consulta classificada pós-prazo só é despachada sob cláusula explícita no lote (`auto_consult_after`,
+`max_calls`). Respeite limites de tempo e custo do briefing. Não prometa ser acordado depois de
 encerrar a sessão.

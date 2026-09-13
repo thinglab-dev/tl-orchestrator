@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "package_file_count": 19,
+  "package_file_count": 22,
   "package_files": [
     "README.md",
     "SKILL.md",
@@ -13,6 +13,9 @@
     "prompts/maker.md",
     "prompts/checker-report-only.md",
     "prompts/searcher.md",
+    "prompts/advisor.md",
+    "schemas/advisor-result.schema.json",
+    "schemas/batch.schema.json",
     "schemas/classification-result.schema.json",
     "schemas/review-result.schema.json",
     "docs/PROJECT_CONFIGURATION.md",

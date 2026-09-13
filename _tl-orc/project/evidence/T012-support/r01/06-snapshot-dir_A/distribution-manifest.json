@@ -1,0 +1,23 @@
+{
+  "format_version": 1,
+  "package_file_count": 17,
+  "package_files": [
+    "README.md",
+    "SKILL.md",
+    "LICENSE",
+    "prompts/orchestrator.md",
+    "prompts/orchestrator-perfis.md",
+    "prompts/orchestrator-playbook.md",
+    "prompts/classifier.md",
+    "prompts/planner.md",
+    "prompts/maker.md",
+    "prompts/checker-report-only.md",
+    "prompts/searcher.md",
+    "schemas/classification-result.schema.json",
+    "schemas/review-result.schema.json",
+    "docs/PROJECT_CONFIGURATION.md",
+    "docs/MODEL_ROUTING.md",
+    "docs/EVOLUTION.md",
+    "docs/WORK_MODEL.md"
+  ]
+}

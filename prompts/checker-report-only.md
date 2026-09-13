@@ -29,9 +29,11 @@ Faça a primeira leitura sobre spec, diff e evidências atuais antes de consulta
 
 No perfil Native do [modelo de trabalho](../docs/WORK_MODEL.md), o briefing informa `spec_revision`,
 `content_id` e os `content_paths` sob revisão. Revise exatamente esse conteúdo; se a árvore não
-corresponder à identificação recebida, declare a divergência em vez de revisar outra coisa. Aplique o
-perfil de verificação da spec: exija sonda contrafactual quando a garantia for comportamental e, nos
-demais tipos, confira a verificação definida. Quando o briefing incluir Feature Briefs, trate-os como
+corresponder à identificação recebida, declare a divergência em vez de revisar outra coisa. O briefing
+informa também o `verification_scope` (`targeted`, `integration_boundary` ou `exceptional_full`) e o
+`integration_group`. Aplique o perfil de verificação da spec conforme o escopo recebido: exija sonda
+contrafactual quando a garantia for comportamental e, nos demais tipos, confira a verificação definida.
+Quando o briefing incluir Feature Briefs, trate-os como
 contexto derivado: confira nas fontes as afirmações relevantes à revisão e registre em `deferred`
 afirmações `confirmed` sem evidência ou regras perdidas na síntese que estejam fora do escopo da
 entrega. O Orquestrador preserva o parecer no registro de revisão junto ao `content_id`.
@@ -39,6 +41,11 @@ entrega. O Orquestrador preserva o parecer no registro de revisão junto ao `con
 ## Achados
 
 Procure desvios de intenção, regressões, casos de borda e lacunas de evidência materiais. Leia adições e remoções, consumidores e testes pertinentes. Não transforme preferência de estilo em defeito sem requisito ou risco demonstrado.
+
+Audite a verificação conforme o `verification_scope` informado no briefing:
+- Sob `verification_scope: targeted`, audite com rigor a suficiência da cobertura direcionada (diff, pacotes/módulos alterados, consumidores impactados, critérios de aceitação específicos e sondas contrafactuais). É terminantemente PROIBIDO apontar a ausência de execução rotineira do portão canônico de integração (`canonical_full_gate`) como deficiência probatória, omissão de teste, defeito ou motivo para `changes_requested` quando a unidade estiver sob escopo direcionado dentro do seu grupo de integração.
+- Sob `verification_scope: integration_boundary`, confira a execução integral e verde do `canonical_full_gate` vinculado ao commit SHA exato da árvore examinada.
+- Sob `verification_scope: exceptional_full`, confira a presença e validade técnica do bloco `full_gate_exception` detalhando a razão estrutural transversal e rejeitando justificativas genéricas como "por segurança", "para garantir tudo" ou "para confirmar".
 
 Aplique rigorosamente as **4 lentes obrigatórias de revisão profunda** (`tl-deep-review`):
 1. **Concorrência e Condições de Corrida:** identifique janelas TOCTOU, leituras/escritas sem lock em estruturas compartilhadas, uso incorreto de variáveis atômicas e corridas assíncronas.

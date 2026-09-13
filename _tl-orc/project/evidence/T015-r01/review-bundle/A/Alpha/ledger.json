@@ -1,0 +1,93 @@
+{
+  "allowed_set": {
+    "allowed_support": [],
+    "inputs": []
+  },
+  "created_at": "2026-09-11T17:07:07.780234+00:00",
+  "observed_reads": [
+    {
+      "tool": "Read",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-A/T009-r07.md",
+      "bytes": 9036,
+      "status": "ok"
+    },
+    {
+      "tool": "Read",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-A/task-T009-spec.md",
+      "bytes": 7780,
+      "status": "ok"
+    },
+    {
+      "tool": "Read",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-A/manifest.json",
+      "bytes": 18591,
+      "status": "ok"
+    },
+    {
+      "tool": "Read",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-A/resume.json",
+      "bytes": 3087,
+      "status": "ok"
+    },
+    {
+      "tool": "Read",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-A/PROJECT.md",
+      "bytes": 5666,
+      "status": "ok"
+    },
+    {
+      "tool": "Grep",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-A/content_paths/T009-analysis.md",
+      "bytes": 4368,
+      "status": "ok"
+    },
+    {
+      "tool": "Read",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-A/content_paths/T009-cases/case_15_r4_required_same_family.json",
+      "bytes": 4043,
+      "status": "ok"
+    },
+    {
+      "tool": "Read",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-A/content_paths/T009-analysis.md",
+      "bytes": 15047,
+      "status": "ok"
+    }
+  ],
+  "phase": "review",
+  "pricing": {
+    "assumptions": [
+      "Cache read priced at 10% of base input token price",
+      "Cache creation priced at 1.25x of base input token price"
+    ],
+    "basis": "official_task_proxy",
+    "estimated_token_cost": 0.4483,
+    "observed_tokens": 29918,
+    "source": "docs/MODEL_ROUTING.md (proxy rubric)",
+    "subscription_quota_impact": "unknown",
+    "verified_at": "2026-09-11"
+  },
+  "reads_outside_allowed_set": [],
+  "rotation": {
+    "reason": "Session metrics within nominal bounds.",
+    "rotation_recommended": false
+  },
+  "schema_version": 1,
+  "tokens": {
+    "cache_creation_input_tokens": 100819,
+    "cache_read_input_tokens": 575104,
+    "input_tokens": 36,
+    "output_tokens": 29882,
+    "thinking_tokens": 19630
+  },
+  "tool_calls": 10,
+  "tool_metrics": {
+    "delivered_result_bytes": 77818,
+    "raw_result_bytes": 77818,
+    "tool_delivery_ratio": 1.0
+  },
+  "turn_count": 19,
+  "unit": "replay-A-Alpha",
+  "failed_read_attempts": [],
+  "disallowed_external_attempts": []
+}

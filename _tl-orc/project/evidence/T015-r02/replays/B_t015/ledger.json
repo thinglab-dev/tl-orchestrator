@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "unit": "T015-replay-B",
+  "phase": "rework",
+  "created_at": "2026-09-11T23:38:44.703590+00:00",
+  "turn_count": 22,
+  "tool_calls": 10,
+  "tokens": {
+    "input_tokens": 42,
+    "cache_creation_input_tokens": 54567,
+    "cache_read_input_tokens": 458169,
+    "output_tokens": 23799,
+    "thinking_tokens": 6341
+  },
+  "tool_metrics": {
+    "raw_result_bytes": 14401,
+    "delivered_result_bytes": 14401,
+    "tool_delivery_ratio": 1.0
+  },
+  "retrieval_amplification": 2.096,
+  "observed_reads": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/PROJECT.md",
+      "selector": "frontmatter",
+      "bytes": 329,
+      "digest": "21c7b5b08a1d51a89f15fa85dd6b1108b5bed7756bdb153088af254d1cacbb0f",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/checker-6-0a-r1.md",
+      "selector": "## Parecer (objeto extra\u00eddo)",
+      "bytes": 2911,
+      "digest": "c1fb814bd4580a4b004ecb93dc18264f32aa84840dea7ba6430c9370f70d01ff",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/dev-report-6-0a.md",
+      "selector": "## Escopo entregue",
+      "bytes": 1494,
+      "digest": "36cb321add5f2cd6454620094a8e6f5722996c86641c21ddbf54f126aa56076b",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/spec-6-0a.md",
+      "selector": "## \u00a73. Crit\u00e9rios de aceite",
+      "bytes": 1126,
+      "digest": "380992f8ce79ee811b7af1e265535cd5cfcef90023049122841ec08d770e617e",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/spec-6-0a.md",
+      "selector": "frontmatter",
+      "bytes": 3373,
+      "digest": "010e049760c1a10116c66d31545473333a16fcff13c9ca4ec0de415913e8579e",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "echo",
+      "selector": "full_file",
+      "bytes": 3373,
+      "digest": "010e049760c1a10116c66d31545473333a16fcff13c9ca4ec0de415913e8579e",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "sed",
+      "selector": "full_file",
+      "bytes": 3373,
+      "digest": "010e049760c1a10116c66d31545473333a16fcff13c9ca4ec0de415913e8579e",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/spec-6-0a.md",
+      "selector": "full_file",
+      "bytes": 3373,
+      "digest": "010e049760c1a10116c66d31545473333a16fcff13c9ca4ec0de415913e8579e",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    }
+  ],
+  "failed_read_attempts": [],
+  "reads_outside_allowed_set": [],
+  "disallowed_external_attempts": [],
+  "allowed_set": {
+    "reference": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/wt/t015-freeze/_tl-orc/project/evidence/T015-r02/allowed_sets/allowed_set_checkpoint-B.json",
+    "inputs": [
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/CODE_TREE_STATUS.txt",
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/PROJECT.md",
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/checker-6-0a-r1.md",
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/dev-report-6-0a.md",
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/manifest.json",
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/resume.json",
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/spec-6-0a.md"
+    ],
+    "allowed_support": [
+      ".git",
+      "/dev/null",
+      "CHANGELOG.md",
+      "README.md",
+      "_tl-orc/PROJECT.md",
+      "_tl-orc/project/STATUS.md",
+      "docs",
+      "prompts",
+      "schemas",
+      "scripts"
+    ]
+  },
+  "telemetry_divergence": null,
+  "pricing": {
+    "basis": "official_task_proxy",
+    "source": "docs/MODEL_ROUTING.md (proxy rubric)",
+    "verified_at": "2026-09-11",
+    "assumptions": [
+      "Cache read priced at 10% of base input token price",
+      "Cache creation priced at 1.25x of base input token price"
+    ],
+    "observed_tokens": 23841,
+    "estimated_token_cost": 0.3571,
+    "subscription_quota_impact": "unknown"
+  },
+  "rotation": {
+    "rotation_recommended": false,
+    "reason": "Session metrics within nominal bounds.",
+    "applied_thresholds": {
+      "max_turns": 30,
+      "max_tool_bytes": 500000,
+      "max_cache_tokens": 1000000
+    }
+  }
+}

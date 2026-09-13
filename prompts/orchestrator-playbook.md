@@ -51,6 +51,32 @@ unidade sem conversa de acompanhamento está no
 com sua cadeia autorizada, e os recibos de Maker, portões e Checker ficam internos ao condutor. Job
 por papel é opcional e quebrar a story em microjobs não autoriza turnos de acompanhamento.
 
+### Leitura seletiva por seção (Selective Retrieval)
+
+Priorize sempre a leitura seletiva por seção (`scripts/read_section.py --file <caminho> --heading <seletor>`)
+em vez de carregar arquivos completos no contexto. O leitor estrutural devolve o recorte canônico da
+seção acompanhado de seu SHA-256 e delimitadores exatos.
+
+A leitura deve carregar procedência (`path`, `heading_path`, `sha256`) e conferir o estado de frescor
+(`current`, `digest_changed`, `selector_not_found`) contra o digest esperado. A leitura integral de
+um arquivo grande continua permitida, mas deve constituir uma decisão consciente e justificada,
+evitando a amplificação desnecessária de contexto (*retrieval amplification*).
+
+### Extratores determinísticos e offloading de ferramentas
+
+Para saídas volumosas de ferramentas (`go test`, `pytest`, `git diff`, `git status`, `grep`, compilações
+e validadores estruturais), execute o extrator determinístico correspondente
+(`scripts/extract_tool_result.py --tool <ferramenta> --input <bruto> --output <compacto> --details-ref <ref>`).
+
+O resultado bruto é preservado íntegro em artefato de disco (`details_ref`), enquanto o contexto do
+agente admite apenas o resumo estruturado com as falhas contratuais mapeadas (`failure_ids`). Sob o
+portão de preservação (*losslessness gate*), nenhuma falha contratual relevante pode ser omitida do
+payload compacto.
+
+Na retomada de sessões e passagens de bastão, utilize o gerador do manifesto de retomada
+(`scripts/resume_generate.py`) para inspecionar integridade de fontes congeladas e compor o contexto
+resolvido da fase conforme `docs/CONTEXT_POLICY.md`.
+
 ## Searcher sob demanda
 
 Quando faltar contexto factual para uma decisão, o Orquestrador pode consultar o Searcher antes ou
@@ -130,7 +156,7 @@ declarado enumera dentro do escopo declarado. Uma story fora dessa lista não en
 proximidade, data, nome de arquivo, sugestão da conversa ou por estar bloqueando outra; ampliar a
 lista é decisão do usuário. Não varra backlogs nem escolha uma story apenas pela data.
 
-Uma ativação processa **no máximo uma** story. Considere a primeira story não concluída na ordem
+Uma ativação processa **no máximo uma** story, salvo sob execução de lote autorizado. Considere a primeira story não concluída na ordem
 declarada pelo board e prossiga somente se ela estiver pronta, com dependências satisfeitas e sem
 decisão humana pendente. Quando o board for `_tl-orc/project/STATUS.md`, siga a
 [fila no perfil Native](../docs/WORK_MODEL.md#fila-sequencial-no-perfil-native): a ordem canônica
@@ -141,7 +167,14 @@ avanço de estado e autoriza somente estado e visão central, nunca specs, decis
 evidências. Sem áreas cadastradas, a fila é da área `global` e nada muda; com múltiplas áreas,
 uma fila nova declara `area_id`, e uma fila existente só é associada a uma área quando `scope` e
 `board` a identificam sem ambiguidade. Se ela estiver bloqueada ou ambígua, não pule para outra por conveniência:
-registre o motivo e aguarde a decisão ou a atualização do board. Quando BMAD reger o módulo,
+registre o motivo e aguarde a decisão ou a atualização do board. Com um lote de unidades expressamente
+autorizado pelo usuário contendo escopo e lista delimitada, a fila sequencial avança automaticamente para
+a próxima unidade desbloqueada do lote após a conclusão da anterior com portões e revisão atendidos,
+sem paradas intermediárias para novos menus. O comportamento padrão diante de bloqueio em qualquer unidade
+do lote é a parada imediata da execução naquela unidade, sendo estritamente proibido saltá-la. A continuação
+automática restrita a ramos topologicamente independentes só é permitida se o lote tiver autorizado
+explicitamente essa política (`continue_independent_on_block: true`); na omissão dessa cláusula, o lote
+inteiro suspende a execução na unidade bloqueada. Quando BMAD reger o módulo,
 execute primeiro a sincronização exigida pela política local e use somente o sprint daquele módulo.
 
 Para a story escolhida, obtenha ou revalide a classificação da **fase atual** para somente os
@@ -159,21 +192,150 @@ correção, renove as provas afetadas, classifique a fase `review` para a árvor
 uma **nova** sessão do Checker resolvido pela política de despacho. O limite padrão é duas
 rodadas de correção após a primeira revisão, ou menor se `_tl-orc/QUEUE.md` o declarar. Ao atingir
 o limite de 2 rodadas sem consenso, ao detectar oscilação de diff idêntico a round anterior, ou
-ao obter parecer inválido sem evidência executável, estacione a story como `parked` gravando `report.md`,
+ao obter parecer inválido sem evidência executável: fora de lote autorizado, estacione a story como `parked` gravando `report.md`,
 solte a lease atômica e avance imediatamente para a próxima story elegível da fila, preservando a
-autonomia noturna sem travar o condutor.
+autonomia noturna sem travar o condutor. Dentro de um lote autorizado do Modo Automático, `parked` solta a lease mas **não confere autoridade para avançar**:
+o lote suspende imediatamente a execução na unidade estacionada caso `continue_independent_after_block: false`, mapeando para stop condition da unidade (`rework_limit_exhausted` ou `bad_spec_or_intent_gap`).
 
-Com `approved`, execute as ações locais e remotas expressamente autorizadas em `QUEUE.md`:
+Com `approved`, execute as ações locais e remotas expressamente autorizadas em `QUEUE.md` ou no lote:
 registrar evidência, atualizar o board, comitar sem pular hooks e abrir o Pull Request (`auto_pr`).
-Quando `auto_pr` e `auto_merge` estiverem ativos, **nunca espere de forma síncrona pelo CI remoto**:
-registre o PR no `state.json` com merge automático (`--auto --squash --delete-branch`), libere o lock
+Quando `auto_pr` estiver ativo, **nunca espere de forma síncrona pelo CI remoto**:
+registre o PR no `state.json`, libere a lease/lock
 e avalie as próximas stories independentes da fila para execução em worktrees isolados. Consulte o
 Scope Arbiter antes de cada despacho: **despache concorrentemente somente se `claim_scope` retornar
 sucesso para todas as stories candidatas** e houver vaga retornada por `acquire_worktree_slot`.
 Dependência no DAG, `scope_conflict`, estado ilegível ou pool esgotado mantém a candidata serializada;
-nunca abra primeiro o worktree para arbitrar depois. PRs concluídos entram por `enqueue_merge` e
+nunca abra primeiro o worktree para arbitrar depois. PRs concluídos com merge expressamente autorizado entram por `enqueue_merge` e
 somente o topo da Merge Queue Serializada pode chamar `gh pr merge`; o item seguinte aguarda o
-registro terminal do anterior, e um `failed` exige intervenção explícita na fila.
+registro terminal do anterior, e um `failed` exige intervenção explícita na fila. A Merge Queue ordena merges já autorizados, mas nunca concede autoridade para merge em `main`: merge em `main` exige autorização humana explícita ou autorização prévia por `permitted_effects` do lote.
+
+## Modo Automático: condução operacional de batches
+
+O Modo Automático conduz a execução autônoma de um lote finito e formalmente autorizado de unidades
+conhecidas do projeto sob disciplina documental estrita, sem daemons, loops de polling residentes ou
+suposição de atomicidade de banco de dados. Segue a máquina de estados normatizada em
+[docs/WORK_MODEL.md](../docs/WORK_MODEL.md#modo-automático-execução-de-lote-finito-autorizado).
+
+### 1. Descoberta e proposta estruturada (`DISCOVER → PROPOSE`)
+
+1. **Invariante de autorização:** A solicitação inicial do usuário ("iniciar modo automático" ou
+   seleção no menu) autoriza estrita e exclusivamente a fase de leitura. É terminantemente proibido
+   alterar código, criar commits ou despachar agentes de implementação nesta fase.
+2. **`DISCOVER`:** O Orquestrador inspeciona as unidades candidatas existentes no projeto (Tasks do
+   perfil Native ou Deliverables), seu grafo de dependências, `spec_revisions`, grupos de integração e
+   portões configurados. Não inventa tarefas novas e não explora backlogs infinitos.
+3. **`PROPOSE`:** Formula e apresenta ao usuário uma proposta formal de lote contendo:
+   - `proposal_id` único e data/hora;
+   - Unidades candidatas com suas revisões, specs, dependências e grupos de integração;
+   - Orçamento total de chamadas a modelos (`max_model_calls`);
+   - Limite de rodadas de retrabalho por unidade (`max_rework_rounds_per_unit`);
+   - Orçamento e gatilhos de Advisor (`max_advisor_calls`), se aplicável;
+   - Efeitos permitidos estritos (`permitted_effects`, ex.: `local_write: true`, `local_commit: true`,
+     com push/PR/merge terminantemente `false`);
+   - Política de bloqueio (`continue_independent_after_block: false` por omissão);
+   - Portões de integração de fronteira previstos;
+   - As 18 stop conditions aplicáveis;
+   - Digest canônico da proposta (`proposal_digest`).
+4. O Orquestrador apresenta a proposta e entra em bloqueio síncrono no estado `WAIT_AUTHORIZATION`.
+
+### 2. Espera de autorização e tratamento de aprovação parcial (`WAIT_AUTHORIZATION`)
+
+1. **Rejeição:** Se o usuário recusar ou pedir cancelamento, retorne para `IDLE`.
+2. **Aprovação integral:** Se o usuário aprovar integralmente a proposta nos seus termos exatos, avance
+   para `PREFREEZE_REVALIDATE`.
+3. **Aprovação parcial:** Se o usuário aprovar apenas um subconjunto das unidades propostas (ex.:
+   "execute T018 e T019, mas exclua T020"), **nunca filtre diretamente o lote no freeze**. O Orquestrador
+   gera obrigatoriamente um novo ciclo `PROPOSE` contendo estritamente o subconjunto aprovado, recalculando
+   dependências, orçamentos, boundaries de integração e o novo `proposal_digest` para nova deliberação humana.
+
+### 3. Revalidação pré-freeze (`PREFREEZE_REVALIDATE`)
+
+Imediatamente antes de materializar o lote em disco:
+1. Recalcule e revalide síncronamente: revisões de unidade, `spec_revision` de cada task, grafo de
+   dependências, `scope_digest` e efeitos autorizados contra o estado real dos arquivos na árvore.
+2. **Tratamento de drift:** Qualquer divergência ou alteração externa ocorrida durante a espera humana
+   invalida sumariamente a proposta anterior. É proibido adaptar o lote silenciosamente; retorne ao
+   estado `PROPOSE` com a proposta atualizada para nova confirmação.
+3. Se todos os metadados e digests conferirem perfeitamente, avance para `FREEZE_BATCH`.
+
+### 4. Congelamento do lote (`FREEZE_BATCH`)
+
+1. Crie o arquivo durável `_tl-orc/project/batches/Bnnn.md` (`B001.md`, `B002.md`, ...).
+2. Grave o envelope estruturado conforme `schemas/batch.schema.json`, separando o snapshot imutável
+   (`frozen_scope`, `authorization`, `immutable_digest`) das seções mutáveis (`status: in_progress`,
+   `budget`, `execution`).
+3. Atualize o lock de coordenação e a projeção em `_tl-orc/project/STATUS.md`:
+   - `active_batch: Bnnn`
+   - `batch_status: in_progress`
+   - incremente `next_batch_id`
+4. Avance para `EXECUTE`.
+
+### 5. Loop de execução sequencial (`EXECUTE`)
+
+Para cada unidade do snapshot congelado, na ordem topológica autorizada:
+
+#### A. Admission Gate da unidade
+Valide rigorosamente:
+1. `authority` inalterada;
+2. Unidade presente no snapshot `frozen_scope`;
+3. `revision` e `spec_revision` sem drift;
+4. `dependencies` satisfeitas (`status == done`);
+5. `coordinator` da sessão atual ativo e válido em `STATUS.md`;
+6. `tree_state == expected_checkpoint` (HEAD esperado e árvore de trabalho limpa);
+7. Efeitos da unidade contidos em `permitted_effects`;
+8. Saldo de chamadas suficiente para a reserva mandatória dinâmica.
+
+#### B. Reserva dinâmica mandatória de verificação
+Calcule: `required_call_reserve = todas as chamadas obrigatórias ainda não consumidas do checkpoint atual até o Checker independente` (Classifiers de cada fase, Maker, Checker e, quando exigidos, Planner ou Advisor).
+- Se `saldo < required_call_reserve`: interrompa imediatamente com `STOP: insufficient_budget_for_unit_verification`.
+- Rework só inicia se houver saldo para todo o ciclo restante até o re-review independente.
+
+#### C. Execução da unidade e Write-Ahead lógico
+1. Obtenha a classificação da fase em perfil fixo (Classifier econômico). Se apontar `bad_spec_or_intent_gap`
+   ou incerteza material insolúvel, pare a unidade antes de despachar o Maker (`STOP: bad_spec_or_intent_gap`).
+2. **Write-ahead de chamada:**
+   - Verifique saldo disponível;
+   - Reserve slots no batch (`reserved_model_calls += N`);
+   - Grave `pending_call` em `Bnnn.md` com `call_id`, `role`, `phase`, `payload_digest`, `dispatched_at`;
+   - Persista `Bnnn.md` em disco;
+   - Despache o agente;
+   - Observe o receipt;
+   - Converta reserva em consumo (`reserved_model_calls -= 1`, `consumed_model_calls += 1`);
+   - Limpe `pending_call` em `Bnnn.md` (`pending_call: null`);
+   - Persista `Bnnn.md` atualizado.
+3. Maker implementa estritamente dentro dos `content_paths` da spec congelada.
+4. Execute verificação direcionada (*targeted verification*) intragrupo conforme T016.
+5. Classifique a fase de review e despache Checker independente em fresh session report-only.
+6. Se o Checker emitir `changes_requested`:
+   - Se os achados forem de responsabilidade do Maker, dentro da spec/content_paths congelados, respeitarem
+     `max_rework_rounds_per_unit` e houver saldo para todo o ciclo restante de rework: prossiga para rework.
+   - Se houver `bad_spec_or_intent_gap`, expansão de escopo ou saldo insuficiente: pare com `STOP`.
+
+#### D. Portões de fronteira T016 dentro do lote
+1. Ao concluir uma unidade com aprovação do Checker e registro de evidência, verifique se a unidade encerra
+   um `integration_group` ou se a próxima unidade pertence a outro grupo de integração.
+2. Havendo transição de `integration_group`, execute obrigatoriamente o `canonical_full_gate` oficial na
+   fronteira do grupo encerrado. Falha no portão bloqueia a execução com `STOP: canonical_full_gate_failure`.
+
+### 6. Interrupções, Stop conditions e recuperação pós-crash
+
+1. Diante de qualquer uma das 18 stop conditions catalogadas em `docs/WORK_MODEL.md`, interrompa
+   imediatamente (`STOP`), registre o motivo em `execution.stop_reason` de `Bnnn.md`, projete em `STATUS.md`
+   e devolva o controle com relatório detalhado ao usuário.
+2. O comportamento padrão em caso de bloqueio é `continue_independent_after_block: false` (interrupção total).
+3. **Recuperação de crash:** Ao retomar uma sessão interrompida:
+   - Se `pending_call` existir no batch: verifique se há recibo inequívoco de conclusão. Se ambíguo, compute
+     conservadoramente como `consumed` e interrompa com `STOP`, evitando estouro acidental de orçamento.
+
+### 7. Fechamento do lote (`CLOSE`)
+
+1. Todas as unidades atingem `status: done`.
+2. Execução obrigatória do `canonical_full_gate` de fronteira final com exit 0.
+3. Atualize `batches/Bnnn.md` para `status: done`.
+4. Atualize `STATUS.md` para `active_batch: none` e `batch_status: none`.
+5. Apresente relatório terminal com unidades entregues, chamadas consumidas e evidências duráveis.
+6. Retorne para `IDLE`.
+- **Invariante terminal:** Lote concluído **nunca** gera ou dispara outro lote automaticamente.
 
 ## Discuss
 
@@ -255,6 +417,74 @@ O debate não substitui a revisão final de uma implementação. Depois da inten
 execução autorizada, despache Checker em **nova sessão independente**, com a intenção e a árvore
 real sob revisão. Não reutilize a sessão consultiva nem seu parecer como aprovação da entrega.
 
+## Condução do Advisor (Desafio Estratégico)
+
+O papel **Advisor** atua como desafio crítico independente de premissas, arquitetura, causalidade e
+riscos antes de decisões materiais caras ou difíceis de reverter. Não faz parte do fluxo rotineiro
+de cada Story.
+
+### 1. Avaliação rigorosa de gatilhos vs non-triggers
+
+Antes de solicitar a classificação ou despachar o Advisor, o Orquestrador deve confirmar a presença
+objetiva de pelo menos um dos **8 gatilhos objetivos** ([docs/WORK_MODEL.md](../docs/WORK_MODEL.md#3-gatilhos-objetivos-de-acionamento)):
+1. Mudança em arquitetura, protocolo, autoridade, governança ou contrato compartilhado;
+2. Decisão difícil de reverter (migração ampla, cutover, alteração estrutural, quebra de retrocompatibilidade);
+3. Experimento que fundamentará decisão do método (benchmarks de governança, A/B de processo);
+4. Incerteza material em trabalho com tier heavy (tier heavy isolado não basta);
+5. Conclusão causal relevante a partir de evidência limitada;
+6. Recorrência de classe de falha descoberta somente por revisão independente;
+7. Segundo parecer explicitamente solicitado pelo usuário;
+8. Pré-congelamento de lote automático de alto custo com tarefas satisfazendo algum dos critérios anteriores.
+
+É **estritamente proibido** acionar o Advisor por rotina ou conveniência (non-triggers): início de Story,
+término de Maker, entrada em revisão, changes_requested comum de revisão, tarefas heavy sem incerteza
+material, alterações documentais/status de rotina, "segunda opinião" informal ou "por segurança".
+
+### 2. Preparação do challenge packet (Context Economy)
+
+O Orquestrador monta um pacote enxuto de desafio (*challenge packet*), evitando despejos brutos do
+histórico ou repositório:
+- A decisão, proposta de arquitetura ou premissa sob desafio;
+- O conjunto completo de famílias que contribuíram materialmente para a proposta/artefato desafiado (`challenged_author_families`);
+- O objetivo pretendido e restrições conhecidas;
+- Fatos confirmados e evidências disponíveis com identificadores estáveis;
+- Premissas centrais e hipóteses adotadas;
+- Alternativas já consideradas e razões do descarte;
+- Limites de autoridade vigentes;
+- A pergunta específica e delimitada dirigida ao Advisor.
+
+Consultas adicionais a arquivos são realizadas pelo próprio Advisor sob demanda via ferramentas somente
+leitura, sem leituras exploratórias desnecessárias.
+
+### 3. Despacho em sessão limpa e resolução de contra-família
+
+O Advisor é despachado obrigatoriamente em **sessão nova e limpa** (`fresh_session: required`), estritamente
+somente leitura (`report_only: true`).
+- A independência é resolvida contra o **conjunto completo de famílias autoras materiais** (`challenged_author_families`),
+  onde `eligible_cross_family = famílias disponíveis - challenged_author_families`:
+  * 1 família autora: `[google]` → OpenAI ou Anthropic; `[openai]` → Google ou Anthropic; `[anthropic]` → Google ou OpenAI.
+  * Pares de famílias autoras: `[google, openai]` → obrigatoriamente Anthropic quando disponível (não depender do último autor); `[google, anthropic]` → OpenAI; `[openai, anthropic]` → Google.
+  * Triplet de famílias autoras (`[google, openai, anthropic]`): sob `advisor_independence: required`, bloqueia o despacho (`blocked`); sob `advisor_independence: preferred`, admite fallback degradado na mesma família em sessão nova (`degraded_same_family`), com `fallback_reason` obrigatório não vazio detalhando todas as famílias conflitantes.
+- Sob `advisor_independence: preferred` (padrão): caso as contra-famílias em `eligible_cross_family` estejam comprovadamente indisponíveis,
+  admite-se fallback em sessão nova, com registro obrigatório (`advisor_independence: degraded_same_family`,
+  `fallback_reason: <motivo>`).
+- Sob `advisor_independence: required`: indisponibilidade de contra-família independente bloqueia o despacho do Advisor com
+  ponto de retomada.
+
+### 4. Consumo mandatório do veredito e disposição bloqueante
+
+O Orquestrador valida a resposta contra [schemas/advisor-result.schema.json](../schemas/advisor-result.schema.json).
+Vereditos restritivos têm efeito operacional bloqueante: é proibido ignorá-los silenciosamente antes da próxima
+ação material:
+- `proceed`: A proposição sob desafio é sólida; o fluxo prossegue normalmente.
+- `adjust`: Há premissas frágeis ou riscos não mitigados. O Orquestrador deve registrar disposição formal
+  (aceite com ajuste ou rejeição fundamentada) na evidência antes do próximo despacho.
+- `plan`: A questão exige detalhamento formal de especificação executável ou decomposição arquitetural. O
+  Orquestrador deve classificar e despachar o Planner se autorizado.
+- `debate`: O Advisor recomenda debate formal (`debate_required: true`). O veredito `debate` implica obrigatoriamente `debate_required: true` conforme a invariante do schema. O Orquestrador não inicia o Debate
+  automaticamente: apresenta a recomendação ao usuário ou verifica autorização prévia vigente.
+- `stop`: Risco inaceitável ou premissa central refutada. Interrompe imediatamente o avanço até deliberação do usuário.
+
 ## Preparar
 
 Leia pedido, regras locais, tarefa atual, dependências e estado da árvore. Se houver
@@ -289,6 +519,14 @@ A leitura linha a linha do diff integral é do Checker. Como condutor, confira a
 
 Leia dirigido na árvore o trecho de que o aceite depende e a fonte de uma prova, em vez de repetir a leitura integral do Checker. Para sondagem independente adicional, despache um verificador; não peça o parecer integral de volta ao seu contexto. Cobertura não conferida e parecer não lido por ninguém não viram aprovação.
 
+Orquestre a verificação rigorosamente conforme a cadência do método: **"targeted early and throughout → canonical full integration gate only at major boundary"**.
+- **Intragrupo (`verification_scope: targeted`):** durante a implementação e revisões de unidades dentro de um mesmo `integration_group` (Epic no BMAD, Deliverable no Native, agrupamento explícito ou Standalone), limite os testes aos módulos afetados, diff, consumidores diretos, ACs específicos e sondas contrafactuais. Não execute a suíte de integração global completa por rotina a cada tarefa.
+- **Fronteira principal (`verification_scope: integration_boundary`):** dispare obrigatoriamente o `canonical_full_gate` configurado apenas no fechamento da unidade final do grupo de integração ou em Native Standalone Task, antes de autorizar a transição para o próximo grupo independente. O portão precisa terminar verde (sucesso, exit 0); falha no gate bloqueia terminantemente a transição. Se `canonical_full_gate` estiver como `not_configured` ou ausente, registre como pendência bloqueante e nunca infira comandos.
+- **Invalidação estrita da árvore:** o resultado do `canonical_full_gate` é estritamente vinculado ao commit SHA verificado. Qualquer alteração posterior no código da árvore invalida a prova e exige nova execução antes da transição de fronteira.
+- **Reaproveitamento de CI:** quando o CI externo já tiver executado o `canonical_full_gate` com sucesso sobre o mesmo commit SHA exato e sob a mesma definição/revisão do portão, com logs auditáveis, reaproveite essa evidência sem duplicar a execução local; se o código ou a definição do comando foi alterada após o CI, a prova anterior é nula.
+- **Exceção antecipada (`verification_scope: exceptional_full`):** permitida estritamente para alterações estruturais transversais (ex.: esquema compartilhado de banco, protocolo cross-módulo, primitivas globais de concorrência, build system). Exige bloco formal `full_gate_exception` com razão técnica e justificativa objetiva; justificativas genéricas ("por segurança", "para garantir tudo", "para confirmar") são nulas e proibidas.
+- **Retrabalho econômico (`changes_requested`):** re-execute testes estritamente no patch alterado, consumidores impactados e ACs pertinentes. Retrabalhos documentais, de evidência, metadados ou status não executam testes funcionais, admitindo no máximo verificações textuais (`git diff --check`, lint estrutural).
+
 Derive a verificação dos riscos e contratos afetados, inclusive quem constrói ou consome tipos/configurações alterados. Execute os portões existentes definidos para a tarefa; uma alteração documental pode ser comprovada por inspeção, comparação de originais, referências e exportação. Não invente uma suíte de programação para validar documentos.
 
 Um resultado de portão ou suíte só vale para a mesma revisão da árvore e a mesma definição do
@@ -319,6 +557,12 @@ Esta seção e seu schema regem a revisão de entrega. As opiniões consultivas 
 [Debater](#debater) seguem o formato próprio daquele modo e não têm valor de aprovação.
 
 Entregue ao Checker o contrato, a intenção congelada, base, diff completo e evidências pertinentes. Não dirija sua primeira leitura para uma conclusão; memórias e relatos antigos entram apenas depois da inspeção independente das fontes atuais.
+
+O briefing de revisão entregue ao Checker deve incluir obrigatoriamente os metadados de cadência de verificação:
+- `verification_scope`: `targeted` | `integration_boundary` | `exceptional_full`
+- `integration_group`: `{ authority: <bmad_epic | native_deliverable | native_standalone | explicit>, id: <id> }`
+  A autoridade do grupo é resolvida semanticamente (Epic no BMAD, Deliverable no Native, ou Native Standalone Task como seu próprio grupo `authority: native_standalone, id: <Task_ID>`), sendo vedado parsing por regex sobre o identificador.
+- Instrução explícita sobre o escopo: sob `verification_scope: targeted`, oriente claramente ao Checker que a verificação é focada no diff, consumidores impactados e ACs, e que a ausência de execução rotineira do `canonical_full_gate` intragrupo não constitui deficiência probatória, defeito ou motivo de reprovação. Sob `exceptional_full`, inclua o bloco formal `full_gate_exception`.
 
 Preserve a resposta original do harness junto à evidência da tarefa. Se ele envolver o parecer
 em um envelope de transporte, identifique seu campo final pela documentação ou pelo contrato

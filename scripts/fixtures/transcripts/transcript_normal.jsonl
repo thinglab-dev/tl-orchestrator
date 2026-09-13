@@ -1,0 +1,3 @@
+{"step_index": 1, "source": "USER_INPUT", "type": "USER_INPUT", "content": "Start work"}
+{"step_index": 2, "source": "MODEL", "type": "PLANNER_RESPONSE", "usage": {"input_tokens": 1200, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 150, "thinking_tokens": 0}, "tool_calls": [{"tool": "read_section", "parameters": {"AbsolutePath": "docs/WORK_MODEL.md", "heading": "## Layout"}, "output": "## Layout\nContent..."}]}
+{"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE", "usage": {"input_tokens": 1350, "cache_creation_input_tokens": 1200, "cache_read_input_tokens": 0, "output_tokens": 200, "thinking_tokens": 0}, "content": "Work complete."}

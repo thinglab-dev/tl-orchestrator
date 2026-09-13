@@ -1,0 +1,108 @@
+[
+  {
+    "checkpoint": "A'",
+    "treatment": "t015",
+    "execution_order": 1,
+    "session_id": "7df656d5-d3c7-41dd-beb3-4c476149c2fe",
+    "wall_clock": 302.33,
+    "turn_count": 50,
+    "tool_calls": 29,
+    "raw_bytes": 55437,
+    "delivered_bytes": 55437,
+    "cache_read_tokens": 1795182,
+    "outside_reads_count": 2,
+    "outside_reads": [
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/T009-analysis.md",
+      "_tl-orc/project/tasks/T010-regras-de-conducao-origem-limites-e-escalonamento.md"
+    ],
+    "failed_reads_count": 1
+  },
+  {
+    "checkpoint": "A'",
+    "treatment": "reference",
+    "execution_order": 2,
+    "session_id": "d71b1b7c-8a58-422c-b92e-053d293972fa",
+    "wall_clock": 147.55,
+    "turn_count": 19,
+    "tool_calls": 10,
+    "raw_bytes": 76069,
+    "delivered_bytes": 76069,
+    "cache_read_tokens": 577812,
+    "outside_reads_count": 1,
+    "outside_reads": [
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/manifest.json"
+    ],
+    "failed_reads_count": 0
+  },
+  {
+    "checkpoint": "B",
+    "treatment": "reference",
+    "execution_order": 3,
+    "session_id": "37e1897f-dfae-4b58-8bcf-028fa3319532",
+    "wall_clock": 115.97,
+    "turn_count": 14,
+    "tool_calls": 9,
+    "raw_bytes": 47631,
+    "delivered_bytes": 47631,
+    "cache_read_tokens": 223781,
+    "outside_reads_count": 2,
+    "outside_reads": [
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/manifest.json",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/reference_manifest.json"
+    ],
+    "failed_reads_count": 0
+  },
+  {
+    "checkpoint": "B",
+    "treatment": "t015",
+    "execution_order": 4,
+    "session_id": "53f6b8d0-f420-409b-9c99-13dc5acb6e9b",
+    "wall_clock": 58.42,
+    "turn_count": 15,
+    "tool_calls": 9,
+    "raw_bytes": 18880,
+    "delivered_bytes": 18880,
+    "cache_read_tokens": 318364,
+    "outside_reads_count": 1,
+    "outside_reads": [
+      "/Users/albertiano/.claude/projects/-Users-albertiano-thinglab-tl-orchestrator/memory/tl-orc-operating-lessons.md"
+    ],
+    "failed_reads_count": 0
+  },
+  {
+    "checkpoint": "C",
+    "treatment": "t015",
+    "execution_order": 5,
+    "session_id": "05418924-1949-4b49-b826-92326b034811",
+    "wall_clock": 116.17,
+    "turn_count": 23,
+    "tool_calls": 13,
+    "raw_bytes": 24943,
+    "delivered_bytes": 24943,
+    "cache_read_tokens": 495225,
+    "outside_reads_count": 2,
+    "outside_reads": [
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/manifest.json",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/reference_manifest.json"
+    ],
+    "failed_reads_count": 0
+  },
+  {
+    "checkpoint": "C",
+    "treatment": "reference",
+    "execution_order": 6,
+    "session_id": "2bafa365-ba23-46b5-b902-7a16cbaae7eb",
+    "wall_clock": 168.66,
+    "turn_count": 20,
+    "tool_calls": 11,
+    "raw_bytes": 46621,
+    "delivered_bytes": 46621,
+    "cache_read_tokens": 431247,
+    "outside_reads_count": 2,
+    "outside_reads": [
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/manifest.json",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/reference_manifest.json"
+    ],
+    "failed_reads_count": 0
+  }
+]

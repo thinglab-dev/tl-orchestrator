@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "verdict": "approved",
+  "action_items": [],
+  "deferred": [
+    {
+      "summary": "Ramo morto (inatingível) na análise de `sed -i` dentro de parse_bash_read_commands.",
+      "evidence": "scripts/context_ledger.py:233-259: o guard `if any(tok == \"-i\" or tok.startswith(\"-i\") for tok in remaining): continue` já descarta qualquer segmento sed com -i antes do laço interno; o bloco `if tok == \"-i\": ...` dentro do laço (comentado como tratamento do sufixo de backup vazio do GNU sed) nunca é alcançado, pois qualquer token -i já provocou o continue anterior. Não altera comportamento observado — os 54 testes unitários, incluindo o caso `sed -i '' 's/x/y/' transient-output.tmp` em test_context_ledger.py:416, passam — mas é código morto que pode confundir manutenção futura do parser de auditoria Bash.",
+      "location": "scripts/context_ledger.py:233-259",
+      "severity": "low"
+    },
+    {
+      "summary": "Variância de fidelidade decisória entre braços do pacote cego r03b não capturada pelo findings_summary de bundle_manifest.json: em 2 dos 3 checkpoints, um braço apoiou sua determinação em uma alegação técnica não sustentada pelos artefatos de entrada, apesar do confinamento AC16 ter sido 100% íntegro (reads_outside_allowed_set == [] em todos os 6 braços).",
+      "evidence": "Checkpoint A: o braço que recomenda 'impedimento de governança' cita 'manifesto de retomada declara effective_authors: [anthropic, google, openai]'; nenhum arquivo em _tl-orc/project/evidence/T015-r01/inputs/checkpoint-A/ (resume.json, manifest.json, PROJECT.md, T009-r07.md) contém tal campo. O próprio T009-r07.md declara textualmente 'independence: distinta de toda autoria efetiva (Google, Anthropic)' — sem OpenAI — e a tabela Agent runs mostra o orquestrador-autor como Anthropic (claude-fable-5-1); o classifier OpenAI não é autor do conteúdo. O braço irmão do mesmo checkpoint chega à leitura correta (independência satisfeita, sem impedimento). Checkpoint C: o braço que infere execução real por Claude via 'assinatura' do esquema de usage (input_tokens/output_tokens/thinking_tokens/cache_read_tokens/total_tokens) é diretamente contradito pelo Checkpoint B do mesmo pacote: o envelope do Checker do Checkpoint B (conversation_id 28ab4a9e-ee0f-4e3a-9e72-df1c2427e038, citado de forma concordante por ambos os braços de B como Agy gemini-3.1-pro-high) usa exatamente o mesmo esquema de campos — ou seja, trata-se de telemetria normalizada da plataforma comum a todos os harnesses, não de uma assinatura exclusiva da API Anthropic. O veredito final desse braço (aprovação irregular por candidato não autorizado) coincide com a leitura correta por outra via (violação direta da tabela 'Catálogo permitido' e do pin 'Escolhas fixadas pelo usuário em 2026-09-07' em PROJECT.md, corretamente citada pelo braço irmão), mas a cadeia de evidência técnica citada é fabricada/não verificável. Isso não é um defeito do código sob os 15 content_paths — o ledger de cada braço confirma leitura fiel e confinada — mas é uma limitação epistemológica adicional, além das já registradas em bundle_manifest.json (N=6, sem prova de economia universal): confinamento AC16 íntegro não garante fidelidade factual do raciocínio posterior do agente sobre o conteúdo entregue.",
+      "location": "r03b-checker-package/A/Alpha/decision.md; r03b-checker-package/C/Beta/decision.md",
+      "severity": "medium"
+    }
+  ],
+  "rejected": [
+    {
+      "summary": "Hipótese de que R7 permanece aberto (confinamento AC16 com allowlist implícita de system_support) rejeitada.",
+      "evidence": "scripts/context_ledger.py:27-100 removeu por completo a lista `system_support` (scripts, docs, prompts, schemas, CHANGELOG.md, README.md, SKILL.md, .git) que antes concedia acesso implícito; hoje apenas `/dev/null` é exceção de sistema, e toda raiz de leitura precisa constar explicitamente em allowed_inputs/allowed_support, resolvida contra o `cwd` efetivo do comando (não mais o cwd do processo auditor) com `Path.resolve()`/`is_relative_to` para confinamento canônico. Coberto por scripts/tests/test_context_ledger.py::test_r7_direct_read_grep_and_glob_use_explicit_roots_and_cwd (Read/Grep/Glob com cwd declarado e tentativa de escape `../outside/secret.md` corretamente capturada em reads_outside_allowed_set). Confirmado empiricamente: os 6 ledgers do pacote r03b-checker-package (checkpoints A/B/C, braços Alpha/Beta) reportam reads_outside_allowed_set == [], failed_read_attempts == [] e disallowed_external_attempts == [] de forma unânime.",
+      "location": "scripts/context_ledger.py:27-100"
+    },
+    {
+      "summary": "Hipótese de dessincronia entre o contrato de campos emitido por read_section.py (sha256/bytes/heading_path) e o consumido por context_ledger.py (antigos digest/heading) rejeitada.",
+      "evidence": "context_ledger.py:443-452 agora lê `parsed_json.get(\"sha256\", parsed_json.get(\"digest\", ...))` e `parsed_json.get(\"heading_path\", parsed_json.get(\"heading\", ...))`, alinhado ao payload real emitido por scripts/read_section.py (canonical_section_payload), com retrocompatibilidade explícita para transcrições antigas. Cobertura em test_context_ledger.py (teste de payload JSON de read_section com asserção de digest/bytes/selector) e nos 54 testes verdes da suíte.",
+      "location": "scripts/context_ledger.py:443-452; scripts/read_section.py:40-53"
+    },
+    {
+      "summary": "Hipótese de perda de diagnóstico (losslessness) em falhas de grep e de aceitação de details_ref local irrecuperável sem --persist-raw rejeitada.",
+      "evidence": "scripts/extract_tool_result.py::extract_grep agora separa diagnósticos (`grep: ...: No such file or directory`) de correspondências reais, preservando-os em `failure_ids` com `status: fail`, sem contá-los como match. main() rejeita (`exit 1`, mensagem 'details_ref does not exist') um --details-ref local que não existe em disco quando --persist-raw não foi usado. Cobertos por test_extract_tool_result.py::test_r9_grep_failure_losslessness_and_counterfactual (usa scripts/fixtures/tool_outputs/grep_fail.txt, novo nesta rodada) e pelo teste de rejeição de details_ref inexistente; ambos com contraprova explícita.",
+      "location": "scripts/extract_tool_result.py:228-268,438-448"
+    },
+    {
+      "summary": "Hipótese de thresholds de rotação não calibrados permanecerem hardcoded (30 turnos / 500000 bytes / 1000000 tokens de cache) rejeitada.",
+      "evidence": "build_ledger_from_transcript e o parser de CLI trocaram os defaults numéricos por `None`; quando nenhum limiar é fornecido, `rotation.reason` é emitido como o literal `not_calibrated` e `applied_thresholds` fica como objeto vazio, em vez de aplicar silenciosamente limiares arbitrários. Reproduzido manualmente nesta revisão contra scripts/fixtures/transcripts/transcript_normal.jsonl (rotation_recommended: false, reason: not_calibrated, applied_thresholds: {}), validado contra schemas/context-ledger.schema.json via validate_context_ledger (válido).",
+      "location": "scripts/context_ledger.py:565-600,826-834"
+    },
+    {
+      "summary": "Hipótese de manifests de retomada com digest placeholder ('on_demand') e open_items sempre vazio ([]) permanecerem sem correção (R11) rejeitada.",
+      "evidence": "scripts/resume_generate.py agora resolve o seletor ativo por método (## Spec para native, ### Acceptance criteria para BMAD), calcula digest real de ## Review quando presente (antes fixo em 'on_demand') e popula `open_items` a partir de checkboxes não marcados (extract_open_review_items / extract_pending_acceptance_criteria), além de bloquear em verify_resume_manifest qualquer `rel_path` de source que escape logicamente da raiz do repositório (`is_relative_to`). Cobertos por test_resume_generate.py::test_r8_bmad_selector_digest_and_integrity_counterfactual e ::test_r8_native_review_digest_and_open_items, ambos com contraprova de digest mismatch após mutação do arquivo-fonte.",
+      "location": "scripts/resume_generate.py:269-320,344-352,422-500"
+    },
+    {
+      "summary": "Hipótese de regressão nos 4 portões mecânicos (suíte unitária, T013, T014, validate_repository.py) rejeitada.",
+      "evidence": "Execução nesta revisão, isolada em TMPDIR gravável dedicado: `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` → 54 testes, OK; `T013-contract-tests.py` → 9 invariantes textuais + 4 contraprovas, todas OK; `T014-participant-policy-tests.py` → 6 invariantes + 7 sondas funcionais, todas OK; `scripts/validate_repository.py` → 17 arquivos do pacote validados (JSON, frontmatter, links, export, hashes), exit 0.",
+      "location": "scripts/tests/; _tl-orc/project/evidence/T013-contract-tests.py; _tl-orc/project/evidence/T014-participant-policy-tests.py; scripts/validate_repository.py"
+    },
+    {
+      "summary": "Hipótese de adulteração ou inconsistência no pacote experimental cegado r03b-checker-package (26 arquivos) rejeitada.",
+      "evidence": "`shasum -a 256 -c package_manifest.sha256` confirma os 26 arquivos sem nenhuma divergência. Os agregados declarados em bundle_manifest.json (findings_summary/aggregate_efficiency: -22,9% delivered bytes, +77,1% turns, +126,0% cache-read tokens; por checkpoint: A +43,3%/+35,7%, B -77,4%/-27,3%, C -15,8%/+200,0%/+313,0%) foram recalculados de forma independente a partir de tool_metrics/tokens/session_metadata dos 6 ledger.json brutos e conferem exatamente, incluindo a correspondência não trivial de braço tratamento/controle invertida entre checkpoints (Alpha=tratamento em A e C; Beta=tratamento em B), sem qualquer sinal de seleção enviesada dos números relatados.",
+      "location": "r03b-checker-package/bundle_manifest.json; r03b-checker-package/package_manifest.sha256"
+    }
+  ]
+}

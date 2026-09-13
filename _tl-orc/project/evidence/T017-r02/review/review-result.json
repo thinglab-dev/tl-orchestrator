@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "verdict": "approved",
+  "action_items": [],
+  "deferred": [],
+  "rejected": [
+    {
+      "summary": "Hipótese de divergência da árvore ou do escopo rejeitada.",
+      "evidence": "HEAD corresponde a 15c031a49a9b4f5b160e64f8b625683290c1604f; o diff contra 219fa2a96d4982b184a44c8cb43f86cfdb45ed39 contém exatamente os 14 content_paths informados."
+    },
+    {
+      "summary": "R1 não persiste: a independência do Advisor é resolvida pelo conjunto completo de autoria material, não pelo último autor.",
+      "evidence": "docs/WORK_MODEL.md, prompts/orchestrator-perfis.md e prompts/orchestrator-playbook.md definem challenged_author_families e eligible_cross_family = famílias disponíveis − challenged_author_families; a suíte cobre os três pares e o triplet."
+    },
+    {
+      "summary": "Fallback indevido em R1 rejeitado.",
+      "evidence": "Para triplet, a documentação e os testes exigem bloqueio sob advisor_independence: required e, somente sob preferred, degraded_same_family com fallback_reason não vazio que enumera as famílias conflitantes."
+    },
+    {
+      "summary": "R2 não persiste: verdict=debate sem debate_required=true é inválido.",
+      "evidence": "schemas/advisor-result.schema.json usa Draft 2020-12 com allOf/if/then impondo debate_required const true quando verdict é debate; prompts/advisor.md mantém a mesma semântica."
+    },
+    {
+      "summary": "Implicação inversa indevida rejeitada.",
+      "evidence": "O schema não restringe adjust com debate_required=true; test_r2_adjust_verdict_with_debate_required_true_passes_schema confirma explicitamente o contrafactual."
+    },
+    {
+      "summary": "Hipótese de Advisor atuar como Checker antecipado ou Planner paralelo rejeitada.",
+      "evidence": "O contrato advisor.md, WORK_MODEL.md e orchestrator.md delimitam atuação consultiva, report-only, em sessão nova, sem substituir Checker ou Planner."
+    },
+    {
+      "summary": "Hipótese de acionamento rotineiro por tier heavy isolado rejeitada.",
+      "evidence": "Os contratos exigem incerteza material além de tier heavy; a suíte contém contraprova explícita para heavy sem incerteza."
+    },
+    {
+      "summary": "Hipótese de propagação incondicional da autoria do Advisor rejeitada.",
+      "evidence": "advisor.md e WORK_MODEL.md mantêm effective_authors inalterado para parecer consultivo; a propagação só ocorre quando conteúdo substantivo é incorporado, coberta por testes."
+    },
+    {
+      "summary": "Hipótese de ignorar vereditos restritivos ou iniciar Debate automaticamente rejeitada.",
+      "evidence": "adjust, plan, debate, stop e debate_required=true exigem disposição formal; Advisor apenas recomenda Debate e não possui autorização nem permissão de despacho."
+    },
+    {
+      "summary": "Hipótese de runtime antecipado para advisor_policy em T018 rejeitada.",
+      "evidence": "PROJECT_CONFIGURATION.md e WORK_MODEL.md definem apenas a interface declarativa enabled/triggers/max_calls e vedam chamadas fora de gatilhos e orçamento autorizados."
+    },
+    {
+      "summary": "Hipótese de ausência de suporte ao Advisor no Classificador rejeitada.",
+      "evidence": "prompts/classifier.md aceita advisor em requested_roles e schemas/classification-result.schema.json adiciona roles.advisor com o role schema canônico."
+    },
+    {
+      "summary": "Hipótese de regressão de distribuição ou da cadência targeted rejeitada.",
+      "evidence": "distribution-manifest.json e README.md listam os mesmos 19 arquivos, incluindo advisor.md e advisor-result.schema.json; git diff --check não reportou falhas e a ausência de canonical_full_gate nesta revisão targeted é conforme o contrato do Checker."
+    },
+    {
+      "summary": "Hipótese de cobertura direcionada insuficiente rejeitada.",
+      "evidence": "python3 -B -m unittest scripts/tests/test_advisor_policy.py foi executado nesta revisão: 41 testes, todos aprovados."
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "checkpoint": "checkpoint-C",
+  "files": [
+    {
+      "bytes": 22008,
+      "path": "PROJECT.md",
+      "sha256": "b3b2f0bc2878389eb20297ea5dad888e0f1148dd924fd974200759f5aa2a9a46"
+    },
+    {
+      "bytes": 6651,
+      "path": "checker-dw-6-0a-01-r1.md",
+      "sha256": "bd663cb980fe0b44a70aa20062f218de4952b2edf368bcbce8d911f8b6f43a2a"
+    },
+    {
+      "bytes": 2304,
+      "path": "deferred-work.md",
+      "sha256": "1ed58894593bbe3aa22b3b7c65dae45a4e6caa103d7113285e75862cc7ca189a"
+    },
+    {
+      "bytes": 0,
+      "path": "release_test.diff",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "files_count": 4,
+  "manifest_sha256": "f25973e87b5260884630dc45aaff30493582c2702ddc816289e610b0758b4ad3"
+}

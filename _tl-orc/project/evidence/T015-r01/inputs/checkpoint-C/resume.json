@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "active_work_ref": "bmad/deferred/DW-6.0A-01@_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/deferred-work.md",
+  "phase": "review",
+  "spec_revision": "DW-6.0A-01-r1",
+  "sources": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/PROJECT.md",
+      "selector": "frontmatter",
+      "digest": "adcd36f9e0ceba9cb6ab2d1bb05799ca3a72c332c48edbee6681a98ad8b4bd73"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/checker-dw-6-0a-01-r1.md",
+      "selector": "## Parecer (objeto extra\u00eddo)",
+      "digest": "01f027ee5194919d96febf5e12592a0be9120ed3ddad41775c19f4e2760f813f"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/deferred-work.md",
+      "selector": "## Deferred from: code review of 6-0a-configuracao-e-lifecycle-do-control-plane (2026-09-08)",
+      "digest": "1ed58894593bbe3aa22b3b7c65dae45a4e6caa103d7113285e75862cc7ca189a"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/release_test.diff",
+      "selector": "full",
+      "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "resolved_context": [
+    {
+      "artifact": "active_unit.spec",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/deferred-work.md",
+      "selector": "## Deferred from: code review of 6-0a-configuracao-e-lifecycle-do-control-plane (2026-09-08)",
+      "digest": "1ed58894593bbe3aa22b3b7c65dae45a4e6caa103d7113285e75862cc7ca189a",
+      "delivery": "inline",
+      "reason": "Deferred work item specification"
+    },
+    {
+      "artifact": "code_diff",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/release_test.diff",
+      "selector": "full",
+      "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "delivery": "excerpt",
+      "reason": "Single-line fix diff"
+    },
+    {
+      "artifact": "project.constraints",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/PROJECT.md",
+      "selector": "frontmatter",
+      "digest": "adcd36f9e0ceba9cb6ab2d1bb05799ca3a72c332c48edbee6681a98ad8b4bd73",
+      "delivery": "inline",
+      "reason": "Project catalog permitted models and roles"
+    },
+    {
+      "artifact": "review_record",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/checker-dw-6-0a-01-r1.md",
+      "selector": "## Parecer (objeto extra\u00eddo)",
+      "digest": "01f027ee5194919d96febf5e12592a0be9120ed3ddad41775c19f4e2760f813f",
+      "delivery": "inline",
+      "reason": "Checker r1 approved external review"
+    }
+  ],
+  "effective_authors": [
+    "openai"
+  ],
+  "open_items": [],
+  "next_action": "Conferir parecer r1 contra cat\u00e1logo do papel em PROJECT.md e propor regulariza\u00e7\u00e3o com nova classifica\u00e7\u00e3o e revis\u00e3o",
+  "always_read": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/PROJECT.md",
+      "selector": "frontmatter",
+      "reason": "Project catalog permitted models"
+    }
+  ]
+}

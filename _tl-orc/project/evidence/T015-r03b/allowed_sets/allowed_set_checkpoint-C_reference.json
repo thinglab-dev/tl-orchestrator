@@ -1,0 +1,15 @@
+{
+  "checkpoint": "checkpoint-C",
+  "treatment": "reference",
+  "inputs": [
+    "inputs/PROJECT.md",
+    "inputs/checker-dw-6-0a-01-r1.md",
+    "inputs/deferred-work.md",
+    "inputs/release_test.diff"
+  ],
+  "allowed_support": [
+    "/dev/null",
+    "README-REPLAY-RULES.md"
+  ],
+  "allowed_set_sha256": "14c55037083958d4ac7762d4072d512c92d78f6a5a4008456bd8c038447d0106"
+}

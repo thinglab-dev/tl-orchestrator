@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "checkpoint": "checkpoint-B",
+  "files": [
+    {
+      "path": "inputs/CODE_TREE_STATUS.txt",
+      "bytes": 73,
+      "sha256": "2f6fb4b308dbf65118c896a604eaeb8f3f9b6d961389ccd50a27d9bfb24a6fea"
+    },
+    {
+      "path": "inputs/PROJECT.md",
+      "bytes": 22008,
+      "sha256": "b3b2f0bc2878389eb20297ea5dad888e0f1148dd924fd974200759f5aa2a9a46"
+    },
+    {
+      "path": "inputs/checker-6-0a-r1.md",
+      "bytes": 10057,
+      "sha256": "3de73f599f706f87cee42e5b5d1598ed38c474eea23ebc1683e22cabec30b452"
+    },
+    {
+      "path": "inputs/dev-report-6-0a.md",
+      "bytes": 5002,
+      "sha256": "07bba24b3c646e220d72954850e9fb56441f0937867e83cf31b0c04cd9839c36"
+    },
+    {
+      "path": "inputs/spec-6-0a.md",
+      "bytes": 3111,
+      "sha256": "705998812b39fd7bda79e901b8fe7734581e94f03fec7127a7a2f5b7d1ff5988"
+    }
+  ],
+  "file_count": 5,
+  "aggregate_manifest_hash": "098f1feb41c0f2f3ceb7ceab9cf62319bb62aeb5e4c96bcf9a739bb2816a7783"
+}

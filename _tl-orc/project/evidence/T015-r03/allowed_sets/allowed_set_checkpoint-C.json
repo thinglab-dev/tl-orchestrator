@@ -1,0 +1,23 @@
+{
+  "allowed_set_sha256": "c4a360e46de2656b6197225acad90ae8882c5f1ff7f32a877a8ba1c2a4b1414a",
+  "allowed_support": [
+    ".git",
+    "/dev/null",
+    "CHANGELOG.md",
+    "README.md",
+    "_tl-orc/PROJECT.md",
+    "_tl-orc/project/STATUS.md",
+    "docs",
+    "prompts",
+    "schemas",
+    "scripts"
+  ],
+  "checkpoint": "checkpoint-C",
+  "inputs": [
+    "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/PROJECT.md",
+    "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/checker-dw-6-0a-01-r1.md",
+    "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/deferred-work.md",
+    "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/release_test.diff",
+    "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/resume.json"
+  ]
+}

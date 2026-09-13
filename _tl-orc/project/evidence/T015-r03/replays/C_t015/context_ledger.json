@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "unit": "T015-r03",
+  "phase": "review",
+  "created_at": "2026-09-12T01:48:05.832957+00:00",
+  "turn_count": 23,
+  "tool_calls": 13,
+  "tokens": {
+    "input_tokens": 44,
+    "cache_creation_input_tokens": 55832,
+    "cache_read_input_tokens": 495225,
+    "output_tokens": 25621,
+    "thinking_tokens": 13506
+  },
+  "tool_metrics": {
+    "raw_result_bytes": 24943,
+    "delivered_result_bytes": 24943,
+    "tool_delivery_ratio": 1.0
+  },
+  "retrieval_amplification": 1.4216,
+  "observed_reads": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/PROJECT.md",
+      "selector": "frontmatter",
+      "bytes": 63,
+      "digest": "983eafd3f9fd80922a9c925a7437b8d03c5034e392f407153e9da0e0c50dc162",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/checker-dw-6-0a-01-r1.md",
+      "selector": "# Parecer do Checker \u2014 DW-6.0A-01 (rodada 1) > ## Parecer (objeto extra\u00eddo)",
+      "bytes": 1931,
+      "digest": "b4e84a0a857755f052acfe562a3f74e867e59302c8fb9602fa6225a79d18245d",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/deferred-work.md",
+      "selector": "## Deferred from: code review of 6-0a-configuracao-e-lifecycle-do-control-plane (2026-09-08)",
+      "bytes": 2304,
+      "digest": "1ed58894593bbe3aa22b3b7c65dae45a4e6caa103d7113285e75862cc7ca189a",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/release_test.diff",
+      "selector": "frontmatter",
+      "bytes": 189,
+      "digest": "1fa008c4dbc42ea66edaaca12051d2280b7370ab7dd959b6844b6e62b21b5728",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/PROJECT.md",
+      "selector": "frontmatter",
+      "bytes": 39,
+      "digest": "a9a09ac034db46e2f78f20456336f70105c794f282d426c971e9b1fe2c90a5eb",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/PROJECT.md --"
+    },
+    {
+      "path": "_tl-orc/PROJECT.md",
+      "selector": "##",
+      "bytes": 2522,
+      "digest": "47a3ea3f4ae952cabf4fcb50a4eaf8f84e87b9652c8f8857b1d69b72b69ff16b",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/PROJECT.md --"
+    },
+    {
+      "path": "_tl-orc/PROJECT.md",
+      "selector": "###",
+      "bytes": 2522,
+      "digest": "47a3ea3f4ae952cabf4fcb50a4eaf8f84e87b9652c8f8857b1d69b72b69ff16b",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/PROJECT.md --"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/checker-dw-6-0a-01-r1.md",
+      "selector": "full_file",
+      "bytes": 6816,
+      "digest": "02f9b81c71c980b585868d3dafcde12b0408f0a4f566c37c12699afe26ed7780",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/manifest.json",
+      "selector": "full_file",
+      "bytes": 724,
+      "digest": "3050dbefa2892373bdd89ea4ee5a04dd80e7b151002ecb34b49d48598910c62f",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/reference_manifest.json",
+      "selector": "full_file",
+      "bytes": 1214,
+      "digest": "f96b13f3db751a862b2109e41692ee12a61b219458e6e9475fcd9675e800e02b",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/PROJECT.md",
+      "selector": "##",
+      "bytes": 7159,
+      "digest": "7c1b2fd5804068f3df17a4b207271c604218296b42cc106e7ad9b6cc9fe45100",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/PROJECT.md --"
+    },
+    {
+      "path": "_tl-orc/PROJECT.md",
+      "selector": "###",
+      "bytes": 7159,
+      "digest": "7c1b2fd5804068f3df17a4b207271c604218296b42cc106e7ad9b6cc9fe45100",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/PROJECT.md --"
+    }
+  ],
+  "failed_read_attempts": [],
+  "reads_outside_allowed_set": [
+    "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/manifest.json",
+    "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/reference_manifest.json"
+  ],
+  "disallowed_external_attempts": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/manifest.json",
+      "selector": "full_file",
+      "reason": "Path outside allowed set: _tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/manifest.json"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/reference_manifest.json",
+      "selector": "full_file",
+      "reason": "Path outside allowed set: _tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/reference_manifest.json"
+    }
+  ],
+  "allowed_set": {
+    "reference": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/wt/t015-freeze/_tl-orc/project/evidence/T015-r03/allowed_sets/allowed_set_checkpoint-C.json",
+    "inputs": [
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/PROJECT.md",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/checker-dw-6-0a-01-r1.md",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/deferred-work.md",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/release_test.diff",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/resume.json"
+    ],
+    "allowed_support": [
+      ".git",
+      "/dev/null",
+      "CHANGELOG.md",
+      "README.md",
+      "_tl-orc/PROJECT.md",
+      "_tl-orc/project/STATUS.md",
+      "docs",
+      "prompts",
+      "schemas",
+      "scripts"
+    ]
+  },
+  "telemetry_divergence": null,
+  "pricing": {
+    "basis": "official_task_proxy",
+    "source": "docs/MODEL_ROUTING.md (proxy rubric)",
+    "verified_at": "2026-09-11",
+    "assumptions": [
+      "Cache read priced at 10% of base input token price",
+      "Cache creation priced at 1.25x of base input token price"
+    ],
+    "observed_tokens": 25665,
+    "estimated_token_cost": 0.3844,
+    "subscription_quota_impact": "unknown"
+  },
+  "rotation": {
+    "rotation_recommended": false,
+    "reason": "not_calibrated",
+    "applied_thresholds": {}
+  },
+  "session_metadata": {
+    "checkpoint": "C",
+    "treatment": "t015",
+    "execution_order": 5,
+    "session_id": "05418924-1949-4b49-b826-92326b034811",
+    "wall_clock_seconds": 116.17,
+    "environment_commit": "ef646f8665f85b4e2a8de70b09c327eae832fc6d",
+    "allowed_set_sha256": "c4a360e46de2656b6197225acad90ae8882c5f1ff7f32a877a8ba1c2a4b1414a"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "checkpoint": "checkpoint-C",
+  "files": [
+    {
+      "path": "inputs/PROJECT.md",
+      "bytes": 22008,
+      "sha256": "b3b2f0bc2878389eb20297ea5dad888e0f1148dd924fd974200759f5aa2a9a46"
+    },
+    {
+      "path": "inputs/checker-dw-6-0a-01-r1.md",
+      "bytes": 6651,
+      "sha256": "bd663cb980fe0b44a70aa20062f218de4952b2edf368bcbce8d911f8b6f43a2a"
+    },
+    {
+      "path": "inputs/deferred-work.md",
+      "bytes": 2304,
+      "sha256": "1ed58894593bbe3aa22b3b7c65dae45a4e6caa103d7113285e75862cc7ca189a"
+    },
+    {
+      "path": "inputs/release_test.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "file_count": 4,
+  "aggregate_manifest_hash": "affa3c4b574ef5ff00f78927041a8726b2d006d28bf265819fa5dac38f6eb5c1"
+}

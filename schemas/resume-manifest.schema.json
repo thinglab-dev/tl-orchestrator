@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tl-orchestrator Resume Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "active_work_ref",
+    "phase",
+    "spec_revision",
+    "sources",
+    "resolved_context",
+    "effective_authors",
+    "open_items",
+    "next_action",
+    "always_read"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "active_work_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phase": {
+      "enum": [
+        "planning",
+        "implementation",
+        "review",
+        "rework",
+        "debate"
+      ]
+    },
+    "spec_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source_entry"
+      }
+    },
+    "resolved_context": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/resolved_context_entry"
+      }
+    },
+    "effective_authors": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "open_items": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "always_read": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/always_read_entry"
+      }
+    }
+  },
+  "$defs": {
+    "source_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "selector",
+        "digest"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "resolved_context_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact",
+        "path",
+        "selector",
+        "digest",
+        "delivery"
+      ],
+      "properties": {
+        "artifact": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "minLength": 1
+        },
+        "delivery": {
+          "enum": [
+            "inline",
+            "excerpt",
+            "on_demand"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "always_read_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "selector"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

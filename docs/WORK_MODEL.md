@@ -20,6 +20,7 @@ onde o perfil é declarado.
 | `Deliverable` | Resultado que reúne Tasks e tem condição própria de conclusão. | `id`, `method`, `goal`, `done_when`, `integration_criteria`, `tasks`, `order`, `status`, `origin`, `decisions` |
 | `Task` | Unidade executável com resultado verificável. | `id`, `type`, `deliverable` ou `standalone: true`, `method`, `status`, `state_revision`, `depends_on`, `blocked_by`, `origin`, `decisions`, `spec_author`, `spec_revision`, `rework_round`, `affects_context`, `content_id`, `content_paths` |
 | `Standalone Task` | Task sem Deliverable. Não implica tier `simple`. | os mesmos de Task |
+| `Batch` | Lote finito de unidades com escopo e orçamento congelados para execução autônoma autorizada. | `id`, `status`, `batch_revision`, `authorization`, `frozen_scope`, `budget`, `execution` |
 | `Decision` | Decisão consolidada com justificativa. | `id`, `kind`, `status`, `context`, `options`, `choice`, `rationale`, `origin` |
 | `Discussion` | Síntese de um debate, com estado. | `id`, `status`, `question`, `context_refs`, `options`, `confirmed_decisions`, `hypotheses`, `open_questions`, `resulting_work` |
 
@@ -44,13 +45,15 @@ _tl-orc/
 ├── QUEUE.md                        # opcional; pode declarar permit_state_update
 ├── evidence/                       # fallback legado, permanece acessível
 └── project/                        # documentos de trabalho; nunca tocado por atualizações
-    ├── STATUS.md                   # coordenação e tabela derivada
+    ├── STATUS.md                   # coordenação, projeção de lote e tabela derivada
     ├── CONTEXT.md                  # contexto global curto
+    ├── batches/Bnnn.md             # batches autorizados do Modo Automático
     ├── tasks/Tnnn-slug.md
     ├── deliverables/Dnnn-slug.md
     ├── decisions/DECnnn-slug.md    # um arquivo por decisão
     ├── discussions/DISCnnn-slug.md
     ├── evidence/Tnnn-rNN.md        # um arquivo por Task e rodada; rodadas anteriores preservadas
+    ├── evidence/Tnnn-rNN/          # derivados e dados operacionais da rodada (inputs/, ledger/)
     ├── context/INDEX.md            # Import Context
     ├── context/features/Fnnn-slug.md
     └── imports/IMPnnn.md
@@ -64,6 +67,19 @@ partir da primeira Task; os demais diretórios são opcionais.
 `project/` é criada na primeira operação autorizada que necessite dessa estrutura, inclusive para
 coordenar trabalho BMAD. Nunca é criada por uma atualização do pacote, e sua criação não transfere
 autoridade para o perfil Native.
+
+### Layout de evidências e derivados por unidade/rodada
+
+Evidências duráveis e derivados de execução de uma unidade (Task Native ou story BMAD) organizam-se
+sob `evidence/<unidade>-rNN/` e no arquivo `evidence/<unidade>-rNN.md`. Pastas e arquivos de evidência
+armazenam registros e dados de medição; nunca são autoridade de status. O status de uma Task Native
+permanece exclusivamente na Task; o status de uma story BMAD permanece no artefato BMAD correspondente.
+Mover ou reorganizar pastas de evidência não altera o status da unidade.
+
+Toda árvore contida sob `project/evidence/` ou `evidence/` é terminantemente excluída da descoberta
+operacional automática e do resolver de configuração ativa. Snapshots arquivados (como snapshots de
+pilotos ou de rodadas anteriores) são dados passivos para auditoria e nunca configuram regras,
+tarefas ou instruções ativas.
 
 ## Áreas de trabalho
 
@@ -147,6 +163,23 @@ Ordem de escrita, sem atomicidade: primeiro a unidade, depois as projeções loc
 último a visão global. Na retomada, releia a unidade oficial antes de reconciliar cabeçalhos
 atrasados; divergência esperada segue a [tabela de recuperação](#transição-e-recuperação) e não
 exige confirmação adicional.
+
+### Manifesto derivado de retomada (`resume.json`)
+
+A retomada de sessão é coordenada pelo manifesto derivado `resume.json`, gerado deterministicamente
+(duas execuções sobre a mesma árvore produzem saída byte-a-byte idêntica). O manifesto carrega a própria
+procedência através de uma lista de `sources` com `path`, `selector` (por heading path) e `digest`
+(SHA-256 canônico).
+
+Campos de coordenação (`effective_authors`, `open_items`, `next_action`) são cópia derivada para consumo
+rápido; a autoridade soberana permanece nos documentos originais (Task, `STATUS.md` e evidências). O
+manifesto inclui a seção `resolved_context` (Resolved Context Manifest), que mapeia cada classe de
+informação da política de contexto para o modo de entrega (`inline`, `excerpt`, `on_demand`)
+apropriado à fase.
+
+Antes de qualquer despacho, o gerador do manifesto executa uma verificação estrita de integridade:
+se qualquer digest das fontes congeladas divergir dos arquivos atuais em disco, a operação encerra
+com erro, impedindo o prosseguimento com contexto corrompido ou stale.
 
 ### Referências entre áreas
 
@@ -328,6 +361,37 @@ status preservam o `content_id`; modificar materialmente qualquer caminho cobert
 reaproveitamento do parecer. Na retomada, o Orquestrador recalcula e compara com o registrado;
 divergência é relatada antes de qualquer ação.
 
+### Canonical section digest
+
+O digest canônico por seção é o hash SHA-256 calculado sobre o conteúdo da seção Markdown, desde a
+linha do cabeçalho (inclusive) até o início do próximo cabeçalho estrutural de nível igual ou superior
+(ou fim do arquivo). O texto é normalizado para UTF-8 com quebras de linha LF (`\n`) e newline final
+único, sem normalização semântica. Subseções de nível mais profundo ficam contidas na seção pai.
+
+Linhas iniciadas por `#` dentro de cercas de código (```` ``` ```` ou `~~~`) e menções a cabeçalhos no
+meio da prosa ou entre crases (por exemplo `` `## Result` ``) não delimitam seções. O conteúdo anterior
+ao primeiro cabeçalho é endereçado deterministicamente como `frontmatter`.
+
+Dois arquivos que diferem apenas em quebras de linha CRLF/LF ou em seções externas produzem exatamente
+o mesmo digest para a seção selecionada.
+
+### Estados de freshness
+
+A avaliação de frescor de uma seção referenciada contra um digest esperado resulta em um de três estados:
+- `current`: seletor encontrado no documento e digest idêntico ao esperado. A fonte que sustenta o fato permanece inalterada.
+- `digest_changed`: seletor encontrado, mas digest diverge do esperado. Requer releitura restrita à seção afetada para apurar o impacto da alteração.
+- `selector_not_found`: cabeçalho renomeado, movido ou ausente. Requer redescobrir o tópico no documento inteiro.
+
+Digest idêntico comprova apenas que a fonte de sustentação não mudou; não atesta que o fato derivado
+era originalmente correto.
+
+### Política de campos voláteis e `always_read`
+
+Campos temporais e contadores de sessão (`last_write_at`, timestamps, sessões de harness) não entram
+no cálculo de digest estável de seções normativas. Blocos essencialmente voláteis de coordenação (como
+o bloco `coordinator` de `STATUS.md`) são expressamente classificados como `always_read`: devem ser lidos
+integralmente e incondicionalmente pelo Orquestrador na retomada.
+
 ### Identificadores
 
 IDs são sequenciais por entidade e alocados apenas pela sessão coordenadora a partir dos
@@ -370,6 +434,79 @@ Uma sonda contrafactual é obrigatória sempre que a garantia depender de compor
 discriminável, qualquer que seja o tipo. As provas comportamentais exigidas pelas garantias
 existentes são preservadas.
 
+### Cadência de verificação e portões de integração
+
+O método normatiza formalmente o princípio fundamental da cadência de verificação:
+**"targeted early and throughout → canonical full integration gate only at major boundary"**.
+O portão completo de integração pertence ao fechamento do bloco ou fronteira principal de integração,
+e não à unidade de trabalho individual.
+
+1. **Verificação direcionada intragrupo (targeted verification):**
+   Dentro de um mesmo grupo de integração (`integration_group`), as etapas de implementação,
+   revisão externa e retrabalho (`changes_requested`) utilizam exclusivamente testes direcionados ao diff,
+   aos pacotes e módulos alterados, aos consumidores diretos do comportamento modificado, aos critérios
+   de aceitação (ACs) específicos da unidade e a sondas contrafactuais. É vedada a exigência ou execução
+   rotineira da suíte global completa a cada tarefa individual dentro do grupo.
+
+2. **Resolução de grupo de integração por autoridade:**
+   A identificação do grupo de integração é resolvida semanticamente pela autoridade de governança do
+   trabalho, sendo expressamente vedado o parsing *ad hoc* de convenções de nomenclatura ou uso de regex
+   sobre o identificador da Story ou Task:
+   - No método BMAD: pelo campo `epic` do item ou documento da story;
+   - No método Native: pelo campo `deliverable` da Task;
+   - Agrupamento explícito: quando expressamente configurado no mapeamento do projeto consumidor
+     (`integration_group: { authority: ..., id: ... }`);
+   - **Caso Standalone (tarefa isolada):** Uma Native Standalone Task (`standalone: true` ou sem Deliverable
+     e sem `integration_group` explícito) constitui seu próprio grupo de integração
+     (`authority: native_standalone, id: <Task_ID>`). Por constituir seu próprio grupo e delimitar uma
+     fronteira autônoma, o portão canônico de fronteira é exigido ao fechar esse grupo antes de autorizar
+     a transição para outro grupo independente.
+
+3. **Portão canônico de integração na fronteira principal (canonical full integration gate):**
+   O portão completo canônico de integração (`canonical_full_gate`) é disparado obrigatoriamente e
+   exclusivamente no fechamento da unidade final de um grupo principal de integração (por exemplo, no
+   fechamento de um Epic antes de abrir o próximo Epic no BMAD, no fechamento do Deliverable ou da
+   última Task de um bloco de integração no Native, ou no fechamento de uma Standalone Task). O
+   `canonical_full_gate` precisa terminar verde (sucesso); qualquer falha no portão bloqueia a transição
+   para o próximo grupo de integração.
+
+4. **Invalidação estrita da árvore:**
+   O resultado da execução do `canonical_full_gate` é rigorosamente vinculado à revisão específica da
+   árvore (commit SHA). Qualquer modificação de código posterior dentro do grupo invalida a prova do gate
+   e exige uma nova execução integral antes que a transição de fronteira possa ser autorizada.
+
+5. **Regime restrito de exceção antecipada:**
+   A execução de um full gate antecipado dentro do grupo é estritamente excepcional e restrita a
+   mudanças estruturais transversais comprovadas (por exemplo, migração de esquema de banco compartilhado,
+   alteração de protocolo cross-módulo, mudança em primitivas globais de concorrência ou no sistema de build).
+   Toda execução antecipada exige a inclusão de um bloco formal de metadados (`full_gate_exception`) na
+   evidência e no briefing, detalhando a razão técnica objetiva e a justificativa de por que testes
+   direcionados seriam insuficientes. Justificativas vagas ou genéricas como "por segurança", "para garantir tudo",
+   "para confirmar" ou "para ter certeza" são expressamente nulas, inválidas e rejeitadas.
+
+6. **Reaproveitamento de prova de CI:**
+   Quando um pipeline de CI externo (como GitHub Actions) já tiver executado com sucesso o
+   `canonical_full_gate` sobre o mesmo commit SHA exato da árvore e sob a mesma definição e revisão do
+   portão, com logs auditáveis acessíveis, o Orquestrador pode reutilizar essa prova, sendo proibido
+   duplicar a execução completa local sem justificativa técnica. Caso o comando, a configuração ou a definição
+   do portão tenham sido alterados após a execução do CI, a prova anterior é nula e a verificação deve
+   ser refeita integralmente.
+
+7. **Vedação a suposições e comando não configurado:**
+   O método trata o comando do portão global como `canonical_full_gate` parametrizável e agnóstico às
+   tecnologias do projeto consumidor (por exemplo, `make check`, `cargo test --workspace`, `npm test`,
+   `go test ./...`, `pytest`). É expressamente proibido ao Orquestrador inferir, adivinhar ou presumir
+   comandos de full gate não configurados. Se o consumidor não possuir um full gate explicitamente
+   configurado em `PROJECT.md` ou derivável de política documentada existente, deve registrar formalmente
+   `canonical_full_gate: not_configured`, tratando isso como uma pendência bloqueante antes de autorizar
+   qualquer transição de fronteira que exija o portão.
+
+8. **Rework econômico e focado:**
+   Em ciclos de retrabalho decorrentes de `changes_requested`, a re-execução de testes restringe-se
+   estritamente ao patch alterado, aos consumidores impactados e aos ACs relacionados. Retrabalhos de
+   natureza puramente documental, de evidência, de metadados ou de atualização de status não executam
+   testes funcionais, admitindo no máximo verificações textuais e estruturais (`git diff --check`, lint).
+
 ## Discussões e decisões
 
 `discussions/DISCnnn-slug.md` tem `status` em `open`, `resolved` ou `superseded`. Nunca é apagada
@@ -384,19 +521,142 @@ Decisões usam um arquivo por decisão. Quando a persistência estiver autorizad
 confirmada em discussão é gravada na mesma interação, com `origin` apontando para a discussão.
 Esta cláusula não autoriza gravação em atividade somente leitura.
 
+## Papel consultivo: Advisor (Cross-Family Strategic Challenge and Escalation)
+
+O papel **Advisor** atua como desafio estratégico, consultivo e independente de premissas, causalidade,
+arquitetura e risco antes de decisões materiais caras ou difíceis de reverter. Sua pergunta orientadora
+central é: **"Isso que pretendemos fazer faz sentido? Que premissa pode estar errada?"**.
+
+### 1. Fronteira do papel e vedações estritas (Role Boundary)
+
+O Advisor é estritamente consultivo e somente leitura (`report_only: true`), executado obrigatoriamente
+em sessão nova e limpa (`fresh_session: required`). É expressamente vedado ao Advisor:
+- Criar, editar, sobrescrever, mover ou excluir arquivos no repositório (`may_edit: false`);
+- Realizar commits, stage ou operações de controle de versão (`may_commit: false`);
+- Alterar status, revisões ou metadados de tasks, deliverables ou boards (`may_change_state: false`);
+- Fechar ou aprovar qualquer tarefa ou unidade de trabalho (`may_close_task: false`);
+- Conceder autorizações de escopo, orçamento ou governança (`may_authorize: false`);
+- Despachar, invocar ou orquestrar outros agentes (`may_dispatch_agents: false`);
+- Substituir ou dispensar a revisão independente do Checker (`may_replace_checker: false`);
+- Substituir o papel do Planner na especificação detalhada de planos executáveis (`may_replace_planner: false`);
+- Iniciar debates por conta própria (`may_recommend_debate: true`: limita-se a recomendar a abertura de debate formal).
+
+### 2. Distinção clara dos quatro papéis
+
+As responsabilidades dos papéis são mutuamente exclusivas e operam em momentos e perspectivas distintos:
+- **Planner:** *"Como devemos fazer?"* — projeta arquitetura, decompõe etapas e produz especificação executável e verificável.
+- **Advisor:** *"Isso que pretendemos fazer faz sentido? Que premissa pode estar errada?"* — desafio crítico consultivo de premissas, causalidade frágil, riscos ocultos e custo de reversão antes de comprometer recursos caros.
+- **Checker:** *"O que foi implementado atende a spec e a prova?"* — auditoria independente posterior ao diff de implementação, verificando critérios de aceitação congelados e integridade probatória.
+- **Debate:** *"Temos alternativas materialmente concorrentes; qual direção devemos escolher?"* — painel consultivo de deliberação multi-perspectiva entre três papéis (Planner, Maker, Checker) sob contraponto estruturado.
+
+O Advisor **não é um Checker antecipado** (não inspeciona diffs de código implementado nem audita conformidade contra specs prontas) e **não é uma quarta IA obrigatória** a ser acionada rotineiramente em cada Story.
+
+### 3. Gatilhos objetivos de acionamento
+
+O acionamento do Advisor é excepcional e restringe-se estritamente à presença de pelo menos um dos **8 gatilhos objetivos**:
+1. **Mudança em arquitetura, protocolo, autoridade, governança ou contrato compartilhado:** alteração com impacto estrutural transversal sobre múltiplos componentes ou políticas centrais.
+2. **Decisão difícil de reverter:** migração ampla de dados, cutover de infraestrutura, alteração de fundação arquitetural ou remoção de retrocompatibilidade.
+3. **Experimento que fundamentará decisão do método:** benchmarks, testes A/B ou medições empíricas de custo/desempenho cujos resultados alterarão regras de governança ou perfis de roteamento.
+4. **Incerteza material em trabalho com tier heavy:** tarefas classificadas como `heavy` que apresentem hipóteses não comprovadas ou riscos substanciais (o tier heavy isolado não basta).
+5. **Conclusão causal importante a partir de evidência limitada:** asserções causais críticas fundamentadas em amostragem empírica restrita (ex.: "técnica X reduziu tokens em 40%", "biblioteca Y é intrinsecamente mais segura").
+6. **Recorrência de classe de falha descoberta somente por revisão independente:** reincidência de problemas sistemáticos que escaparam ao planejamento inicial e foram flagrados apenas tardiamente no Checker.
+7. **Segundo parecer explicitamente solicitado pelo usuário:** requisição direta do operador humano demandando contra-análise estratégica independente.
+8. **Antes de congelar lote automático de alto custo:** antes de autorizar a execução de lote sequencial ou autônomo de tarefas que satisfaçam algum dos critérios anteriores.
+
+### 4. Vedações de acionamento rotineiro (Non-triggers / Anti-overuse)
+
+É expressamente proibido ao Orquestrador acionar o Advisor por conveniência, rotina ou redundância:
+- No início padrão de uma Story ou Task comum;
+- Ao término da implementação do Maker;
+- Na entrada padrão em fase de revisão;
+- Em ciclos comuns de retrabalho (`changes_requested`) com achados delimitados;
+- Em tarefas com tier `heavy` desprovidas de incerteza arquitetural material;
+- Em alterações puramente documentais, metadados ou atualizações rotineiras de status;
+- Sob pretextos genéricos como "segunda opinião informal", "para ter certeza" ou "por segurança".
+
+### 5. Challenge packet mínimo e Context Economy
+
+Seguindo os princípios de Context Economy (T015), o Orquestrador entrega ao Advisor um pacote enxuto de desafio (*challenge packet*), evitando descarregar o histórico ou a árvore completa:
+- Proposição, decisão ou artefato sob desafio;
+- Objetivo pretendido e restrições conhecidas;
+- Fatos confirmados e evidências verificadas;
+- Premissas materiais e hipóteses adotadas;
+- Alternativas já consideradas e razões de descarte;
+- Limites de autoridade vigentes;
+- Pergunta concreta e específica formulada pelo Orquestrador.
+
+Consultas adicionais a arquivos pontuais são realizadas pelo próprio Advisor sob demanda via ferramentas somente leitura (`view_file`, `grep_search`, `read_section.py`), sem leituras exploratórias amplas.
+
+### 6. Regime de independência, contra-família e fallback degradado
+
+- **Preferência padrão:** Por padrão adota-se `advisor_independence: preferred`, com execução obrigatória em sessão limpa (`fresh_session: required`).
+- **Resolução de contra-família contra o conjunto completo de famílias autoras materiais:** A independência do Advisor é avaliada contra o **conjunto completo de famílias que contribuíram materialmente para o artefato desafiado** (`challenged_author_families`), e não meramente contra uma única família ou contra o último autor:
+  ```text
+  challenged_author_families = conjunto completo das famílias que contribuíram materialmente para o artefato desafiado
+  eligible_cross_family = famílias disponíveis - challenged_author_families
+  ```
+  * **Casos com 1 família autora:**
+    - Se `challenged_author_families = [google]` → contra-família elegível: OpenAI (Codex) ou Anthropic (Claude);
+    - Se `challenged_author_families = [openai]` → contra-família elegível: Google (Agy) ou Anthropic (Claude);
+    - Se `challenged_author_families = [anthropic]` → contra-família elegível: Google (Agy) ou OpenAI (Codex).
+  * **Casos com pares de famílias autoras materiais:**
+    - Se `challenged_author_families = [google, openai]` → contra-família elegível: obrigatoriamente Anthropic (Claude) quando disponível; não pode depender do último autor;
+    - Se `challenged_author_families = [google, anthropic]` → contra-família elegível: obrigatoriamente OpenAI (Codex);
+    - Se `challenged_author_families = [openai, anthropic]` → contra-família elegível: obrigatoriamente Google (Agy).
+  * **Caso extremo com as 3 famílias (`[google, openai, anthropic]`):**
+    - Sob `advisor_independence: required`: nenhuma família independente disponível (`eligible_cross_family = ∅`), bloqueia terminantemente o despacho do Advisor (`blocked`) com emissão de impedimento fundamentado e ponto de retomada.
+    - Sob `advisor_independence: preferred`: admite fallback na mesma família em sessão nova, obrigatoriamente registrado como `advisor_independence: degraded_same_family`, com `fallback_reason` obrigatório não vazio detalhando todas as famílias conflitantes.
+- **Fallback degradado sob `preferred`:** Caso nenhuma contra-família alternativa de `eligible_cross_family` esteja utilizável no catálogo e a indisponibilidade esteja comprovada, admite-se o despacho do Advisor em sessão nova como fallback degradado, com registro formal mandatório na evidência (`advisor_independence: degraded_same_family`, `fallback_reason: <motivo>`).
+- **Bloqueio sob `required`:** Sob configuração explícita `advisor_independence: required`, a indisponibilidade de contra-família independente em `eligible_cross_family` bloqueia terminantemente o despacho do Advisor com emissão de impedimento fundamentado e ponto de retomada.
+
+### 7. Saída estruturada e semântica dos cinco vereditos
+
+A resposta do Advisor consiste exclusivamente em um objeto JSON validado contra `schemas/advisor-result.schema.json` (Draft 2020-12), com os campos obrigatórios `schema_version: 1`, `verdict`, `confidence` (`high|medium|low`), `findings`, `alternatives`, `missing_evidence`, `debate_required` (boolean) e `reason`.
+
+Semântica operacional mandatória de cada veredito:
+- `proceed`: A proposição sob desafio é sólida, premissas sustentadas e riscos gerenciáveis. O fluxo prossegue normalmente.
+- `adjust`: A direção é válida, mas há premissas frágeis, parâmetros incorretos ou riscos não mitigados. Exige disposição obrigatória e justificada do Orquestrador antes do próximo despacho de planejamento ou implementação.
+- `plan`: A questão carece de detalhamento formal de especificação executável ou decomposição de impacto. O Orquestrador deve classificar e despachar o Planner se autorizado.
+- `debate`: Existem alternativas concorrentes materiais ou incertezas estratégicas irreconciliáveis por análise unilateral. O Advisor recomenda a abertura de Debate formal (implicando obrigatoriamente `debate_required: true` no schema). O Advisor não autoriza nem inicia o debate.
+- `stop`: A premissa central é falsa, o risco de dano estrutural ou custo de reversão é proibitivo, ou há carência absoluta de evidência/autoridade. O avanço material é interrompido imediatamente até deliberação superior do usuário.
+
+### 8. Disposição obrigatória das recomendações restritivas
+
+Os vereditos `adjust`, `plan`, `debate` e `stop`, bem como o sinalizador `debate_required: true`, possuem efeito operacional bloqueante: é terminantemente vedado ao Orquestrador ignorá-los silenciosamente antes da próxima ação material. Cada apontamento relevante deve receber disposição formal (aceite com ajuste, encaminhamento de planejamento/debate, ou justificativa explícita de rejeição fundamentada) registrada na evidência.
+
+### 9. Regra estrita de autoria e independência do Checker
+
+O parecer do Advisor é estritamente consultivo e **NÃO** insere a família do Advisor no conjunto de autoria efetiva (`effective_authors`).
+Somente se conteúdo substantivo (especificação de arquitetura, texto formal de spec ou trechos de código de solução) produzido pelo Advisor for copiado diretamente ou incorporado à spec ou aos `content_paths` da entrega, a família do Advisor passará a integrar `effective_authors` para fins da avaliação de independência do Checker subsequente da unidade.
+
+### 10. Interface declarativa para o Modo Automático
+
+Para execução em lotes automáticos (Modo Automático), a política do Advisor integra a autoridade imutável e congelada do lote via bloco declarativo `frozen_scope.advisor_policy`:
+- `frozen_scope.advisor_policy` é parte integrante da autoridade congelada do lote sob `additionalProperties: false`;
+- `enabled`: ativa ou desativa o acionamento de Advisors no lote; quando `enabled: false`, qualquer despacho de Advisor é categoricamente impedido (`consumed_advisor_calls` permanece 0);
+- `triggers`: lista fechada de gatilhos autorizados para o lote entre os 8 gatilhos objetivos. A presença de gatilhos autorizados não autoriza recursão (`advisor -> advisor`);
+- `max_calls`: limite estrito de chamadas consultivas permitidas. `frozen_scope.advisor_policy.max_calls` é a autoridade de política congelada, enquanto `budget.max_advisor_calls` é a projeção usada pelo mecanismo genérico de orçamento. É mandatória a invariância de igualdade estrita: `advisor_policy.max_calls == budget.max_advisor_calls`.
+
+É vedado ao Orquestrador realizar chamadas espontâneas a Advisors fora do orçamento e dos gatilhos declarados na política do lote.
+
 ## Conclusão
 
-- **Task `done`:** portões aplicáveis executados, parecer `approved` válido vinculado ao
+- **Task `done`:** portões aplicáveis executados conforme a cadência de verificação estabelecida
+  (verificação direcionada intragrupo, ou portão canônico de fronteira na unidade de fechamento do grupo
+  ou em tarefas standalone), parecer `approved` válido vinculado ao
   `content_id` revisado, e autoridade de fechamento já concedida pela política do projeto. Sob
   `checker_independence: preferred`, o estado `done` é permitido mesmo com pendência de revisão
   posterior aberta (`status: pending`). Sob `checker_independence: required`, a ausência de parecer
   de família distinta bloqueia o fechamento com ponto de retomada; a indisponibilidade nunca
-  converte `required` em `preferred`. Não há confirmação humana adicional por Task por padrão.
+  converte `required` em `preferred`. Sob `checker_independence: required`, qualquer coincidência
+  entre a família do modelo do revisor e a autoria efetiva (incluindo Makers de todas as rodadas e
+  reworks prévios) constitui impedimento absoluto, obrigando o Orquestrador a emitir impedimento
+  fundamentado e impedindo a aprovação da unidade. Não há confirmação humana adicional por Task por padrão.
 - **Deliverable `done`:** todas as Tasks exigidas `done` e `integration_criteria` verificados
-  conforme os portões aplicáveis. Tasks todas `done` não comprovam, por si só, que as partes
-  funcionam juntas. Ao fechar, o Deliverable lista as pendências de revisão abertas de suas Tasks
-  sem que elas bloqueiem a sua conclusão. O Orquestrador registra o fechamento com a evidência da
-  verificação integrada.
+  conforme os portões aplicáveis, com aprovação obrigatória do `canonical_full_gate` na fronteira principal
+  de integração. Tasks todas `done` não comprovam, por si só, que as partes funcionam juntas. Ao fechar, o
+  Deliverable lista as pendências de revisão abertas de suas Tasks sem que elas bloqueiem a sua conclusão. O
+  Orquestrador registra o fechamento com a evidência da verificação integrada.
 - **Reuso de parecer:** alteração material posterior à revisão, isto é, novo `content_id`, impede
   o reuso automático do parecer para fechar a Task.
 
@@ -406,7 +666,10 @@ Fora do parecer e sem alterar o schema, o arquivo de evidência da rodada,
 `project/evidence/Tnnn-rNN.md` (ou o artefato próprio da story BMAD), registra o parecer JSON
 íntegro, a unidade revisada (qualificada como `<area_id>:<id>` no modo multiárea), `spec_revision`,
 `content_id` revisado, `run_id` do Checker, sessão, harness, modelo, effort, família e limitações
-de independência. É esse registro que vincula o parecer ao conteúdo e à unidade; hashes iguais em
+de independência. Sob `checker_independence: required`, o registro deve comprovar a ausência total
+de sobreposição entre a família do Checker e todas as famílias registradas na autoria efetiva da
+unidade (Makers originais e de retrabalhos anteriores); qualquer coincidência invalida a revisão e
+impede o fechamento. É esse registro que vincula o parecer ao conteúdo e à unidade; hashes iguais em
 outra unidade não transportam a aprovação.
 
 Toda chamada a agente entra na tabela `Agent runs` da evidência (Planner, Maker, Checker, sondas e
@@ -510,6 +773,178 @@ a coordenação. A tabela de Tasks nativas só existe quando há Tasks nativas.
 - Limites: `max_rework_rounds` por Task, `max_replans` por Deliverable com omissão igual a `1`, e
   estagnação: duas rodadas consecutivas com os mesmos achados do Checker bloqueiam e apresentam a
   decisão necessária.
+- Em lotes autorizados multitarefas expressamente aprovados pelo usuário com escopo e lista delimitada, a
+  transição entre tarefas concluídas e subsequentes elegíveis desbloqueadas é contínua e automática dentro
+  dos limites do lote, registrando o encerramento da unidade anterior e a abertura da seguinte. Qualquer
+  bloqueio impõe parada imediata da execução na unidade afetada, sendo vedado saltá-la e projetando a pendência
+  em `STATUS.md`. O avanço para tarefas independentes depende de autorização explícita no lote
+  (`continue_independent_on_block: true`), permanecendo a suspensão total do lote como regra por omissão.
+  Perguntas ao usuário iniciam contagem de prazo no evento tecnicamente observável `question_emitted_at`
+  (admitindo `transport_ack_at` se fornecido pelo canal), sendo terminantemente proibido presumir leitura humana.
+
+## Modo Automático: execução de lote finito autorizado
+
+O Modo Automático permite a execução autônoma de um lote finito e explicitamente autorizado de unidades já conhecidas do projeto. Ele unifica as garantias de esperas e liveness (T013), roteamento e independência (T014), economia de contexto (T015), cadência de verificação com portões de fronteira (T016) e desafio consultivo por Advisor (T017).
+
+### 1. Natureza do sistema e não-objetivos
+
+- **Protocolo durável documental:** T018 não cria daemon, transação distribuída, engine autônomo persistente, lock distribuído ou atomicidade de banco de dados. O Modo Automático é um protocolo durável conduzido pelo Orchestrator/harness existente através de uma disciplina documental de write-ahead serializada pelo `coordinator`.
+- **Composição com o protocolo de execução:** O despacho e a execução de cada unidade individual no estado `EXECUTE` seguem o protocolo por artefatos e recebimento de recibo terminal compacto (< 4 KiB) especificado em `docs/EXECUTION_PROTOCOL.md` (e `scripts/tl_job.py`). O Modo Automático atua como a autoridade de governança do lote finito, gerenciando admissão, reserva dinâmica de orçamento, avanço dos checkpoints duráveis em `_tl-orc/project/batches/Bnnn.md`, controle de paradas e portões canônicos de fronteira de integração (T016).
+- **Anti-patterns expressamente vedados:**
+  * Não criar agentes indefinidamente autônomos ou auto-direcionados;
+  * Não percorrer backlog de forma contínua ou descontrolada;
+  * Não criar ou formalizar novas Tasks espontaneamente;
+  * Não auto-autorizar escopo, orçamento, efeitos ou exceções;
+  * Não manter serviços em segundo plano, daemons permanentes ou loops de polling contínuo;
+  * Não presumir nem executar `git push`, PR, merge remoto, tags git ou releases sem instrução humana explícita prévia.
+
+### 2. Máquina de estados formal
+
+A execução de batches obedece à máquina de estados estrita:
+
+```text
+IDLE
+  ↓ comando explícito do usuário: "iniciar modo automático"
+DISCOVER                  # read-only: inspeção de unidades candidatas existentes no projeto
+  ↓
+PROPOSE                   # read-only: formulação da proposta formal estruturada do lote
+  ↓
+WAIT_AUTHORIZATION        # bloqueio síncrono aguardando deliberação humana
+  ├── rejeição → IDLE
+  ├── aprovação parcial → PROPOSE revisado (novo ciclo com recálculo)
+  └── aprovação integral
+          ↓
+PREFREEZE_REVALIDATE      # revalidação síncrona contra drift entre proposta e autorização
+  ├── drift detectado → PROPOSE revisado (invalida proposta anterior)
+  └── integridade confirmada
+          ↓
+FREEZE_BATCH              # materialização imutável do snapshot do lote em batches/Bnnn.md
+          ↓
+EXECUTE                   # loop sequencial de execução por unidade com admission gate
+          ↓
+CLOSE                     # fechamento do lote com relatório terminal e retorno a IDLE
+
+Saídas excepcionais: BLOCKED | STOPPED | FAILED | CANCELLED
+```
+
+- **Invariante fundamental de autorização:**
+  `"iniciar modo automático" ≠ autorização para executar`
+  O comando inicial do usuário autoriza única e exclusivamente a fase de leitura `DISCOVER → PROPOSE`. Nenhuma modificação de código, criação de commit, mutação de arquivo ou despacho de agentes de implementação pode ocorrer antes de uma resposta humana formal que aprove a proposta apresentada.
+- **Semântica estrita de aprovação parcial:** Caso o usuário aprove apenas um subconjunto das unidades propostas (ex.: *"execute T018 e T019, deixe T020 de fora"*), a resposta humana **nunca filtra diretamente o lote no freeze**. O Orquestrador gera obrigatoriamente um novo ciclo `PROPOSE` contendo estritamente o subconjunto aprovado, recalculando dependências, orçamentos, boundaries de integração e o novo `proposal_digest`, exigindo nova confirmação explícita.
+- **Revalidação pré-freeze (`PREFREEZE_REVALIDATE`):** Imediatamente antes de materializar o lote em disco no estado `FREEZE_BATCH`, o Orquestrador recalcula e revalida síncronamente: revisões de unidade, `spec_revision` de cada task, grafo de dependências, `scope_digest` e efeitos autorizados. Havendo **qualquer divergência ou drift**, a proposta anterior é considerada sumariamente inválida; é terminantemente proibido adaptar o lote silenciosamente, retornando obrigatoriamente a `PROPOSE`.
+
+### 3. Persistência durável: modelo híbrido adotado
+
+A Alternativa C (*runtime-only* em memória) é formalmente desqualificada e rejeitada por violar a durabilidade e a recuperação auditável exigidas pelo método.
+
+Adota-se a arquitetura híbrida de persistência:
+1. **Fonte de verdade do lote:** Arquivo dedicado `_tl-orc/project/batches/Bnnn.md` (`B001.md`, `B002.md`, ...).
+2. **Projeção e coordenação da árvore:** Ponteiro enxuto de uma linha no cabeçalho global de `_tl-orc/project/STATUS.md` (`active_batch`, `batch_status`, `next_batch_id`).
+3. **Regra de resolução de conflito:** Se houver qualquer divergência entre `STATUS.md` e `Bnnn.md`, a autoridade sobre o lote é `Bnnn.md`. O Orquestrador relê o batch e reconcilia a projeção em `STATUS.md`.
+4. **Validação por schema:** O envelope estruturado de `Bnnn.md` é validado estritamente por `schemas/batch.schema.json` (Draft 2020-12), separando o snapshot imutável de autoridade/escopo (`frozen_scope`, `authorization`, `immutable_digest`) das seções mutáveis de progresso da execução (`status`, `budget`, `execution`). O progresso da execução não pode alterar retroativamente a autoridade ou o escopo congelado.
+
+### 4. Contabilidade de chamadas por write-ahead lógico
+
+O controle orçamentário baseia-se em chamadas efetivamente realizadas observadas, operado via write-ahead lógico serializado pelo coordenador da árvore:
+
+1. Verificar saldo disponível no lote: `saldo = max_model_calls - consumed_model_calls - reserved_model_calls`;
+2. Reservar slots obrigatórios: `reserved_model_calls += N`;
+3. Gravar `pending_call` em `Bnnn.md` com `call_id`, `role`, `phase`, `payload_digest`, `dispatched_at`;
+4. Persistir estado do lote em disco;
+5. Despachar a chamada ao modelo;
+6. Observar o receipt / resultado estruturado;
+7. Converter: `reserved_model_calls -= 1`, `consumed_model_calls += 1`;
+8. Limpar `pending_call` em `Bnnn.md` (`pending_call: null`);
+9. Persistir estado atualizado em disco.
+
+#### Recuperação de crash ou interrupção
+
+Ao reiniciar a execução do lote após falha de processo, timeout ou encerramento de sessão:
+- Se `pending_call` for `null`: retoma a partir do último checkpoint confirmado;
+- Se `pending_call` existir:
+  * Com evidência inequívoca de conclusão (recibo/log confirma saída): contabiliza como `consumed` e prossegue;
+  * Se o despacho comprovadamente não ocorreu: libera a reserva e prossegue;
+  * Em caso ambíguo: contabiliza conservadoramente como `consumed` e interrompe imediatamente com `STOP`, impedindo estouro silencioso de orçamento.
+
+### 5. Admission gate por unidade e reserva dinâmica de orçamento
+
+#### Admission gate por unidade
+
+Antes de admitir qualquer unidade para execução no loop `EXECUTE`:
+1. `authority` permanece válida e inalterada;
+2. `batch membership` confirmado (unidade presente no snapshot `frozen_scope`);
+3. `revision` e `spec_revision` confirmadas sem drift em relação ao snapshot;
+4. `dependencies` da unidade totalmente satisfeitas (`status == done`);
+5. `coordinator` válido e ativo em `STATUS.md`;
+6. `tree_state == expected_checkpoint` (HEAD esperado e árvore de trabalho limpa);
+7. efeitos necessários contidos em `permitted_effects`;
+8. saldo orçamentário suficiente para a reserva mandatória dinâmica.
+
+#### Cálculo dinâmico da reserva mandatória de orçamento
+
+A reserva mandatória de orçamento não é um número fixo universal, sendo calculada dinamicamente para cada unidade:
+
+$$\text{required\_call\_reserve} = \text{todas as chamadas obrigatórias ainda não consumidas do checkpoint atual até o Checker independente}$$
+
+- A admissão de uma unidade exige garantia de orçamento para cobrir todo o caminho obrigatório até a revisão independente, incluindo Classifiers obrigatórios de cada fase, Maker, Checker e, quando já exigidos pela política ou contexto, Planner ou Advisor.
+- Exemplos típicos no fluxo comum (ilustrativos, nunca constantes normativas):
+  * Unidade nova simples típica: $\ge 4$ chamadas (`Classifier impl + Maker + Classifier rev + Checker`); caso Advisor ou Planner entrem no caminho, a reserva sobe proporcionalmente.
+  * Antes de despachar o Maker (com Classifier de impl já consumido): $\ge 3$ chamadas (`Maker + Classifier rev + Checker`).
+  * Antes de retrabalho (*rework*): exige saldo para todo o ciclo restante até o re-review independente ($\ge 4$ chamadas para `Classifier rework + Maker + Classifier rev + Checker`).
+- Se o saldo restante for inferior a `required_call_reserve`:
+  $$\text{STOP: } insufficient\_budget\_for\_unit\_verification$$
+
+#### Simetria de `bad_spec_or_intent_gap`
+
+A sinalização de incerteza material insolúvel, contradição de autoridade ou lacuna de intenção opera simetricamente:
+- Se apontada pelo Classifier da fase ou por verificação estática pré-Maker: interrompe a unidade antes de despachar o Maker (`STOP: bad_spec_or_intent_gap`), evitando consumo inútil de chamadas;
+- Se apontada pelo Checker independente em seu parecer: interrompe antes de autorizar retrabalho automático.
+
+#### Limites estritos de retrabalho automático
+
+O avanço automático em `changes_requested` é restrito a achados direcionados ao Maker, contidos na `spec_revision` e `content_paths` congelados, sem alteração de arquitetura ou produto, respeitando `max_rework_rounds_per_unit` e dispondo de saldo para todo o ciclo restante de rework até o re-review independente.
+
+### 6. Fronteiras de integração T016 dentro do lote
+
+Um único lote pode conter unidades de diferentes grupos de integração (`integration_groups`). A cadência de verificação T016 aplica-se com rigor:
+1. Dentro do mesmo grupo de integração: verificação direcionada (*targeted verification*);
+2. Na transição de um grupo de integração para outro dentro do batch: execução obrigatória do `canonical_full_gate` oficial na fronteira do grupo que encerra. Falha no portão bloqueia com `STOP: canonical_full_gate_failure`;
+3. No encerramento da última unidade do último grupo: execução obrigatória do `canonical_full_gate` antes de transitar para `CLOSE`.
+
+### 7. 18 Condições formais de parada (*Stop conditions*)
+
+A execução do lote é imediatamente interrompida (`STOP`), projetando a interrupção em `STATUS.md` e devolvendo o controle ao usuário, sob qualquer uma das 18 condições formais:
+
+1. `authority_missing_or_ambiguous`: ausência de comando formal explícito.
+2. `scope_expansion`: tentativa de escrita fora dos `content_paths` congelados.
+3. `new_work_outside_frozen_batch`: necessidade de Task nova não presente no snapshot.
+4. `model_call_budget_exhausted`: orçamento de chamadas do lote esgotado.
+5. `rework_limit_exhausted`: esgotamento do número de rodadas de retrabalho da unidade.
+6. `insufficient_budget_for_unit_verification`: saldo restante inferior a `required_call_reserve`.
+7. `required_checker_independence_unavailable`: indisponibilidade de família independente sob política `required`.
+8. `required_advisor_independence_unavailable`: indisponibilidade de consultor independente sob política `required`.
+9. `advisor_verdict_stop`: parecer de parada emitido pelo Advisor.
+10. `advisor_verdict_debate` (ou `debate_required: true`): necessidade de deliberação sem autorização prévia de debate.
+11. `bad_spec_or_intent_gap`: especificação inconsistente ou lacuna de intenção levantada por Classifier ou Checker (simétrico).
+12. `canonical_full_gate_failure`: falha de portão canônico em fronteira de grupo ou fechamento.
+13. `coordinator_conflict`: divergência de coordenador da árvore.
+14. `unexpected_tree_state`: árvore de trabalho não condiz com `expected_tree_checkpoint`.
+15. `unexpected_revision_drift`: divergência de revisão em relação ao snapshot congelado.
+16. `external_effect_not_authorized`: tentativa de invocar push, PR, merge, tag ou rede sem autorização.
+17. `unrecoverable_harness_failure`: falha persistente de infraestrutura de harness.
+18. `dependency_block`: bloqueio de dependência de unidade no lote.
+    - O comportamento padrão é `continue_independent_after_block: false` (interrompe no primeiro bloqueio). Continuidade restrita a ramos topologicamente independentes exige autorização expressa no lote.
+
+### 8. Fechamento do lote (`CLOSE`) e invariante terminal
+
+O lote transita para `CLOSE` quando:
+1. Todas as unidades do lote atingem `status: done`;
+2. O portão canônico de integração de fronteira final (`canonical_full_gate`) passa com exit 0;
+3. O status do lote em `batches/Bnnn.md` é atualizado para `done`;
+4. `active_batch` em `STATUS.md` é atualizado para `none` e `batch_status: none`;
+5. É gerado o relatório terminal ao usuário contendo sumário de unidades, chamadas consumidas e evidências;
+6. O sistema retorna ao estado `IDLE`.
+- **Invariante terminal:** O fechamento de um lote **nunca** cria ou dispara outro lote automaticamente.
 
 ## Autorizações de escrita
 
@@ -664,6 +1099,8 @@ campos desconhecidos como desconhecidos.
 format_version: 1
 work_method: native
 active_work_ref: native/task/T001@_tl-orc/project/tasks/T001-slug.md
+active_batch: B001
+batch_status: in_progress
 current_role: orchestrator
 next_action: <frase curta>
 coordinator:
@@ -677,6 +1114,7 @@ next_task_id: 2
 next_deliverable_id: 1
 next_decision_id: 1
 next_discussion_id: 1
+next_batch_id: 2
 open_discussions: []
 
 ## Tasks
@@ -758,6 +1196,86 @@ content_id: <unknown até a implementação>
 ## Result
 ## Evidence
 ## Review
+```
+
+### Batch (Bnnn.md)
+
+```text
+id: Bnnn
+status: <in_progress|done|blocked|stopped|failed|cancelled>
+batch_revision: 1
+
+authorization:
+  proposal_id: <proposal_id>
+  proposal_digest: <sha256:...>
+  authority_source: explicit_user_authorization
+  authorized_at: <ISO-timestamp>
+  permitted_effects:
+    local_write: true
+    local_commit: true
+    local_merge: false
+    pull_request: false
+    push: false
+    tag: false
+    release: false
+  continue_independent_after_block: false
+
+frozen_scope:
+  advisor_policy:
+    enabled: true
+    triggers:
+      - architecture_or_contract_change
+      - heavy_tier_material_uncertainty
+    max_calls: 2
+  units:
+    - work_ref: <Tnnn>
+      revision: 1
+      spec_revision: <hash>
+      integration_group: <group-id>
+      dependencies: []
+  integration_groups:
+    <group-id>: [<Tnnn>]
+  major_boundaries:
+    - from: <group-id>
+      to: batch_closure
+      gate: <command>
+  stop_conditions:
+    - authority_missing_or_ambiguous
+    - scope_expansion
+    - new_work_outside_frozen_batch
+    - model_call_budget_exhausted
+    - rework_limit_exhausted
+    - insufficient_budget_for_unit_verification
+    - required_checker_independence_unavailable
+    - required_advisor_independence_unavailable
+    - advisor_verdict_stop
+    - advisor_verdict_debate
+    - bad_spec_or_intent_gap
+    - canonical_full_gate_failure
+    - coordinator_conflict
+    - unexpected_tree_state
+    - unexpected_revision_drift
+    - external_effect_not_authorized
+    - unrecoverable_harness_failure
+    - dependency_block
+  immutable_digest: <sha256:...>
+
+budget:
+  max_model_calls: 24
+  consumed_model_calls: 0
+  reserved_model_calls: 0
+  max_rework_rounds_per_unit: 2
+  max_advisor_calls: 2
+  consumed_advisor_calls: 0
+  pending_call: null
+
+execution:
+  current_unit: <Tnnn|null>
+  current_phase: <phase|null>
+  current_round: 0
+  expected_tree_checkpoint: <commit_sha_ou_tree_digest>
+  completed_units: []
+  stop_reason: null
 ```
 
 ### Deliverable

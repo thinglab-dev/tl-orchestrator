@@ -1,0 +1,1 @@
+code_tree: not_observable (conforme congelamento em T015 spec linha 106)

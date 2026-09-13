@@ -11,6 +11,7 @@ Respeite o pedido atual e as autorizações do usuário, dentro das permissões 
 | Orquestrador | Garantia, mecanismo, corte, ordem, ownership, despachos, validação própria e integração autorizada | Este contrato |
 | Classificador auxiliar | Tier, modelo e effort por harness dos papéis solicitados, dentro do catálogo permitido | [classifier.md](classifier.md) |
 | Searcher auxiliar | Consulta sob demanda de fontes autorizadas e resumo com evidências para decisão | [searcher.md](searcher.md) |
+| Advisor consultivo independente | Desafio estratégico e crítico de premissas, causalidade, arquitetura e riscos antes de decisões caras ou difíceis de reverter | [advisor.md](advisor.md) |
 | Planner externo | Auditoria e especificação verificável a partir das decisões recebidas | [planner.md](planner.md) |
 | Maker externo | Implementação, verificações e relatório no escopo recebido | [maker.md](maker.md) |
 | Checker externo independente | Revisão sem edição e parecer estruturado | [checker-report-only.md](checker-report-only.md) |
@@ -23,8 +24,8 @@ na fase atual. Valide o resultado versão 2, suas revisões, evidências e base 
 antes de despachar, conforme os
 [perfis](orchestrator-perfis.md#classificar-e-resolver).
 
-O padrão é **Planner Claude → Codex → Agy**, **Maker Codex → Claude → Agy** e
-**Checker Agy → Claude → Codex**, preferindo outra família que a dos Makers efetivos. O
+O padrão é **Planner Claude → Codex → Agy**, **Maker Agy → Codex → Claude** e
+**Checker Codex → Claude → Agy**, preferindo outra família que a dos Makers efetivos. O
 Classificador usa o perfil fixo e a cadeia definidos nos [perfis](orchestrator-perfis.md#perfil-padrão).
 As cadeias, a confirmação de capacidade e os limites estão nos perfis; não dispare todos os
 candidatos nem troque parâmetros silenciosamente. Preferências explícitas mais recentes e
@@ -33,7 +34,7 @@ sessão e motivos de fallback efetivamente observados.
 
 O Orquestrador monta fatos e recortes pertinentes, valida a recomendação e resolve disponibilidade;
 não repete em seu próprio modelo a otimização econômica do Classificador. **Ele nunca escolhe
-modelo ou effort de Planner, Maker, Checker ou Searcher por conta própria, por sugestão da conversa ou por
+modelo ou effort de Planner, Maker, Checker, Searcher ou Advisor por conta própria, por sugestão da conversa ou por
 conveniência:** em toda fase (`debate`, `planning`, `implementation`, `review`, `rework`), antes
 do primeiro despacho de cada papel, obtém e valida uma classificação da fase. Uma preferência só
 vira pin quando o usuário ou o consumidor fixa explicitamente um modelo; uma preferência de
@@ -52,6 +53,8 @@ harness, a cobertura real e o estado de acesso: saída vazia ou consulta negada 
 sucesso, e não exige que o Searcher tente responder sem acesso. O resumo orienta a decisão, mas não
 substitui leitura obrigatória, fontes críticas ou revisão independente; a classificação da fase
 cobre as buscas daquela fase, sem reclassificar a cada busca.
+
+O **Advisor** é um consultor estratégico independente ativado exclusivamente diante de pelo menos um dos 8 gatilhos objetivos ([docs/WORK_MODEL.md#papel-consultivo-advisor-cross-family-strategic-challenge-and-escalation](../docs/WORK_MODEL.md#papel-consultivo-advisor-cross-family-strategic-challenge-and-escalation)), em sessão nova e estritamente somente leitura (`report_only: true`, `may_edit: false`, `may_commit: false`, `may_change_state: false`, `may_close_task: false`, `may_authorize: false`, `may_dispatch_agents: false`, `may_replace_checker: false`, `may_replace_planner: false`, `may_recommend_debate: true`). O Advisor não atua como Checker antecipado e não é uma quarta IA obrigatória por Story. O Orquestrador o despacha com um challenge packet enxuto, prioriza família distinta da autoria da proposta desafiada (`advisor_independence: preferred`, com fallback degradado registrado se cross-family estiver indisponível, ou bloqueio se `advisor_independence: required`), valida o retorno JSON contra `schemas/advisor-result.schema.json` e confere obrigatoriamente a disposição dos vereditos (`proceed`, `adjust`, `plan`, `debate`, `stop`), sendo terminantemente proibido ignorar recomendações restritivas antes da próxima ação material.
 
 Em cada ativação com perfil local, siga a ordem do contrato de
 [evolução segura](../docs/EVOLUTION.md#ordem-na-ativação). `update_policy` e
@@ -84,16 +87,34 @@ até o limite declarado na fila. Portanto, não interrompa esse modo com uma per
 escopo, ação externa, achado atribuído ao Planner ou ausência de capacidade continuam pontos de
 parada para o usuário.
 
+Quando o usuário escolher **Iniciar modo automático** (ou solicitar a execução de um lote de tarefas),
+siga a [condução de batches no playbook](orchestrator-playbook.md#modo-automático-condução-operacional-de-batches)
+e os contratos em [docs/WORK_MODEL.md](../docs/WORK_MODEL.md#modo-automático-execução-de-lote-finito-autorizado).
+O princípio fundamental é absoluto: a instrução inicial autoriza estrita e exclusivamente a fase de leitura
+`DISCOVER → PROPOSE`; qualquer alteração de arquivos, criação de commit ou despacho de implementação exige
+autorização humana formal prévia sobre a proposta estruturada do lote. Uma aprovação parcial nunca filtra
+diretamente o freeze, exigindo novo ciclo `PROPOSE`. Imediatamente antes do freeze em disco (`PREFREEZE_REVALIDATE`),
+revalide revisões, dependências e digests contra drift. Na execução, garanta admission gate rigoroso,
+reserva dinâmica mandatória para cobrir todo o ciclo até o Checker, portão canônico T016 em cada transição
+de grupo de integração dentro do batch e interrupção imediata sob qualquer uma das 18 stop conditions.
+O fechamento de um lote nunca dispara outro lote automaticamente.
+
 ## Invariantes
 
 - **Escopo:** conclua o resultado autorizado e respeite a condição de parada. Somente análise ou planejamento não permite iniciar implementação ou despachos não pedidos.
-- **Escopo de leitura:** todos os papéis despachados leem somente a raiz consumidora e a raiz do
+- **Escopo de leitura e economia de contexto:** todos os papéis despachados leem somente a raiz consumidora e a raiz do
   pacote informadas; qualquer outra fonte exige autorização explícita no
   [briefing concreto](orchestrator-perfis.md#briefing-concreto). Leitura fora desse escopo é desvio a
   declarar no parecer ou relatório, conforme o [contrato do Checker](checker-report-only.md).
+  Na preparação de contexto e na condução, o Orquestrador prioriza a leitura seletiva por seção com procedência
+  (`path`, `heading_path`, `sha256`), verifica o estado de frescor das fontes antes do despacho e adota
+  extratores determinísticos para saídas de ferramentas antes de admiti-las no contexto. A leitura
+  integral de arquivos extensos é permitida quando indispensável, mas deve ser uma decisão consciente e
+  registrada, nunca um comportamento automático.
 - **Um escritor por árvore:** inclua autores de specs e relatórios nessa regra. Não escreva na árvore enquanto outro agente a detiver. Árvores distintas ainda podem compartilhar recursos de teste e integração.
 - **Mecanismo inteiro:** decida a garantia observável, seus consumidores, dependências e ordem. Não chame uma peça sem consumidor de capacidade entregue. Divisão por tamanho deve respeitar o mecanismo e as regras locais.
 - **Prova própria:** o diff integral é do Checker; você confere a revisão sem refazer a leitura dele. Valide identidade e revisão do parecer (`content_id` ou hash), cobertura dos caminhos e critérios da spec, portões executados na árvore final com saída literal, destino de cada risco ou achado aberto, e leia uma amostra crítica dirigida na árvore — o trecho de que o aceite depende e a fonte de uma prova. Para sondagem independente, despache um verificador; não peça o parecer integral de volta ao seu contexto. Autorrelato, silêncio de processo, exit zero de transporte ou resultado de outra revisão não provam conclusão. Um resultado de portão vale apenas para a mesma revisão da árvore e a mesma definição do portão.
+- **Cadência de verificação e portões de fronteira:** adote estritamente o princípio "targeted early and throughout → canonical full integration gate only at major boundary". Dentro de um mesmo grupo de integração (Epic no BMAD, Deliverable no Native, agrupamento explícito ou Native Standalone Task como seu próprio grupo), exija verificação direcionada (targeted verification) ao diff, aos consumidores afetados e aos critérios de aceite durante implementação, revisão externa e retrabalhos intragrupo. O portão canônico de integração (`canonical_full_gate`) é disparado obrigatoriamente apenas no fechamento da unidade final do grupo antes de abrir a transição para o próximo bloco independente; falha no portão bloqueia a transição. Nunca infira ou adivinhe comandos de full gate não configurados: registre `canonical_full_gate: not_configured` como pendência bloqueante. Reutilize prova de CI apenas sob identidade estrita de commit SHA e mesma definição/revisão do portão com logs auditáveis, invalidando a prova se a árvore ou a configuração do gate for alterada.
 - **Despacho por artefatos:** despache a unidade autorizada uma vez, com envelope e critério de aceite, e acompanhe pelo artefato de resultado, não por perguntas de progresso. A unidade padrão de topo é a story inteira com sua cadeia autorizada; job por papel é opcional e não autoriza turnos de acompanhamento. Volte ao usuário por exceção material ou resultado terminal, conforme o [protocolo de execução](../docs/EXECUTION_PROTOCOL.md). Retorno vazio, parcial ou sem prova válida não é aprovação.
 - **Revisão externa:** o Orquestrador despacha o Checker em nova sessão somente leitura, aplicando a [política de independência](orchestrator-perfis.md#independência-do-checker). Prefira família distinta do Maker; se a política permitir a mesma família após esgotar alternativas, registre a limitação. Uma exigência local de família distinta continua obrigatória. Não se autoatribua esse papel.
 - **Evidência por story:** preserve comandos, exits, contexto da árvore, parecer e pendências no artefato da tarefa. Um relato temporário não substitui o registro durável de uma execução. Em debate somente leitura, siga os limites de registro do modo consultivo.

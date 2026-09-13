@@ -1,0 +1,17 @@
+{
+  "checkpoint": "B",
+  "treatment": "reference",
+  "execution_order": 4,
+  "environment_commit": "3e9ecc356b839dbe5e736e5356219bb092a4ff00",
+  "input_manifest_sha256": "80bb06444491d44b9cb19966f21d6d5d6b2d6ac985cf4dacf2355cdce7a91194",
+  "allowed_set_sha256": "297bbc935288d81701903a3afae300ba3166d4a26a65dc62e238f52c6f88736d",
+  "model": "claude-sonnet-5",
+  "effort": "medium",
+  "tool_policy": "Read,Glob,Grep,Bash",
+  "session_id": "9028434f-d3d3-4671-8321-8c8c495c8b9b",
+  "wall_clock_seconds": 85.82,
+  "exit_code": 0,
+  "reads_outside_allowed_set": [],
+  "failed_read_attempts": [],
+  "disallowed_external_attempts": []
+}

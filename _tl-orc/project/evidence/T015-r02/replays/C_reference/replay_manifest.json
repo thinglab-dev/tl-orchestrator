@@ -1,0 +1,27 @@
+{
+  "checkpoint": "C",
+  "treatment": "reference",
+  "round": "r02",
+  "execution_order": 5,
+  "environment_commit": "3e9ecc356b839dbe5e736e5356219bb092a4ff00",
+  "input_manifest_sha256": "f25973e87b52...",
+  "allowed_set_sha256": "a670ae6f7642c9b95ab1a184a205c76a6f25564eb51c80c8720f1887dce9a579",
+  "model": "claude-sonnet-5",
+  "effort": "medium",
+  "tool_policy": "Read,Glob,Grep,Bash",
+  "session_id": "019a53d6-d045-4e26-8e42-2be5b1bac76e",
+  "wall_clock_seconds": 102.25,
+  "exit_code": 0,
+  "observed_reads_count": 6,
+  "reads_outside_allowed_set": [
+    "."
+  ],
+  "failed_read_attempts": [],
+  "disallowed_external_attempts": [
+    {
+      "tool": "Bash:grep",
+      "path": "/Users/albertiano/thinglab-platform/_tl-orc/PROJECT.md",
+      "reason": "Target realpath is outside frozen repo root: /Users/albertiano/thinglab-platform/_tl-orc/PROJECT.md"
+    }
+  ]
+}

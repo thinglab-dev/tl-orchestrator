@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+rootdir: /workspace
+collected 4 items
+
+tests/test_auth.py .F.s                                                  [100%]
+
+=================================== FAILURES ===================================
+___________________________ test_token_expiration ____________________________
+
+    def test_token_expiration():
+>       assert token.is_valid() is False
+E       AssertionError: assert True is False
+
+tests/test_auth.py:24: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_auth.py::test_token_expiration - AssertionError: assert True is False
+=================== 1 failed, 2 passed, 1 skipped in 0.23s ====================

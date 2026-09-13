@@ -1,0 +1,63 @@
+{
+  "arm": "Arm_A",
+  "description": "Bra\u00e7o A (Controle / Hist\u00f3rico Fornecido)",
+  "wall_clock_seconds": 384.0641050338745,
+  "exit_code": 0,
+  "session_file": "/Users/albertiano/.claude/projects/-Users-albertiano--gemini-antigravity-brain-c35bdc15-8391-494c-8de0-190630cac49e-scratch-t012-pilot-dir-A/e4110e2c-db89-48bc-a367-171e7aa8c9b1.jsonl",
+  "input_tokens": 22,
+  "cache_creation_input_tokens": 383583,
+  "cache_read_input_tokens": 655083,
+  "output_tokens": 70810,
+  "thinking_tokens": 48255,
+  "turns": 11,
+  "tool_calls": [
+    {
+      "name": "Grep",
+      "input": {
+        "pattern": "astra-domain|astra-coding|gpt56-coding|flash-deepswe",
+        "path": "/Users/albertiano/thinglab/tl-orchestrator/docs/MODEL_ROUTING.md",
+        "output_mode": "content",
+        "-n": true,
+        "-C": 4
+      }
+    },
+    {
+      "name": "Grep",
+      "input": {
+        "pattern": "cost_basis|official_task_proxy|local_observed|token_price_only",
+        "path": "/Users/albertiano/thinglab/tl-orchestrator/prompts/classifier.md",
+        "output_mode": "content",
+        "-n": true,
+        "-C": 2
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/thinglab/tl-orchestrator/docs/MODEL_ROUTING.md",
+        "offset": 1,
+        "limit": 40
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/thinglab/tl-orchestrator/docs/MODEL_ROUTING.md",
+        "offset": 60,
+        "limit": 40
+      }
+    },
+    {
+      "name": "Grep",
+      "input": {
+        "pattern": "timeout|indispon|mesma fam|independ|fallback",
+        "path": "/Users/albertiano/thinglab/tl-orchestrator/prompts/orchestrator-perfis.md",
+        "output_mode": "content",
+        "-n": true,
+        "-C": 2,
+        "head_limit": 80
+      }
+    }
+  ],
+  "tool_results_bytes": 16896
+}

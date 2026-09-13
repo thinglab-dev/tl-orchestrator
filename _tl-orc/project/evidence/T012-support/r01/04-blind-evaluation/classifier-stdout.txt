@@ -1,0 +1,63 @@
+{
+  "schema_version": 2,
+  "story_id": "T012",
+  "phase": "review",
+  "context_revision": "tl-orchestrator@b06d37e+T012-spec-9c64bc99ae8a8e24",
+  "catalog_revision": "PROJECT.md-perfil-de-despacho-2026-09-07",
+  "confidence": "high",
+  "facts": [
+    "A fase é review cega das decisões decision-alpha.md e decision-beta.md da Task T012 contra o gabarito normativo scratch/t012-pilot/normative-rubric.md.",
+    "Ambas as decisões experimentais foram geradas sob o harness Claude (família Anthropic).",
+    "A política de independência do Checker é required, impedindo a família Anthropic de atuar como avaliadora para evitar viés de auto-revisão.",
+    "O Checker prioritário independente estabelecido pela política global formalizada em T014 é Codex GPT-5.6 Terra com esforço High.",
+    "O harness Google (Agy) permanece como alternativa independente de fallback elegível."
+  ],
+  "uncertainties": [
+    "Possibilidade de indisponibilidade transitória ou latência do endpoint do modelo primário Codex GPT-5.6 Terra durante a avaliação cega.",
+    "Eventual necessidade de recurso ao fallback agy/gemini-3.8-flash-high caso ocorra erro no harness primário."
+  ],
+  "reclassify_when": [
+    "Se o harness codex com gpt-5.6-terra/high estiver indisponível ou falhar por transporte, acionar o fallback independente agy/gemini-3.8-flash-high.",
+    "Se novos braços experimentais com autorias de outras famílias forem adicionados ao escopo do piloto T012.",
+    "Se houver alteração substancial na rubrica normativa congelada ou nos critérios de independência exigidos."
+  ],
+  "roles": {
+    "checker": {
+      "tier": "heavy",
+      "reason": "Avaliação cega rigorosa de alto impacto metodológico comparando duas decisões experimentais de condução de ciclo curto contra rubrica normativa congelada, exigindo profundidade analítica, independência estrita e conformidade contratual.",
+      "candidates": [
+        {
+          "harness": "codex",
+          "model": "gpt-5.6-terra",
+          "effort": "high",
+          "evidence_ids": [
+            "price-terra",
+            "transport-openai",
+            "astra-coding"
+          ],
+          "cost_basis": "token_price_only",
+          "reason": "Família OpenAI não participou da geração das decisões de T012; selecionada como avaliador checker prioritário independente sob a política global T014 com esforço high para rigor analítico."
+        },
+        {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "evidence_ids": [],
+          "cost_basis": "unknown",
+          "reason": "Impedido por checker_independence: required devido à autoria das decisões sob o harness Claude (família anthropic)."
+        },
+        {
+          "harness": "agy",
+          "model": "gemini-3.8-flash-high",
+          "effort": "high",
+          "evidence_ids": [
+            "price-flash-high",
+            "transport-google"
+          ],
+          "cost_basis": "token_price_only",
+          "reason": "Família Google não participou da geração das decisões de T012; elegível e selecionada como alternativa independente de fallback na cadeia com esforço high."
+        }
+      ]
+    }
+  }
+}

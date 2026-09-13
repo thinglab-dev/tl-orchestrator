@@ -43,7 +43,7 @@ em `Agent runs`) são coisas diferentes; nenhuma delas prova a outra.
 | Classificador | Agy → Codex → Claude (perfil fixo publicado) |
 | Planner | Claude → Codex → Agy |
 | Maker | Agy → Codex → Claude |
-| Checker report-only | Codex → Claude → Agy, respeitando a autoria efetiva |
+| Checker report-only | Codex → Claude → Agy, subordinada a checker_independence e autoria efetiva |
 
 Autoria efetiva: identifique todas as famílias que produziram o conteúdo revisado, incluindo
 reworks, experimentos comparativos e correções próprias do Orquestrador. Sob `preferred`,
@@ -64,13 +64,14 @@ resultante.
 | Planner | Claude | `claude-opus-5` | high | |
 | Planner | Codex | `gpt-5.6-terra` | medium, high | |
 | Planner | Agy | `gemini-3.1-pro-high` | high (no ID) | |
-| Maker | Agy | `gemini-3.8-flash-high` | high (no ID) | preferência do usuário |
+| Maker | Agy | `gemini-3.8-flash-high` | high (no ID) | preferência global padrão |
 | Maker | Codex | `gpt-5.6-terra` | medium, high, xhigh | |
 | Maker | Claude | `sonnet` | medium, high | |
 | Maker | Claude | `claude-opus-5` | high | |
-| Checker | Codex | `gpt-6-astra` | high | acesso não comprovado até a primeira chamada |
-| Checker | Codex | `gpt-6-astra` | xhigh | condicional: exige justificativa específica do Classificador sobre o risco da fase e a necessidade de esforço adicional, dentro do orçamento autorizado e registrada antes do despacho; no piloto inicial o pin `gpt-6-astra/high` prevalece |
-| Checker | Codex | `gpt-5.6-terra` | high | referência atual |
+| Checker | Codex | `gpt-5.6-terra` | high | referência padrão prioritária |
+| Checker | Codex | `gpt-5.6-terra` | xhigh | escalonamento sob tier heavy / risco elevado |
+| Checker | Codex | `gpt-6-astra` | high | candidato experimental do piloto sob avaliação |
+| Checker | Codex | `gpt-6-astra` | xhigh | condicional: exige justificativa específica do Classificador |
 | Checker | Claude | `sonnet` | high | |
 | Checker | Claude | `claude-opus-5` | high | |
 | Checker | Agy | `gemini-3.1-pro-high` | high (no ID) | |
@@ -82,8 +83,10 @@ adequado naquele harness para o papel solicitado; nunca como normalização de u
 
 ### Piloto de avaliação do Astra como Checker
 
-- Pin do piloto: candidato do harness Codex para Checker fixado em `gpt-6-astra/high`. O
-  Classificador continua sendo chamado, valida as restrições e dimensiona os fallbacks.
+- Avaliação experimental: candidato de referência padrão do harness Codex para Checker é
+  `gpt-5.6-terra/high`. `gpt-6-astra/high` permanece como candidato experimental classificável no
+  catálogo para medição comparativa de desempenho, latência e consumo, sem pin rígido obrigatório
+  que sobreponha a cadeia padrão `Codex → Claude → Agy`.
 - Escopo: a revisão do piloto exige família distinta da autoria efetiva, registrada como restrição
   de entrada, embora a política geral seja `preferred`.
 - Uma execução que caiu em fallback não conta como avaliação concluída do Astra; registra-se o

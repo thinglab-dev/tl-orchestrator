@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "unit": "T015-r03",
+  "phase": "rework",
+  "created_at": "2026-09-12T01:45:04.127364+00:00",
+  "turn_count": 14,
+  "tool_calls": 9,
+  "tokens": {
+    "input_tokens": 26,
+    "cache_creation_input_tokens": 53907,
+    "cache_read_input_tokens": 223781,
+    "output_tokens": 24062,
+    "thinking_tokens": 12463
+  },
+  "tool_metrics": {
+    "raw_result_bytes": 47631,
+    "delivered_result_bytes": 47631,
+    "tool_delivery_ratio": 1.0
+  },
+  "retrieval_amplification": 1.0,
+  "observed_reads": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/CODE_TREE_STATUS.txt",
+      "selector": "full_file",
+      "bytes": 77,
+      "digest": "8e83e4a3e038d2d37d2494bd1e0e1296950212dc7c87740fc7e3a368d30ce82c",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/PROJECT.md",
+      "selector": "full_file",
+      "bytes": 22852,
+      "digest": "b189f6d233bb42de1420ea5dbb5cfd9b17cc71e6e0738d25e7b82da0ffc70a1e",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/checker-6-0a-r1.md",
+      "selector": "full_file",
+      "bytes": 10267,
+      "digest": "c337c3e217fcdd9ef036f2c82b793f81b6550603d9a63150d3300f5f2b517bad",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/dev-report-6-0a.md",
+      "selector": "full_file",
+      "bytes": 5203,
+      "digest": "74c332479466bdcbfd5ef7cef3122927d93760c2db9571ebf1ebc618282de046",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/spec-6-0a.md",
+      "selector": "full_file",
+      "bytes": 3237,
+      "digest": "cf800ff2fd89ef3abaa74996334199005469f94b6b1657e21703c207fcebe913",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/manifest.json",
+      "selector": "full_file",
+      "bytes": 861,
+      "digest": "fdace2f3f1dd5f478df0b3620c57419f3254170777f2863f1193354d84b75d39",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/reference_manifest.json",
+      "selector": "full_file",
+      "bytes": 1431,
+      "digest": "6f34451ce554935a95e4a9d1d9de4c51e3bb821f2be2edb98f153b457600d93d",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/resume.json",
+      "selector": "full_file",
+      "bytes": 3139,
+      "digest": "ee13d016cf005362b6b78ca908f5b0b45d2c70bbea80c6ea29cb66b2170aa169",
+      "reason": "Tool execution: Read"
+    }
+  ],
+  "failed_read_attempts": [],
+  "reads_outside_allowed_set": [
+    "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/manifest.json",
+    "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/reference_manifest.json"
+  ],
+  "disallowed_external_attempts": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/manifest.json",
+      "selector": "full_file",
+      "reason": "Path outside allowed set: _tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/manifest.json"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/reference_manifest.json",
+      "selector": "full_file",
+      "reason": "Path outside allowed set: _tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/reference_manifest.json"
+    }
+  ],
+  "allowed_set": {
+    "reference": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/wt/t015-freeze/_tl-orc/project/evidence/T015-r03/allowed_sets/allowed_set_checkpoint-B.json",
+    "inputs": [
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/CODE_TREE_STATUS.txt",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/PROJECT.md",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/checker-6-0a-r1.md",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/dev-report-6-0a.md",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/resume.json",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/spec-6-0a.md"
+    ],
+    "allowed_support": [
+      ".git",
+      "/dev/null",
+      "CHANGELOG.md",
+      "README.md",
+      "_tl-orc/PROJECT.md",
+      "_tl-orc/project/STATUS.md",
+      "docs",
+      "prompts",
+      "schemas",
+      "scripts"
+    ]
+  },
+  "telemetry_divergence": null,
+  "pricing": {
+    "basis": "official_task_proxy",
+    "source": "docs/MODEL_ROUTING.md (proxy rubric)",
+    "verified_at": "2026-09-11",
+    "assumptions": [
+      "Cache read priced at 10% of base input token price",
+      "Cache creation priced at 1.25x of base input token price"
+    ],
+    "observed_tokens": 24088,
+    "estimated_token_cost": 0.361,
+    "subscription_quota_impact": "unknown"
+  },
+  "rotation": {
+    "rotation_recommended": false,
+    "reason": "not_calibrated",
+    "applied_thresholds": {}
+  },
+  "session_metadata": {
+    "checkpoint": "B",
+    "treatment": "reference",
+    "execution_order": 3,
+    "session_id": "37e1897f-dfae-4b58-8bcf-028fa3319532",
+    "wall_clock_seconds": 115.97,
+    "environment_commit": "3e9ecc356b839dbe5e736e5356219bb092a4ff00",
+    "allowed_set_sha256": "532dddc273e86bb2a89a03989a2ccb74e4cf3b494cdff067a1f508d10e7c5ebb"
+  }
+}

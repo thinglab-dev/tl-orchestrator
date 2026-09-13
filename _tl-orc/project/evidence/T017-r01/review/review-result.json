@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "verdict": "changes_requested",
+  "action_items": [
+    {
+      "id": "R1",
+      "severity": "high",
+      "category": "patch",
+      "target_role": "maker",
+      "location": "docs/WORK_MODEL.md §6; prompts/orchestrator-perfis.md#independência-do-advisor; prompts/orchestrator-playbook.md §3; scripts/tests/test_advisor_policy.py",
+      "problem": "A resolução de contra-família trata a autoria da proposta como uma única família. Não há regra para autoria múltipla que exclua todas as famílias autoras antes de selecionar o Advisor.",
+      "evidence": "Os contratos mapeiam apenas proposta Anthropic, Google ou OpenAI individualmente; o resolvedor de teste recebe proposal_family: str e cobre somente casos de uma família. Para effective_authors: [google, openai], não é exigida a preferência Anthropic e a decisão pode depender indevidamente do último autor observado.",
+      "required_action": "Definir e aplicar a resolução contra o conjunto completo de famílias autoras do artefato desafiado; para [google, openai], exigir Anthropic quando disponível. Cobrir fallback preferred/required e adicionar sondas contrafactuais de múltiplos autores."
+    },
+    {
+      "id": "R2",
+      "severity": "medium",
+      "category": "patch",
+      "target_role": "maker",
+      "location": "schemas/advisor-result.schema.json; prompts/advisor.md#semântica-dos-vereditos; scripts/tests/test_advisor_policy.py",
+      "problem": "O schema aceita verdict: debate com debate_required: false, contrariando a semântica mandatória de que esse veredito recomenda Debate formal com debate_required: true.",
+      "evidence": "advisor-result.schema.json declara debate_required apenas como booleano, sem condicional vinculada a verdict: debate. A suíte testa somente o caso positivo e não contém contrafactual que rejeite a combinação inconsistente.",
+      "required_action": "Codificar ou validar explicitamente a invariância verdict=debate implica debate_required=true e adicionar teste contrafactual determinístico."
+    }
+  ],
+  "deferred": [],
+  "rejected": [
+    {
+      "summary": "Hipótese de que o Advisor vira Checker antecipado ou Planner paralelo refutada.",
+      "evidence": "docs/WORK_MODEL.md e prompts/advisor.md distinguem os quatro papéis e vedam ao Advisor auditar diff implementado, conformidade de specs fechadas ou produzir especificação completa.",
+      "location": "docs/WORK_MODEL.md §2; prompts/advisor.md#distinção-de-papéis"
+    },
+    {
+      "summary": "Hipótese de que tier heavy sozinho aciona Advisor refutada.",
+      "evidence": "Os contratos exigem incerteza material adicional e listam heavy sem incerteza material como non-trigger; o teste direcionado passou.",
+      "location": "docs/WORK_MODEL.md §§3-4; prompts/orchestrator-playbook.md §1; scripts/tests/test_advisor_policy.py"
+    },
+    {
+      "summary": "Hipótese de fallback same-family sem marcação ou sob required refutada.",
+      "evidence": "Sob preferred, os contratos exigem advisor_independence: degraded_same_family e fallback_reason; sob required, exigem bloqueio. Os testes direcionados passaram.",
+      "location": "docs/WORK_MODEL.md §6; prompts/orchestrator-perfis.md#independência-do-advisor"
+    },
+    {
+      "summary": "Hipótese de propagação incondicional da autoria do Advisor refutada.",
+      "evidence": "A autoria permanece fora de effective_authors salvo incorporação substantiva direta à spec ou content_paths; os dois casos foram cobertos e passaram na suíte.",
+      "location": "docs/WORK_MODEL.md §9; prompts/advisor.md#autoria-estrita"
+    },
+    {
+      "summary": "Hipótese de vereditos restritivos poderem ser ignorados silenciosamente refutada, exceto pela inconsistência específica apontada em R2.",
+      "evidence": "adjust, plan, debate, stop e debate_required:true são bloqueantes e exigem disposição formal antes da próxima ação material; a suíte cobre ausência e presença de disposição.",
+      "location": "docs/WORK_MODEL.md §8; prompts/orchestrator-playbook.md §4"
+    },
+    {
+      "summary": "Hipótese de autoautorização ou autoabertura de Debate pelo Advisor refutada.",
+      "evidence": "O papel não pode autorizar nem despachar agentes; debate_required é recomendação cuja abertura depende de usuário ou autorização prévia.",
+      "location": "prompts/advisor.md#limites-do-papel-e-vedações; prompts/orchestrator-playbook.md §4"
+    },
+    {
+      "summary": "Hipótese de implementação antecipada do Modo Automático em T017 refutada.",
+      "evidence": "advisor_policy é documentada apenas como interface declarativa de enabled, triggers e max_calls; não há runtime, agendador ou despacho automático novo no diff.",
+      "location": "docs/WORK_MODEL.md §10; docs/PROJECT_CONFIGURATION.md"
+    },
+    {
+      "summary": "Hipótese de incompatibilidade do schema do Classificador com requested_roles advisor refutada.",
+      "evidence": "classification-result.schema.json aceita advisor em roles com o mesmo $defs/role dos demais papéis; prompts/classifier.md define tier normal/heavy e encaminha seleção por harness.",
+      "location": "schemas/classification-result.schema.json; prompts/classifier.md"
+    },
+    {
+      "summary": "Hipótese de ausência dos artefatos distribuídos ou de falha na suíte direcionada refutada.",
+      "evidence": "HEAD corresponde a eadf2ad35ee21e7b1a5a96fa992f36047ad45c63; o diff contém os 14 caminhos declarados, o manifesto lista 19 arquivos, git diff --check não reportou falhas e python3 -B -m unittest scripts/tests/test_advisor_policy.py passou com 33 testes.",
+      "location": "distribution-manifest.json; scripts/tests/test_advisor_policy.py"
+    },
+    {
+      "summary": "Hipótese de que a ausência do canonical_full_gate invalida esta revisão refutada.",
+      "evidence": "O briefing fixa verification_scope: targeted e canonical_full_gate.required_now: false; o contrato do Checker proíbe tratar essa ausência como deficiência nesta fase.",
+      "location": "prompts/checker-report-only.md#achados"
+    }
+  ]
+}

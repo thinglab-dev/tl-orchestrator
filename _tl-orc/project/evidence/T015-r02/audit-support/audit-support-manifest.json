@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "description": "Hardened experimental harness, bundle builders and audit tools used in T015-r02 paired replays",
+  "created_at": "2026-09-11T23:45:00Z",
+  "files": {
+    "audit_all_replays.py": {
+      "sha256": "568202f26a34ae25e24c5c9796c49a01070e3336827b5a3aaf94935da2226822",
+      "size_bytes": 2104
+    },
+    "audit_table.py": {
+      "sha256": "7d623a54cab7f72a2eef4ad9d65f8dab645123cb166530569dbca1ca02c4879e",
+      "size_bytes": 14786
+    },
+    "build_r02_review_bundle.py": {
+      "sha256": "b828f6caf6a3b44b496671432c12a3709568de44c8cc56e1bb5b86595c5c9b3b",
+      "size_bytes": 8011
+    },
+    "claude_transcript_adapter.py": {
+      "sha256": "51cfaa6538a3d1cfa56e1125adb2bca7669c5bd362f323ee9160fd1f244f130e",
+      "size_bytes": 35325
+    },
+    "regenerate_r01_ledgers.py": {
+      "sha256": "ad96502e8c2c9a008e966a9629930be571ef5cb037f2cd46a5bf97216f3d8a38",
+      "size_bytes": 3476
+    },
+    "run_r02_replays.py": {
+      "sha256": "5e25c592798353003ac8f825e837a2443a9bfba3c965a55d839dfaaa47d3e0fd",
+      "size_bytes": 19822
+    },
+    "run_single_replay.py": {
+      "sha256": "531920228883e094dc5d4da8162f7d9d404bb3acc66110c2dd2c1ed1f18a4492",
+      "size_bytes": 20934
+    },
+    "test_hardened_auditor.py": {
+      "sha256": "417bc17f38b4024fb61e3506bd379234c2ee704b19489806657c2ee3c58a148a",
+      "size_bytes": 7902
+    }
+  }
+}

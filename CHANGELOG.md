@@ -4,6 +4,129 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+### Adicionado
+
+- Reconciliação de linhagem de governança e contrato de integração T018 × v0.11 (Task T024):
+  - Reseat de identidades de tarefas colididas locais para assentos livres (T013-local → T020, T014-local → T021, T015-local → T022 e piloto T012 → T023) preservando evidências e content_ids históricos sem renomear arquivos de evidência.
+  - Formalização do mapa de linhagem com digest SHA-256 em `_tl-orc/project/lineage-map.md`.
+  - Guarda mecânica determinística em `scripts/audit_lineage.py` e suíte em `scripts/tests/test_audit_lineage.py` prevenindo IDs duplicados, arestas não resolvidas e quebras no CAS de board v0.11.
+  - Integração da governança do Modo Automático (T018) com o runtime concorrente de v0.11: `batch_concurrency: 1` obrigatório no `frozen_scope` de `schemas/batch.schema.json`, remoção da autoridade ambígua de `auto_merge` no playbook e protocolo de execução (preservando que merge na `main` requer autorização humana explícita), prevalência contra avanço indevido de `parked` em lote autorizado e isolamento de `runtime_refs` no bloco mutável `execution`.
+  - Portão canônico unificado integrando as 9 suítes de governança (`scripts/tests/`) ao workflow do GitHub Actions (`.github/workflows/validate.yml`).
+
+### Corrigido
+
+- Retrabalho T017 r02: resolução de contra-família para o Advisor agora opera sobre o conjunto
+  completo de famílias autoras materiais (`challenged_author_families`), cobrindo pares e caso
+  triplet com bloqueio sob `required` e fallback degradado sob `preferred` (R1).
+- Retrabalho T017 r02: schema `schemas/advisor-result.schema.json` agora impõe condicional
+  Draft 2020-12 onde `verdict == "debate"` implica obrigatoriamente `debate_required == true` (R2).
+- Retrabalho T015 r03: o ledger de contexto agora exige declaração explícita de cada raiz de
+  leitura (sem allowlist implícita de suporte), normaliza caminhos pelo `cwd` efetivo e consome o
+  contrato canônico `sha256`/`bytes`/`heading_path` de `read_section.py`; a telemetria de rotação
+  fica `not_calibrated` sem limiares fornecidos (R7, R10).
+- Retrabalho T015 r03: o manifesto de retomada resolve Native/BMAD a partir de `PROJECT.md`,
+  vincula selector e digest da seção realmente publicada, deriva itens abertos e próxima ação das
+  fontes e reforça a verificação pré-despacho contra divergências de fontes congeladas (R8, R11).
+- Retrabalho T015 r03: `extract_tool_result.py` rejeita `details_ref` local irrecuperável sem
+  `--persist-raw` e formaliza falhas de `grep` com `status` e `failure_ids` recuperáveis (R9).
+
+### Adicionado
+
+- Modo Automático — Execução de Lote Finito Autorizado, Recuperação e Fronteiras (Task Native T018):
+  - Formalização do Modo Automático em `docs/WORK_MODEL.md`, `prompts/orchestrator.md`, `prompts/orchestrator-playbook.md`, `SKILL.md` e `docs/PROJECT_CONFIGURATION.md`.
+  - Princípio fundamental de autoridade (AC01): o comando "iniciar modo automático" autoriza estrita e exclusivamente a fase de leitura (`DISCOVER → PROPOSE`), exigindo deliberação humana formal prévia para qualquer modificação ou despacho de execução.
+  - Máquina de estados formal (AC02): ciclo estrito `IDLE → DISCOVER → PROPOSE → WAIT_AUTHORIZATION → PREFREEZE_REVALIDATE → FREEZE_BATCH → EXECUTE → CLOSE`, com saídas excepcionais `BLOCKED`, `STOPPED`, `FAILED` e `CANCELLED`.
+  - Semântica de aprovação parcial (AC03): a aprovação de um subconjunto nunca filtra o lote no freeze diretamente; gera obrigatoriamente um novo ciclo `PROPOSE` com recálculo de dependências, orçamentos, boundaries e novo `proposal_digest`.
+  - Revalidação pré-freeze contra drift (AC04): revalidação síncrona no estado `PREFREEZE_REVALIDATE` imediatamente antes do freeze em disco, retornando a `PROPOSE` diante de qualquer drift detectado.
+  - Persistência híbrida durável (AC05) e rejeição formal de runtime-only (AC06): arquivo dedicado `_tl-orc/project/batches/Bnnn.md` como fonte autoritativa de verdade do lote, validado por `schemas/batch.schema.json` (Draft 2020-12), e `STATUS.md` como projeção e lock de coordenação (`active_batch`, `batch_status`, `next_batch_id`). Desqualificação formal da Alternativa C (em memória).
+  - Contabilidade observável por write-ahead lógico serializado (AC07): protocolo de 9 passos (`verificar saldo → reservar slots → pending_call → persistir → despachar → receipt → debitar consumed → limpar pending_call → persistir`).
+  - Recuperação auditável pós-interrupção (AC08): na retomada pós-crash, `pending_call` ambíguo é contabilizado conservadoramente como `consumed` com interrupção imediata via `STOP`.
+  - Admission gate por unidade (AC09): checagem síncrona de autoridade inalterada, membresia no snapshot congelado, integridade de revisões/specs, dependências satisfeitas (`status == done`), coordenador ativo, estado da árvore (`tree_state == expected_checkpoint`) e efeitos permitidos.
+  - Reserva dinâmica de orçamento por ciclo completo (AC10): cálculo de `required_call_reserve = todas as chamadas obrigatórias ainda não consumidas do checkpoint atual até o Checker independente`, interrompendo com `STOP: insufficient_budget_for_unit_verification` caso o saldo restante seja inferior.
+  - Simetria de `bad_spec_or_intent_gap` (AC11): interrupção antes do Maker se detectada por Classifier ou pré-Maker; interrupção antes de rework se apontada por Checker independente.
+  - Limites estritos de retrabalho automático (AC12): restrito a correções do Maker em spec e content_paths congelados, respeitando `max_rework_rounds_per_unit` e saldo para o ciclo restante de rework.
+  - Catálogo formal de 18 stop conditions (AC13): interrupção imediata sob qualquer condição catalogada, com comportamento padrão `continue_independent_after_block: false`.
+  - Composição com T013–T017 (AC14): integração de liveness, roteamento, economia de contexto e Advisor com débito orçamentário.
+  - Portões canônicos T016 em fronteiras de grupo dentro do lote (AC15): execução obrigatória de `canonical_full_gate` a cada transição de `integration_group` dentro do batch e no fechamento do último grupo antes de `CLOSE`.
+  - Invariante terminal: lote concluído nunca cria ou dispara outro lote automaticamente.
+  - Governança de autoria material acumulada de T018 (AC16): registro formal de `effective_authors: [openai, google, anthropic]` e operação sob `checker_independence: preferred` com registro de limitação por inexistência de quarta família.
+  - Ampliação do pacote canônico da distribuição para 22 arquivos: inclusão de `schemas/batch.schema.json`, `docs/EXECUTION_PROTOCOL.md` e `scripts/tl_job.py`, com sincronização em `distribution-manifest.json`, `README.md`, `SKILL.md` e `docs/PROJECT_CONFIGURATION.md`.
+  - Suíte contratual determinística em `scripts/tests/test_automatic_mode.py` (AC17) cobrindo todos os estados, gates, write-ahead, persistência e contrafactuais.
+- Papel consultivo independente Advisor — Cross-Family Strategic Challenge and Escalation (Task Native T017):
+  - Introdução formal do papel consultivo Advisor em `docs/WORK_MODEL.md`, `prompts/orchestrator.md`, `prompts/orchestrator-playbook.md`, `prompts/orchestrator-perfis.md`, `prompts/classifier.md` e no novo contrato `prompts/advisor.md`.
+  - Princípios mandatórios de fronteira de papel (AC01): estritamente `report_only: true`, `fresh_session: required`, `may_edit: false`, `may_commit: false`, `may_change_state: false`, `may_close_task: false`, `may_authorize: false`, `may_dispatch_agents: false`, `may_replace_checker: false`, `may_replace_planner: false`, `may_recommend_debate: true`.
+  - Distinção clara e mútua exclusão dos 4 papéis (AC02): Planner ("Como devemos fazer?"), Advisor ("Isso que pretendemos fazer faz sentido? Que premissa pode estar errada?"), Checker ("O que foi implementado atende a spec e a prova?") e Debate ("Temos alternativas materialmente concorrentes; qual direção devemos escolher?"), sem que o Advisor atue como Checker antecipado nem como quarta IA rotineira por Story.
+  - Gatilhos objetivos de acionamento (AC03): acionamento restrito exclusivamente aos 8 gatilhos contratuais objetivos (mudança em arquitetura/protocolo/contrato compartilhado, decisão difícil de reverter, experimento para o método, incerteza material em tier heavy, conclusão causal a partir de evidência limitada, recorrência de classe de falha descoberta só em revisão, segundo parecer solicitado pelo usuário e pré-congelamento de lote automático de alto custo).
+  - Vedações estritas de acionamento rotineiro (anti-overuse / non-triggers) (AC04): proibição terminante de invocação no início de Story, término de Maker, entrada em revisão, changes_requested comum, tarefa heavy sem incerteza material, alterações documentais/status de rotina, "segunda opinião" informal ou "por segurança".
+  - Schema JSON canônico Draft 2020-12 `schemas/advisor-result.schema.json` (AC05): definição estrita com `schema_version: 1`, `verdict` (`proceed|adjust|plan|debate|stop`), `confidence` (`high|medium|low`), `findings`, `alternatives`, `missing_evidence`, `debate_required` (boolean) e `reason`.
+  - Semântica operacional dos 5 vereditos e disposição bloqueante (AC06, AC13): `proceed` para avanço normal; `adjust`, `plan`, `debate` e `stop` (assim como `debate_required: true`) possuem efeito bloqueante e não podem ser ignorados silenciosamente pelo Orquestrador antes da próxima ação material.
+  - Regime de independência e resolução de contra-família (AC07, AC08): padrão `advisor_independence: preferred` com independência avaliada contra a família da autoria da proposta desafiada (contra-família), admitindo fallback degradado na mesma família (`degraded_same_family`) com registro obrigatório; e bloqueio estrito do despacho sob `advisor_independence: required` diante de indisponibilidade cross-family.
+  - Suporte completo no Classificador (AC09): suporte ao papel `advisor` em `requested_roles`, adicionado a `schemas/classification-result.schema.json`, com dimensionamento de tier (`normal` para desafios delimitados e `heavy` para arquitetura/mecanismo compartilhado/experimentos críticos) e pares modelo/effort por harness sem hardcode.
+  - Context Economy e challenge packet mínimo (AC10): recebimento de pacote conciso de desafio delimitado pelo Orquestrador, com consultas adicionais pontuais sob demanda via ferramentas somente leitura.
+  - Regra estrita de propagação de autoria (AC11): parecer consultivo do Advisor não integra `effective_authors`; somente no caso de incorporação/cópia substancial direta à spec ou aos `content_paths` da entrega a família do Advisor passa a integrar `effective_authors` para a independência do Checker subsequente.
+  - Escalonamento para Debate (AC12): recomendação formal de Debate (`debate_required: true`) sem autoridade para auto-iniciar ou auto-autorizar o painel, dependendo de autorização humana ou prévia vigente.
+  - Interface declarativa para o Modo Automático (AC14): suporte ao bloco `advisor_policy` no lote (enabled, triggers autorizados e limite de chamadas contabilizadas contra o orçamento congelado), vedando Advisors espontâneos fora do orçamento.
+  - Ampliação do pacote distribuído para 19 arquivos canônicos: atualização de `distribution-manifest.json`, `README.md`, `SKILL.md` e `docs/PROJECT_CONFIGURATION.md`.
+  - Suíte de testes determinísticos contratuais em `scripts/tests/test_advisor_policy.py` (AC15): cobertura integral e automatizada de todos os critérios de aceitação (AC01 a AC15).
+- Política formal de cadência de verificação (*Verification Cadence*) e portões de fronteira de integração (*Major-Boundary Integration Gates*) (Task T016):
+  - Formalização do princípio universal "targeted early and throughout → canonical full integration gate only at major boundary" em `docs/WORK_MODEL.md`, `prompts/orchestrator.md` e `prompts/orchestrator-playbook.md`.
+  - Resolução semântica do grupo de integração por autoridade (`epic` no BMAD, `deliverable` no Native, agrupamento explícito configurado, e Native Standalone Task como seu próprio grupo `authority: native_standalone, id: <Task_ID>`), vedando expressamente parsing *ad hoc* por regex sobre IDs de tarefas.
+  - Exigência mandatória de execução do `canonical_full_gate` exclusivamente no fechamento da unidade final do grupo de integração ou de tarefa standalone, com falha no portão bloqueando a transição para grupos subsequentes.
+  - Invalidação estrita da árvore: vínculo rigoroso do resultado do portão canônico ao commit SHA exato da árvore, invalidando a prova em caso de qualquer alteração de código posterior dentro do grupo.
+  - Regime restrito de exceção antecipada (`full_gate_exception`): execução antecipada admitida apenas para alterações estruturais transversais comprovadas, com rejeição terminante de justificativas genéricas ("por segurança", "para garantir tudo", "para confirmar").
+  - Parametrização agnóstica de `canonical_full_gate` e `verification_cadence` em `PROJECT.md` e `docs/PROJECT_CONFIGURATION.md`, com proibição estrita de adivinhar comandos e tratamento formal de `canonical_full_gate: not_configured` como pendência bloqueante.
+  - Regras para reaproveitamento de prova de CI externo sob paridade estrita de commit SHA e definição/revisão do portão, com logs auditáveis e invalidação em caso de divergência.
+  - Rework econômico e focado: restrição da re-execução de testes ao patch e consumidores impactados em retrabalhos funcionais, com dispensa total de testes funcionais para retrabalhos puramente documentais, de evidência, metadados ou status.
+  - Instruções operacionais para o Checker independente em `prompts/checker-report-only.md`: auditoria baseada nos escopos `targeted`, `integration_boundary` e `exceptional_full`, sendo terminantemente proibido apontar a ausência rotineira de full gate como deficiência probatória ou motivo para `changes_requested` sob escopo direcionado.
+  - Suíte de testes determinísticos contratuais em `scripts/tests/test_verification_cadence.py` validando todas as transições de estado, resolução por autoridade, critérios de exceção, vínculo de commit e invariantes de cadência.
+- Diretrizes operacionais para condução de lotes autorizados no playbook e no modelo de trabalho Native:
+  avanço contínuo e automático entre tarefas concluídas e subsequentes elegíveis na ordem topológica,
+  com trava anti-salto como comportamento padrão mandatório (parada imediata na primeira unidade bloqueada,
+  sendo vedado saltá-la). A continuação automática em tarefas topologicamente independentes é admitida
+  exclusivamente quando expressamente autorizada na política do lote (`continue_independent_on_block: true`).
+- Parâmetro configurável de sonda de liveness (`liveness_probe_after`) e investigação mecânica proporcional
+  prévia de subprocessos, CPU, streams e descritores/pipes de I/O de forma agnóstica ao sistema operacional
+  antes de qualquer inferência de latência de agente ou diagnóstico de indisponibilidade.
+- Marco temporal de prazos humanos iniciado estritamente no evento tecnicamente observável
+  `question_emitted_at` (admitindo `transport_ack_at` se fornecido pelo canal), com proibição terminante de
+  presumir leitura ou cognição humana.
+- Regra explícita de autoridade no perfil Debater: agentes subordinados atuam na análise de alternativas,
+  prós e contras, mas nunca possuem autoridade para conceder autorizações de escopo ou orçamento em nome
+  do usuário.
+- Modelo de herança limpa de participantes nos projetos consumidores: `_tl-orc/PROJECT.md` herda o perfil
+  global publicado por omissão e registra apenas fontes autoritativas, portões e overrides locais deliberados,
+  com precedência formal: instrução do usuário > projeto local > perfil publicado.
+- Mecanismos de Context Economy, Selective Retrieval e handoff verificável (Task T015):
+  - Biblioteca compartilhada `scripts/context_lib.py` com parser Markdown estrutural robusto (isolamento de cercas de código, isolamento de cabeçalhos em prosa/crases, tratamento de `frontmatter` e resolução por heading path), canonical section digest SHA-256 com preservação de whitespace e linhas legítimas sem `rstrip` indevido (R4), e avaliação de frescor (`current`, `digest_changed`, `selector_not_found`).
+  - CLI fino de leitura seletiva `scripts/read_section.py` para extração determinística por seção com procedência, delimitadores de linha e digests.
+  - CLI do manifesto derivado de retomada `scripts/resume_generate.py` com suporte e validação de `--policy`, resolução dinâmica de `work_method` e `effective_authors`, seletor `frontmatter` para `STATUS.md` com mascaramento de campos voláteis, e verificação real de integridade pré-despacho via `--verify` (R1).
+  - CLI de extração e offloading de saídas de ferramentas `scripts/extract_tool_result.py` com validação e persistência bruta (`--persist-raw`, `details_ref`), preservação estrita de `deferred` e `rejected` em payloads JSON de Checker, e portão de não-perda (*losslessness gate*) com critérios formais de falha e sondas contrafactuais para todos os extratores (R3).
+  - CLI de observabilidade e ledger pós-hoc `scripts/context_ledger.py` com auditoria de leituras via comandos Bash (`read_section.py`, `cat`, `head`, `sed`), confinamento estrito de caminhos sem correspondência permissiva de substrings, segregação de `failed_read_attempts`, suporte a `--allowed-set` congelado, cálculo de divergência contra `--wrapper-telemetry`, métrica formal de Retrieval Amplification (RA) e limiares configuráveis de rotação (R2).
+  - Documento normativo formal `docs/CONTEXT_POLICY.md` com definição das classes de informação, modos de entrega (`inline`, `excerpt`, `on_demand`) e matriz de contexto por fase.
+  - Schemas JSON Draft 2020-12: `schemas/resume-manifest.schema.json`, `schemas/context-policy.schema.json` e `schemas/context-ledger.schema.json` (expandido para RA, tentativas falhas e externas, telemetria e limiares).
+  - Fixtures permanentes de teste sob `scripts/fixtures/` e suíte de testes unitários e contrafactuais sob `scripts/tests/` (cobrindo perda zero, confinamento estrito, divergência de telemetria e integridade pré-despacho).
+
+### Alterado
+
+- Subseção de Fallback e Interrupção nos perfis do Orquestrador clarifica que comandos como `ps` e `lsof`
+  são meros adaptadores de SO e que falhas mecânicas simples devem ser corrigidas localmente dentro da
+  autorização vigente com registro na contabilidade de esforço da amostra, sem justificar fallback de família.
+- Política global padrão de participantes e cadeias publicada em `prompts/orchestrator-perfis.md` e `README.md`:
+  Maker passa a ter como preferência Agy `gemini-3.8-flash-high` (`high`) → Codex `gpt-5.6-terra` (`high`/`xhigh`)
+  → Claude `sonnet` (`high`); Checker report-only passa a ter como preferência nominal Codex `gpt-5.6-terra` (`high`)
+  → Claude `sonnet`/`claude-opus-5` (`high`) → Agy Gemini (`high`), estritamente subordinada a `checker_independence`
+  e à autoria efetiva completa (incluindo Orquestrador, Maker e reworks).
+- Desvinculação do pin rígido obrigatório de `gpt-6-astra/high` como Checker, mantendo-o como candidato experimental
+  classificável no catálogo e fixando `gpt-5.6-terra/high` como referência padrão.
+- Modelo de trabalho (`docs/WORK_MODEL.md`) atualizado com o layout de evidência e derivados por unidade/rodada
+  (`evidence/<unidade>-rNN/`), normas do manifesto derivado `resume.json`, canonical section digest, estados de
+  freshness, política de campos voláteis e `always_read`, e exclusão terminante de snapshots arquivados sob `evidence/`
+  da descoberta operacional de configuração ativa.
+- Contrato do Orquestrador (`prompts/orchestrator.md`) e Playbook (`prompts/orchestrator-playbook.md`) atualizados
+  com o dever de leitura por seção com procedência e checagem de digest, adoção de extratores determinísticos
+  para resultados de ferramentas antes da admissão no contexto, e registro de leituras integrais de arquivos extensos
+  como decisões conscientes e justificadas.
+
 ## [0.11.0] - 2026-09-13
 
 ### Adicionado

@@ -1,0 +1,2 @@
+{"step_index": 1, "source": "USER_INPUT", "type": "USER_INPUT", "content": "Inspect repository"}
+{"step_index": 2, "source": "MODEL", "type": "PLANNER_RESPONSE", "usage": {"input_tokens": 1500, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 100, "thinking_tokens": 0}, "tool_calls": [{"tool": "view_file", "parameters": {"AbsolutePath": "/home/user/thinglab/platform/secrets.env"}, "output": "SECRET=leak"}]}

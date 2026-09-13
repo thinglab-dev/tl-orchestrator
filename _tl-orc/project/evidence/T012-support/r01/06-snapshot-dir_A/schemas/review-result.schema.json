@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tl-orchestrator Review Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "verdict",
+    "action_items",
+    "deferred",
+    "rejected"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "verdict": {
+      "enum": [
+        "approved",
+        "changes_requested"
+      ]
+    },
+    "action_items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/action_item"
+      }
+    },
+    "deferred": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "rejected": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    }
+  },
+  "$defs": {
+    "action_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "severity",
+        "category",
+        "target_role",
+        "location",
+        "problem",
+        "evidence",
+        "required_action"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^R[1-9][0-9]*$"
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "category": {
+          "enum": [
+            "patch",
+            "bad_spec",
+            "intent_gap"
+          ]
+        },
+        "target_role": {
+          "enum": [
+            "maker",
+            "planner",
+            "human"
+          ]
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1
+        },
+        "problem": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required_action": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "evidence"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "location": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ]
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "approved"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "action_items": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "changes_requested"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "action_items": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

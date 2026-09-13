@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "checkpoint": "checkpoint-B",
+  "treatment": "reference",
+  "files": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/CODE_TREE_STATUS.txt",
+      "bytes": 73,
+      "sha256": "2f6fb4b308dbf65118c896a604eaeb8f3f9b6d961389ccd50a27d9bfb24a6fea"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/PROJECT.md",
+      "bytes": 22008,
+      "sha256": "b3b2f0bc2878389eb20297ea5dad888e0f1148dd924fd974200759f5aa2a9a46"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/checker-6-0a-r1.md",
+      "bytes": 10057,
+      "sha256": "3de73f599f706f87cee42e5b5d1598ed38c474eea23ebc1683e22cabec30b452"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/dev-report-6-0a.md",
+      "bytes": 5002,
+      "sha256": "07bba24b3c646e220d72954850e9fb56441f0937867e83cf31b0c04cd9839c36"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/spec-6-0a.md",
+      "bytes": 3111,
+      "sha256": "705998812b39fd7bda79e901b8fe7734581e94f03fec7127a7a2f5b7d1ff5988"
+    }
+  ],
+  "file_count": 5,
+  "aggregate_manifest_hash": "fb8d07890b08f735b47749ec6249546ad7b9046aadaeaa9547875d05eb9e0a50",
+  "allowed_set_hash": "532dddc273e86bb2a89a03989a2ccb74e4cf3b494cdff067a1f508d10e7c5ebb"
+}

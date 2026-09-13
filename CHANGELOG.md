@@ -6,6 +6,19 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ### Adicionado
 
+- Seleção Dinâmica de Primário — Desacoplamento entre Ranking Semântico e Fallback de Infraestrutura (Task Native T019):
+  - Desacoplamento formal entre avaliação semântica de qualidade (`recommended_primary` em `candidates[0]`) e despacho factual/recuperação de infraestrutura (`effective_primary`).
+  - Novo contrato de schema Draft 2020-12 em `schemas/classification-result-v3.schema.json` cobrindo a matriz fechada de 4 estados (`conclusive`, `underdetermined`, `awaiting_operator`, `infeasible`), `evaluations[]` granular por par (harness, modelo, effort) e `candidates[]` como autoridade única de ranking (R6, R12, R18).
+  - Minimum Technical Adequacy Gate (R10): pares avaliados com `technical_adequacy: "insufficient"` ou `"uncertain"` recebem `dispatchable: false` em `evaluations[]` e são estritamente excluídos de `candidates[]`, impedindo promoção indevida a fallback de infraestrutura.
+  - Estado `awaiting_operator` e parada formal (R11): empate semântico sob política `ask` ou sob política automática sem vencedor único emite `dispatch_role: "unassigned"` para todos os candidatos, zero primário e dispara STOP imediato (`AWAIT_AUTHORIZATION`) no Runtime.
+  - Matcher determinístico de `project_priority` (R13, R20): seletores de prioridade com precedência formal (`harness/model/effort` > `harness/model/*` > `harness/*`), resolvendo unicamente quando houver 1 match e transicionando para `awaiting_operator` em caso de exaustão, sem heurísticas alfabéticas ou ocultas.
+  - Disciplina econômica precisa (R1, R2, R16): `cost_basis: unknown` nunca perde desempate econômico; menor esforço (`medium < high`) só desempata dentro do mesmo modelo; `token_price_only` suporta apenas `unit_token_price`, vedando alegação de menor custo da tarefa sem medição ou proxy.
+  - Quota pressure desacoplada (R3): pressão de cota atua exclusivamente no Runtime no instante do despacho e não contamina o ranking semântico durável do Classificador.
+  - Preflight local vs remoto (R21): preflight puramente local falha sem debitar chamadas (`reservation released`); preflight remoto ou invocação de CLI compromete formalmente slot com write-ahead e auditoria.
+  - Máquina de fallback side-effect safe (R5, R14, R15, R22): classificação formal de desfechos em 4 classes (`PRE_DISPATCH_UNAVAILABLE`, `DISPATCH_FAILED_PROVEN_NO_EFFECT`, `DISPATCH_OUTCOME_AMBIGUOUS`, `SEMANTIC_FAILURE`), bloqueio absoluto de fallback diante de `DISPATCH_OUTCOME_AMBIGUOUS` (STOP imediato preservando workspace dirty) e exigência de reserva dinâmica `required_call_reserve` antes de acionar fallback.
+  - Validador canônico dual upstream distribuído em `scripts/validate_classification.py` (Draft 2020-12 em Python puro stdlib) suportando nativamente schemas v2 e v3 via `schema_version`, garantindo rollout opt-in sem regressão em projetos legados.
+  - Ampliação do pacote canônico da distribuição de 22 para exatamente 24 arquivos (adicionando `schemas/classification-result-v3.schema.json` e `scripts/validate_classification.py`), com sincronização integral em `distribution-manifest.json`, `README.md`, `SKILL.md` e `docs/PROJECT_CONFIGURATION.md`.
+  - Suíte contratual determinística em `scripts/tests/test_dynamic_primary_selection.py` cobrindo integralmente os invariantes R1 a R22.
 - Reconciliação de linhagem de governança e contrato de integração T018 × v0.11 (Task T024):
   - Reseat de identidades de tarefas colididas locais para assentos livres (T013-local → T020, T014-local → T021, T015-local → T022 e piloto T012 → T023) preservando evidências e content_ids históricos sem renomear arquivos de evidência.
   - Formalização do mapa de linhagem com digest SHA-256 em `_tl-orc/project/lineage-map.md`.

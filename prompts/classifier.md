@@ -50,12 +50,7 @@ de que precisar para executar.
 
 ## Decisão
 
-Escolha um par **modelo/effort por harness para cada papel solicitado**, incluindo os fallbacks
-mesmo quando o primeiro harness está disponível. Use somente pares autorizados do catálogo e
-respeite escolhas fixadas. Não reordene cadeias nem selecione o candidato a executar: isso cabe ao
-Orquestrador após conferir disponibilidade e a família dos Makers efetivos.
-
-Classifique cada papel pelo trabalho residual da fase, sem presumir que os três exigem o mesmo tier:
+Classifique cada papel pelo trabalho residual da fase, sem presumir que os papéis exigem o mesmo tier:
 
 | Tier | Sinais típicos |
 | :--- | :--- |
@@ -94,10 +89,47 @@ mais capacidade que um Maker numa execução já delimitada. Review depende do a
 das contraprovas necessárias, não só do tamanho do diff. Em rework, avalie achados e trabalho
 residual; não herde automaticamente o tier anterior.
 
-Se não houver par adequado e autorizado para um harness, mantenha sua posição e devolva
-`model: null` e `effort: null`, com motivo. Nunca invente um ID, use default oculto ou devolva um
-par insuficiente apenas para preencher a cadeia. Quota, autenticação e timeout são disponibilidade;
-não reduzem a capacidade necessária do trabalho.
+### Modos de classificação (v2 vs v3)
+
+A forma de selecionar e registrar os candidatos depende da versão de schema solicitada no briefing:
+
+#### 1. Modo Schema v2 (legado / `classification_schema_version: 2`)
+Escolha um par **modelo/effort por harness para cada papel solicitado**, na ordem da cadeia informada,
+incluindo os fallbacks mesmo quando o primeiro harness está disponível. Se não houver par adequado e
+autorizado para um harness, mantenha sua posição e devolva `model: null` e `effort: null`, com motivo.
+Não reordene cadeias nem selecione o primário: o Orquestrador despacha `candidates[0]` conforme a cadeia física.
+
+#### 2. Modo Schema v3 (seleção dinâmica de primário / `classification_schema_version: 3`)
+Desacople a avaliação semântica de mérito técnico da cadeia física de fallback:
+- **`evaluations[]` granular por par (R12):** Avalie individualmente cada par (harness, modelo, effort)
+  autorizado no catálogo para o papel, registrando `catalog_eligible`, `technical_adequacy` (`sufficient`,
+  `insufficient` ou `uncertain`), `dispatchable`, `evidence_ids`, `uncertainty` e `reason`. Pares sem modelo
+  autorizado recebem `catalog_eligible: false` e `dispatchable: false` (R7).
+- **Minimum Technical Adequacy Gate (R10):** Apenas pares avaliados com `technical_adequacy: "sufficient"`
+  recebem `dispatchable: true` e são admitidos em `candidates[]`. Pares com adequação `insufficient` ou
+  `uncertain` permanecem restritos a `evaluations[]` com `dispatchable: false` e NUNCA entram em `candidates[]`
+  nem são promovidos a fallback de infraestrutura.
+- **`candidates[]` como única autoridade de ranking (R6):** Ordene os candidatos suficientes em `candidates[]`
+  por mérito técnico e custo comprovado. Em estados resolvíveis, `candidates[0]` é o `recommended_primary`.
+- **Matriz fechada de 4 estados (R18):**
+  * `conclusive`: seleção unívoca por mérito técnico ou custo comprovado (`tie_break_applied: null`),
+    com exatamente 1 primário (`candidates[0]`, `dispatch_role: "primary"`), zero unassigned.
+  * `underdetermined`: empate semântico onde o custo é incomparável (`unknown`) ou idêntico, resolvido
+    por política do projeto com vencedor único (`tie_break_applied != null`), definindo exatamente 1 primário
+    em `candidates[0]`.
+  * `awaiting_operator`: empate semântico sob política `ask` ou política automática sem vencedor único
+    (exaustão ou ambiguidade entre seletores). `candidates >= 2`, todos com `dispatch_role: "unassigned"`,
+    zero primário, disparando STOP / `AWAIT_AUTHORIZATION` no Runtime (R11).
+  * `infeasible`: nenhum par atingiu adequação técnica suficiente (`candidates: []`), disparando STOP / `RECLASSIFY`.
+- **Regras de desempate e economia (R1, R2, R8, R13, R16, R20):**
+  * R1: `cost_basis: unknown` nunca perde um desempate econômico; a comparação com custo conhecido é
+    estritamente `economic comparison unavailable`.
+  * R2: Menor effort (`medium < high`) só desempata dentro do mesmo modelo ou com equivalência catalogada.
+  * R16: `token_price_only` suporta apenas `unit_token_price`; é proibido inferir menor custo da tarefa
+    (`expected_task_cost`) sem proxy oficial ou medição empírica observada.
+  * R20: O matcher de `project_priority` testa seletores em ordem: 0 matches -> ignora; 1 match -> vencedor único;
+    >1 matches -> não resolve e continua; fim da lista sem vencedor único -> transiciona para `awaiting_operator`.
+  * R3: Quota pressure não altera o ranking semântico durável; disponibilidade é governada no despacho pelo Runtime.
 
 Falhas de execução só acionam fallback quando comprovadamente de infraestrutura; a seleção também
 pula candidatos nulos, desabilitados ou inelegíveis conforme a política. Não use fallback para
@@ -105,35 +137,33 @@ contornar recusa de segurança, reduzir salvaguardas ou buscar uma resposta mais
 
 ## Resultado obrigatório
 
-Responda exclusivamente com um objeto JSON conforme
-[schemas/classification-result.schema.json](../schemas/classification-result.schema.json).
-Campos e enums mantêm a grafia do schema; a justificativa segue o idioma do projeto.
+Responda exclusivamente com um objeto JSON válido, sem texto ou blocos em volta:
 
-Use `schema_version: 2`. Copie `story_id`, `phase`, `context_revision` e `catalog_revision` sem
-alterá-los. Em `roles`, inclua exatamente os papéis solicitados.
-Para cada papel, informe tier, justificativa e os candidatos na ordem da cadeia recebida, uma vez
-por harness. Em cada candidato, informe harness, modelo, effort, `evidence_ids`, `cost_basis` e
-motivo da escolha ou da lacuna. `evidence_ids` contém somente IDs únicos presentes no briefing,
-pertinentes ao modelo e à tarefa. `cost_basis` declara o alcance da comparação:
-`local_observed`, `official_task_proxy`, `token_price_only` ou `unknown`. Ele identifica a base da
-estimativa de custo, não a evidência de capacidade; um proxy oficial não fornece o custo exato
-desta tarefa. Use `local_observed` apenas para medição local comparável fornecida;
-`official_task_proxy` para proxy oficial de tarefa; `token_price_only` quando há somente tarifa
-vigente; e `unknown` sem base econômica válida. Aplique-o ao dado econômico realmente disponível,
-não ao score de capacidade.
+### Quando solicitado Schema v2 (`classification_schema_version: 2`)
+Conforme [schemas/classification-result.schema.json](../schemas/classification-result.schema.json):
+- Use `schema_version: 2`. Copie `story_id`, `phase`, `context_revision` e `catalog_revision` sem alterá-los.
+- Em `roles`, inclua exatamente os papéis solicitados.
+- Para cada papel, informe `tier`, `reason` e `candidates` na ordem da cadeia recebida (uma vez por harness).
+- Em cada candidato, informe `harness`, `model`, `effort`, `evidence_ids`, `cost_basis` e `reason`.
 
-Quando `cost_basis` não for `unknown`, `evidence_ids` deve conter ao menos um ID econômico fornecido
-que sustente essa base; referência apenas de capacidade ou qualidade não satisfaz o vínculo. Com
-`cost_basis: unknown`, a lista pode ficar vazia ou citar fontes de capacidade, sem convertê-las em
-base econômica. Falta de prova de qualidade específica do papel não apaga uma referência econômica
-disponível: preserve-a no `cost_basis` correto e registre separadamente a incerteza de qualidade.
-Preço isolado ou benchmark não comparável não prova precisão do Checker nem menor custo por story.
-Não invente nem preencha fonte automaticamente para validar a saída; vínculo inválido exige a
-correção de contrato permitida, sem relaxar schema ou validação. Não afirme independência ou
-identidade de Makers efetivos se o briefing não as fornecer; o Orquestrador confere esses fatos ao
-resolver o despacho.
-Separe fatos, incertezas e condições concretas de reclassificação; use listas curtas.
-Confiança declarada não garante correção e não dispensa validação.
+### Quando solicitado Schema v3 (`classification_schema_version: 3`)
+Conforme [schemas/classification-result-v3.schema.json](../schemas/classification-result-v3.schema.json):
+- Use `schema_version: 3`. Copie `story_id`, `phase`, `context_revision` e `catalog_revision` sem alterá-los.
+- Em `roles`, para cada papel solicitado: informe `tier`, `selection_status` (`conclusive`, `underdetermined`,
+  `awaiting_operator`, `infeasible`), `tie_break_applied` (`null` ou identificador da regra aplicada),
+  `evaluations` (avaliação exaustiva de cada par do catálogo) e `candidates` (apenas os pares suficientes,
+  ordenados por ranking).
+- Em cada candidato de `candidates`: informe `harness`, `model`, `effort`, `dispatch_role` (`primary`, `fallback`
+  ou `unassigned`), `evidence_ids`, `cost_basis`, `uncertainty` e `reason`.
+
+### Disciplina de evidências e custo
+`cost_basis` declara o alcance da comparação: `local_observed`, `official_task_proxy`, `token_price_only` ou `unknown`.
+Ele identifica a base da estimativa de custo, não a evidência de capacidade; um proxy oficial não fornece o custo exato
+desta tarefa. Use `local_observed` apenas para medição local comparável fornecida; `official_task_proxy` para proxy oficial
+de tarefa; `token_price_only` quando há somente tarifa vigente; e `unknown` sem base econômica válida.
+Quando `cost_basis` não for `unknown`, `evidence_ids` deve conter ao menos um ID econômico fornecido que sustente essa base.
+Com `cost_basis: unknown`, a lista pode ficar vazia ou citar fontes de capacidade, sem convertê-las em base econômica.
+Não invente nem preencha fonte automaticamente para validar a saída.
 
 O resultado só orienta o despacho. A seleção efetiva, a família observada, a independência do
 Checker, a disponibilidade e as permissões são conferidas pelo Orquestrador. Não emita comandos,

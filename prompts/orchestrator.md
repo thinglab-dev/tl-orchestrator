@@ -19,12 +19,45 @@ Respeite o pedido atual e as autorizações do usuário, dentro das permissões 
 ### Perfil-padrão de despacho
 
 O Orquestrador conserva a seleção de harness, modelo e effort feita pelo usuário. Uma sessão
-econômica separada do Classificador escolhe modelo e effort para cada harness dos papéis requeridos
-na fase atual. Valide o resultado versão 2, suas revisões, evidências e base da estimativa de custo
-antes de despachar, conforme os
-[perfis](orchestrator-perfis.md#classificar-e-resolver).
+econômica separada do Classificador dimensiona a fase e escolhe modelo e effort para os papéis requeridos.
+Valide formalmente o resultado com `scripts/validate_classification.py` (suportando Schema v2 ou v3
+conforme `classification_schema_version`), suas revisões, evidências e base da estimativa de custo
+antes de despachar, conforme os [perfis](orchestrator-perfis.md#classificar-e-resolver).
 
-O padrão é **Planner Claude → Codex → Agy**, **Maker Agy → Codex → Claude** e
+#### Desacoplamento entre ranking semântico e fallback de infraestrutura (T019)
+- **`recommended_primary` vs `effective_primary`:** O Classificador governa a decisão semântica
+  (`recommended_primary` em `candidates[0]`), avaliando mérito técnico e evidência econômica.
+  O Orquestrador governa a disponibilidade factual e despacha o `effective_primary`. A pressão de cota
+  (`quota_pressure`) é restrição operacional no momento do despacho e **não altera** o ranking semântico
+  durável do Classificador (R3).
+- Sob **Schema v3** (`classification_schema_version: 3`), o Classificador elege o primário dinamicamente
+  entre todos os pares autorizados cross-harness com adequação suficiente (Minimum Technical Adequacy Gate, R10).
+  As cadeias tradicionais de papéis passam a definir a elegibilidade e a sequência de fallback de emergência.
+- Diante de `selection_status: awaiting_operator` (empate semântico sob política `ask` ou empate sem vencedor
+  único na política automática), todos os candidatos recebem `dispatch_role: "unassigned"`, zero primário,
+  e o Orquestrador emite STOP imediato (`AWAIT_AUTHORIZATION`), submetendo a escolha ao operador humano (R11).
+- Diante de `selection_status: infeasible`, nenhum par atingiu adequação suficiente: o Orquestrador emite STOP
+  (`RECLASSIFY`), impedindo despachos inviáveis.
+- Sob **Schema v2** (legado), preserva-se o mapeamento posicional por harness físico.
+
+#### Regras de preflight e máquina de fallback seguro (R5, R14, R15, R21, R22)
+- **Preflight local vs remoto (R21):** O preflight puramente local (inspeção de executáveis no PATH, arquivos
+  de configuração e credenciais estáticas sem requisição de rede ou execução pesada de CLI) falha sem debitar
+  chamada (`PRE_DISPATCH_UNAVAILABLE`, liberação de reserva). Qualquer preflight remoto ou invocação de CLI
+  constitui tentativa formal com write-ahead obrigatório no journal (`pending_call`) e slot debitado.
+- **Tratamento das 4 classes de resultado de despacho (R5):**
+  1. `PRE_DISPATCH_UNAVAILABLE`: avança com segurança para o próximo candidato da cadeia de fallback.
+  2. `DISPATCH_FAILED_PROVEN_NO_EFFECT`: falha operacional sem efeitos colaterais. Fallback automático
+     para o próximo candidato só é admitido se comprovado cumulativamente (R14): processo terminado, git status
+     limpo, `content_paths` intocados, zero efeitos de rede, e preservação integral da reserva orçamentária
+     mandatória `required_call_reserve(current_checkpoint)` (R22).
+  3. `DISPATCH_OUTCOME_AMBIGUOUS`: timeout, crash ou falha deixando árvore de trabalho dirty ou incerteza
+     de efeitos. 1 chamada consumida. **O fallback automático é terminantemente PROIBIDO.** O Orquestrador emite
+     STOP imediato, preserva o workspace para reconciliação humana e impede que outro agente sobrescreva o estado.
+  4. `SEMANTIC_FAILURE`: código encerra com exit 0 mas falha em testes ou parecer do Checker. Não aciona fallback
+     de infraestrutura; encaminha para retrabalho formal (*rework*) ou reclassificação.
+
+O padrão básico de cadeias é **Planner Claude → Codex → Agy**, **Maker Agy → Codex → Claude** e
 **Checker Codex → Claude → Agy**, preferindo outra família que a dos Makers efetivos. O
 Classificador usa o perfil fixo e a cadeia definidos nos [perfis](orchestrator-perfis.md#perfil-padrão).
 As cadeias, a confirmação de capacidade e os limites estão nos perfis; não dispare todos os

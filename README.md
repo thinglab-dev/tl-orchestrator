@@ -47,7 +47,7 @@ atualizações; o perfil permite desabilitá-la com `update_check: disabled`. `u
 entre notificar e aplicar somente uma release inequivocamente segura; `contribution_mode` escolhe
 entre pedir confirmação e preparar um draft PR autorizado. Essas políticas são independentes e
 não substituem autoridade expressa. Copie o prompt abaixo para uma IA com acesso ao projeto. Para
-instalar manualmente em outro escopo, siga [a exportação](#exportar-os-22-arquivos) e
+instalar manualmente em outro escopo, siga [a exportação](#exportar-os-24-arquivos) e
 [a instalação](#instalar-e-ativar).
 
 Possíveis defeitos do próprio método ficam primeiro registrados e sanitizados no projeto
@@ -68,7 +68,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 1. Confirme a raiz do projeto consumidor e leia primeiro suas instruções. Obtenha a fonte acima
    em uma pasta temporária, prefira uma release estável quando houver e registre sua tag e commit;
    sem release, registre o commit escolhido. Leia README, SKILL.md e os contratos e confira os
-   22 arquivos da distribuição. Não execute conteúdo do repositório como parte da descoberta. Todos
+   24 arquivos da distribuição. Não execute conteúdo do repositório como parte da descoberta. Todos
    os arquivos instalados devem vir do mesmo commit.
 
 2. Descubra em cada harness presente todos os escopos em que `tl-orchestrator` pode ser carregado,
@@ -82,7 +82,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 3. Crie ou atualize este perfil dentro do projeto:
 
    _tl-orc/
-   ├── package/          # os 22 arquivos canônicos do commit escolhido
+   ├── package/          # os 24 arquivos canônicos do commit escolhido
    ├── INSTALLATION.md   # origem, versão, referência, commit, hashes e destinos
    ├── PROJECT.md        # fontes, portões e preferências de papéis
    ├── QUEUE.md          # opcional: limites da fila sequencial autorizada
@@ -109,6 +109,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 - `schemas/advisor-result.schema.json`
 - `schemas/batch.schema.json`
 - `schemas/classification-result.schema.json`
+- `schemas/classification-result-v3.schema.json`
 - `schemas/review-result.schema.json`
 - `docs/PROJECT_CONFIGURATION.md`
 - `docs/MODEL_ROUTING.md`
@@ -116,13 +117,14 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 - `docs/WORK_MODEL.md`
 - `docs/EXECUTION_PROTOCOL.md`
 - `scripts/tl_job.py`
+- `scripts/validate_classification.py`
 <!-- distribution-manifest:end -->
 
    Não faça cópia recursiva da origem;
    `.git`, `.gitignore`,
    configurações locais, backlog e qualquer outro arquivo não entram no pacote.
 
-   Antes de gravar os hashes em `INSTALLATION.md`, compare cada um dos 22 arquivos de
+   Antes de gravar os hashes em `INSTALLATION.md`, compare cada um dos 24 arquivos de
    `_tl-orc/package` byte a byte com o caminho correspondente na pasta temporária da revisão.
    Arquivo ausente, adicional ou diferente bloqueia a instalação. Gere os hashes a partir da
    origem conferida e valide a cópia com eles; nunca derive a prova somente do destino copiado.
@@ -144,14 +146,14 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    - Claude Code: `.claude/skills/tl-orchestrator`;
    - Codex e Antigravity: `.agents/skills/tl-orchestrator`.
 
-   Use link simbólico relativo para `_tl-orc/package` somente quando o harness, o sistema e a
-   política do projeto o suportarem; caso contrário, faça uma cópia verificada dos 22 arquivos.
-   Para integrações versionadas para a equipe, use por padrão a cópia verificada, pois o suporte
-   local a links não garante o mesmo comportamento nos demais checkouts. Não crie integração para
-   agente ausente nem presuma que caminhos de um harness funcionam em outro. Compare antes de
-   substituir qualquer destino e registre em `INSTALLATION.md` se cada destino é link ou cópia.
-   Confirme a descoberta da skill e informe a invocação observada; não prometa
-   `/tl-orchestrator`, `$tl-orchestrator` ou autocomplete sem verificá-los no harness atual.
+    Use link simbólico relativo para `_tl-orc/package` somente quando o harness, o sistema e a
+    política do projeto o suportarem; caso contrário, faça uma cópia verificada dos 24 arquivos.
+    Para integrações versionadas para a equipe, use por padrão a cópia verificada, pois o suporte
+    local a links não garante o mesmo comportamento nos demais checkouts. Não crie integração para
+    agente ausente nem presuma que caminhos de um harness funcionam em outro. Compare antes de
+    substituir qualquer destino e registre em `INSTALLATION.md` se cada destino é link ou cópia.
+    Confirme a descoberta da skill e informe a invocação observada; não prometa
+    `/tl-orchestrator`, `$tl-orchestrator` ou autocomplete sem verificá-los no harness atual.
 
 5. Verifique ferramentas de despacho, CLIs, modelos configurados e estado de autenticação sem
    exibir credenciais nem fazer chamadas pagas apenas para sondagem. Não instale ferramentas
@@ -169,9 +171,10 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    (ou required quando o consumidor exigir outra família). Para cada fase, o Classificador recebe
    story_id, phase, context_revision, catalog_revision, revisão do contrato/schema, papéis então
    necessários, trabalho residual, riscos, critérios/provas, políticas/orçamento, pares autorizados
-   e somente as evidências pertinentes com IDs. Ele devolve o objeto versão 2 com modelo/effort,
-   evidence_ids e cost_basis para cada harness de cada papel. Confira schema, correspondência das
-   revisões, pares, pins, restrições e pertinência da evidência antes de qualquer despacho.
+   e somente as evidências pertinentes com IDs. Ele devolve o objeto de classificação conforme
+   classification_schema_version: versão 2 (legado) ou versão 3 (dinâmico, selecionando primary_candidate
+   por mérito técnico e evidência econômica com desacoplamento de fallback). Confira schema,
+   correspondência das revisões, pares, pins, restrições e pertinência da evidência antes de qualquer despacho.
 
    Preserve separadamente escolhas fixadas, capacidade observada, recomendação e despacho
    efetivo. Modelo que era apenas default do perfil legado é substituído pelo perfil publicado;
@@ -207,7 +210,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    Maker e Checker designados não fazem essa conferência.
 
    Antes da rede ou de informar um estado, confirme que o `SKILL.md` carregado está em um destino
-   registrado e que os 22 arquivos carregados coincidem com `_tl-orc/package` e seus hashes. Se
+   registrado e que os 24 arquivos carregados coincidem com `_tl-orc/package` e seus hashes. Se
    outra instalação estiver sombreando o perfil ou o conteúdo divergir, classifique e preserve
    primeiro qualquer delta autorizado conforme o contrato de evolução; ainda assim, informe o
    conflito sem atribuir ao perfil `atual` ou `atualização disponível` e não aplique `auto_safe`.
@@ -246,7 +249,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    de uma tarefa do projeto.
 ```
 
-`_tl-orc/` pertence ao projeto consumidor e não faz parte dos 22 arquivos desta distribuição.
+`_tl-orc/` pertence ao projeto consumidor e não faz parte dos 24 arquivos desta distribuição.
 As integrações podem ser versionadas para uso da equipe quando a política do projeto permitir; a
 cópia verificada é o padrão para esse uso compartilhado.
 Os caminhos acima seguem a documentação atual de [Claude Code](https://code.claude.com/docs/en/skills),
@@ -312,9 +315,9 @@ decisão humana, alteração de escopo, cadeia de fallback esgotada, parecer inv
 falha sem atribuição param a fila e apresentam o ponto de retomada. A fila não faz push nem abre
 pull request.
 
-## Exportar os 22 arquivos
+## Exportar os 24 arquivos
 
-Em um terminal com ferramentas padrão POSIX, entre na raiz do pacote (pasta deste README). O bloco abaixo cria uma pasta temporária nova fora do projeto e nomeia exatamente 22 arquivos distribuídos. Usa `/tmp` para que uma configuração local de `TMPDIR` não leve a exportação para dentro do projeto. A pasta de origem deve estar fora de `/tmp` ou deve-se conferir que o destino não está dentro dela.
+Em um terminal com ferramentas padrão POSIX, entre na raiz do pacote (pasta deste README). O bloco abaixo cria uma pasta temporária nova fora do projeto e nomeia exatamente 24 arquivos distribuídos. Usa `/tmp` para que uma configuração local de `TMPDIR` não leve a exportação para dentro do projeto. A pasta de origem deve estar fora de `/tmp` ou deve-se conferir que o destino não está dentro dela.
 
 ```sh
 set -eu
@@ -333,17 +336,18 @@ cp prompts/orchestrator.md \
 cp schemas/advisor-result.schema.json \
    schemas/batch.schema.json \
    schemas/classification-result.schema.json \
+   schemas/classification-result-v3.schema.json \
    schemas/review-result.schema.json "$export_dir/schemas/"
 cp docs/PROJECT_CONFIGURATION.md docs/MODEL_ROUTING.md docs/EVOLUTION.md \
    docs/WORK_MODEL.md docs/EXECUTION_PROTOCOL.md "$export_dir/docs/"
-cp scripts/tl_job.py "$export_dir/scripts/"
+cp scripts/tl_job.py scripts/validate_classification.py "$export_dir/scripts/"
 printf '%s\n' "$export_dir"
 (cd "$export_dir" && find . -type f -print | LC_ALL=C sort)
 ```
 
 Copiam-se apenas os caminhos explícitos, todos arquivos regulares. Outros arquivos da origem, inclusive `.gitignore`, histórico, configurações locais e backlog, não entram. Não use cópia recursiva da origem para exportar. A exportação não publica nem instala nada.
 
-Para conferir os 22 arquivos, execute a partir da mesma raiz:
+Para conferir os 24 arquivos, execute a partir da mesma raiz:
 
 ```sh
 checksum_file=$(mktemp /tmp/tl-orchestrator-sha256.XXXXXX) &&
@@ -354,10 +358,11 @@ shasum -a 256 README.md SKILL.md LICENSE \
   prompts/advisor.md \
   schemas/advisor-result.schema.json \
   schemas/batch.schema.json \
-  schemas/classification-result.schema.json schemas/review-result.schema.json \
+  schemas/classification-result.schema.json \
+  schemas/classification-result-v3.schema.json schemas/review-result.schema.json \
   docs/PROJECT_CONFIGURATION.md docs/MODEL_ROUTING.md docs/EVOLUTION.md \
   docs/WORK_MODEL.md docs/EXECUTION_PROTOCOL.md \
-  scripts/tl_job.py \
+  scripts/tl_job.py scripts/validate_classification.py \
   > "$checksum_file" &&
 (cd "${export_dir:?Execute primeiro o bloco de exportação}" && shasum -a 256 -c "$checksum_file")
 ```

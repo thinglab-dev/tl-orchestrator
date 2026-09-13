@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "package_file_count": 22,
+  "package_file_count": 24,
   "package_files": [
     "README.md",
     "SKILL.md",
@@ -17,12 +17,14 @@
     "schemas/advisor-result.schema.json",
     "schemas/batch.schema.json",
     "schemas/classification-result.schema.json",
+    "schemas/classification-result-v3.schema.json",
     "schemas/review-result.schema.json",
     "docs/PROJECT_CONFIGURATION.md",
     "docs/MODEL_ROUTING.md",
     "docs/EVOLUTION.md",
     "docs/WORK_MODEL.md",
     "docs/EXECUTION_PROTOCOL.md",
-    "scripts/tl_job.py"
+    "scripts/tl_job.py",
+    "scripts/validate_classification.py"
   ]
 }

@@ -13,7 +13,7 @@ spec_author: orchestrator
 spec_revision: 124cdbab8122d6bc
 rework_round: 0
 affects_context: []
-content_paths: [distribution-manifest.json, README.md, SKILL.md, docs/PROJECT_CONFIGURATION.md, docs/WORK_MODEL.md, prompts/classifier.md, prompts/orchestrator.md, prompts/orchestrator-perfis.md, schemas/classification-result-v3.schema.json, scripts/validate_classification.py, scripts/tests/test_dynamic_primary_selection.py, CHANGELOG.md]
+content_paths: [distribution-manifest.json, README.md, SKILL.md, docs/PROJECT_CONFIGURATION.md, docs/WORK_MODEL.md, prompts/classifier.md, prompts/orchestrator.md, prompts/orchestrator-perfis.md, schemas/classification-result-v3.schema.json, scripts/validate_classification.py, scripts/tests/test_dynamic_primary_selection.py, scripts/tests/test_automatic_mode.py, CHANGELOG.md]
 content_id: unknown até a implementação
 effective_authors: [openai, google, anthropic]
 checker_independence: preferred

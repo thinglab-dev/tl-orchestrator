@@ -4,6 +4,21 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-13
+
+### Adicionado
+
+- Execução concorrente multi-story em worktrees isolados com supervisor Python stdlib: Worktree
+  Pool de capacidade limitada e concessão atômica, Scope Arbiter fail-closed para impedir colisão
+  entre `content_paths`, Merge Queue Serializada FIFO para manter um único merge em voo e varredura
+  de worktrees órfãos por expiração de heartbeat.
+- Atualização CAS do board por `state_revision`, ponto de entrada `tl_run_story.py` para enfileirar e
+  avançar somente o topo da fila de merge, e testes offline de contenção, conflitos, FIFO, leases
+  expiradas e escrita concorrente do `STATUS.md`.
+
+- Recuperação de itens de merge abandonados por timestamp e retentativa com carência ao persistir
+  o estado terminal, evitando bloqueio permanente da fila após queda ou contenção transitória.
+
 ## [0.10.0] - 2026-09-13
 
 ### Adicionado
@@ -548,3 +563,4 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 [0.3.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.2.2...v0.3.0
 [0.4.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.3.0...v0.4.0
 [0.2.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.1.5...v0.2.0
+[0.11.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.10.0...v0.11.0

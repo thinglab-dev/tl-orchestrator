@@ -236,6 +236,9 @@
           },
           "then": {
             "properties": {
+              "tie_break_applied": {
+                "type": "null"
+              },
               "candidates": {
                 "type": "array",
                 "minItems": 2,

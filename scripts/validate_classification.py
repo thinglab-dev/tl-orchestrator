@@ -304,6 +304,8 @@ def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str
                 if candidates[idx].get("dispatch_role") != "fallback":
                     errors.append(f"roles.{role_name}: candidate[{idx}] must have dispatch_role == \"fallback\" in underdetermined status")
     elif status == "awaiting_operator":
+        if tie_break is not None:
+            errors.append(f"roles.{role_name}: awaiting_operator status requires tie_break_applied to be null")
         if len(candidates) < 2:
             errors.append(f"roles.{role_name}: awaiting_operator status requires at least 2 candidates")
         for idx, c in enumerate(candidates):

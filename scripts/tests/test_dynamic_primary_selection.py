@@ -674,6 +674,7 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
         # Branch 2: awaiting_operator
         awaiting_branch = all_of[2]
         self.assertEqual(awaiting_branch["if"]["properties"]["selection_status"]["const"], "awaiting_operator")
+        self.assertEqual(awaiting_branch["then"]["properties"]["tie_break_applied"]["type"], "null")
         self.assertEqual(awaiting_branch["then"]["properties"]["candidates"]["minItems"], 2)
         self.assertEqual(
             awaiting_branch["then"]["properties"]["candidates"]["items"]["properties"]["dispatch_role"]["const"],
@@ -767,8 +768,9 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
         self.assertTrue(any("non-empty tie_break_applied" in e for e in errs))
 
         # --- C. AWAITING_OPERATOR ---
-        # Valid: 2 candidates, both unassigned
-        self.assertTrue(validate_classification_data(make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_un, cand_claude_un]))[0])
+        # Valid: 2 candidates, both unassigned, tie_break_applied=None
+        v, errs = validate_classification_data(make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_un, cand_claude_un]))
+        self.assertTrue(v, f"Valid awaiting_operator rejected: {errs}")
         # Reject: less than 2 candidates
         self.assertFalse(validate_classification_data(make_payload("awaiting_operator", None, [eval_codex], [cand_codex_un]))[0])
         # Reject: candidate[0] is primary
@@ -779,6 +781,14 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
         self.assertFalse(validate_classification_data(make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_un, cand_claude_pri]))[0])
         # Reject: candidate[1] is fallback
         self.assertFalse(validate_classification_data(make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_un, cand_claude_fb]))[0])
+        # Reject: tie_break_applied is "ask"
+        v, errs = validate_classification_data(make_payload("awaiting_operator", "ask", [eval_codex, eval_claude], [cand_codex_un, cand_claude_un]))
+        self.assertFalse(v)
+        self.assertTrue(any("awaiting_operator status requires tie_break_applied to be null" in e for e in errs))
+        # Reject: tie_break_applied is "project_priority: ..."
+        v, errs = validate_classification_data(make_payload("awaiting_operator", "project_priority: codex/*/*", [eval_codex, eval_claude], [cand_codex_un, cand_claude_un]))
+        self.assertFalse(v)
+        self.assertTrue(any("awaiting_operator status requires tie_break_applied to be null" in e for e in errs))
 
         # --- D. INFEASIBLE ---
         # Valid: empty candidates, null tie_break
@@ -799,6 +809,35 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
         v, errs = validate_classification_data(make_payload("infeasible", "some_tie_break", [eval_insuf], []))
         self.assertFalse(v)
         self.assertTrue(any("infeasible status requires tie_break_applied to be null" in e for e in errs))
+
+        # --- E. PARITY CHECK ON STATE MATRIX ---
+        parity_cases = [
+            ("conclusive_valid", True, make_payload("conclusive", None, [eval_codex], [cand_codex_pri])),
+            ("conclusive_fb_at_0", False, make_payload("conclusive", None, [eval_codex], [cand_codex_fb])),
+            ("conclusive_pri_at_1", False, make_payload("conclusive", None, [eval_codex, eval_claude], [cand_codex_pri, cand_claude_pri])),
+            ("conclusive_with_tb", False, make_payload("conclusive", "tb", [eval_codex], [cand_codex_pri])),
+            ("underdetermined_valid", True, make_payload("underdetermined", tb_valid, [eval_codex], [cand_codex_pri])),
+            ("underdetermined_empty_cands", False, make_payload("underdetermined", tb_valid, [eval_codex], [])),
+            ("underdetermined_fb_at_0", False, make_payload("underdetermined", tb_valid, [eval_codex], [cand_codex_fb])),
+            ("underdetermined_un_at_0", False, make_payload("underdetermined", tb_valid, [eval_codex], [cand_codex_un])),
+            ("underdetermined_pri_at_1", False, make_payload("underdetermined", tb_valid, [eval_codex, eval_claude], [cand_codex_pri, cand_claude_pri])),
+            ("underdetermined_un_at_1", False, make_payload("underdetermined", tb_valid, [eval_codex, eval_claude], [cand_codex_pri, cand_claude_un])),
+            ("underdetermined_null_tb", False, make_payload("underdetermined", None, [eval_codex], [cand_codex_pri])),
+            ("underdetermined_empty_tb", False, make_payload("underdetermined", "", [eval_codex], [cand_codex_pri])),
+            ("awaiting_valid", True, make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_un, cand_claude_un])),
+            ("awaiting_1_cand", False, make_payload("awaiting_operator", None, [eval_codex], [cand_codex_un])),
+            ("awaiting_pri_at_0", False, make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_pri, cand_claude_un])),
+            ("awaiting_fb_at_0", False, make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_fb, cand_claude_un])),
+            ("awaiting_with_tb_ask", False, make_payload("awaiting_operator", "ask", [eval_codex, eval_claude], [cand_codex_un, cand_claude_un])),
+            ("awaiting_with_tb_priority", False, make_payload("awaiting_operator", "project_priority: codex/*/*", [eval_codex, eval_claude], [cand_codex_un, cand_claude_un])),
+            ("infeasible_valid", True, make_payload("infeasible", None, [eval_insuf], [])),
+            ("infeasible_pri_cand", False, make_payload("infeasible", None, [eval_insuf], [cand_codex_pri])),
+            ("infeasible_fb_cand", False, make_payload("infeasible", None, [eval_insuf], [cand_codex_fb])),
+            ("infeasible_un_cand", False, make_payload("infeasible", None, [eval_insuf], [cand_codex_un])),
+            ("infeasible_with_tb", False, make_payload("infeasible", "tb", [eval_insuf], [])),
+        ]
+        for name, expected, payload in parity_cases:
+            self.assertEqual(validate_classification_data(payload)[0], expected, f"Parity mismatch in Python validator for {name}")
 
     def test_r11_hygiene_guard_no_private_scratch_paths_in_t019_content_paths(self) -> None:
         """Finding R11: Hygiene guard proving no private scratch or machine paths exist in T019 content paths."""
@@ -909,6 +948,8 @@ const suite = [
   { name: 'awaiting_1_cand', expected: false, payload: makePayload('awaiting_operator', null, [cUn]) },
   { name: 'awaiting_pri_at_0', expected: false, payload: makePayload('awaiting_operator', null, [cPri, cUn]) },
   { name: 'awaiting_fb_at_0', expected: false, payload: makePayload('awaiting_operator', null, [cFb, cUn]) },
+  { name: 'awaiting_with_tb_ask', expected: false, payload: makePayload('awaiting_operator', 'ask', [cUn, cUn]) },
+  { name: 'awaiting_with_tb_priority', expected: false, payload: makePayload('awaiting_operator', 'project_priority: codex/*/*', [cUn, cUn]) },
 
   // Infeasible
   { name: 'infeasible_valid', expected: true, payload: makePayload('infeasible', null, []) },

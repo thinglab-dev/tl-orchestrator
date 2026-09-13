@@ -4,6 +4,17 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-13
+
+### Adicionado
+
+- Protocolo de Pipelining Assíncrono com Git Worktrees (`docs/EXECUTION_PROTOCOL.md` e `prompts/orchestrator-playbook.md`):
+  - Desacoplamento da fase de entrega (`phase_deliver`): a abertura de PR (`gh pr create`) não bloqueia mais a sessão aguardando de forma síncrona o CI remoto do GitHub Actions.
+  - O monitoramento do PR é delegado com auto-merge atômico (`--auto --squash --delete-branch`), liberando imediatamente a capacidade para admitir e codificar a próxima story independente no DAG em um worktree isolado.
+  - Heartbeat e fencing de leases para recuperação atômica de locks órfãos (`session.lock`) em caso de encerramento abrupto do processo, eliminando travamentos residuais sem intervenção manual.
+  - Orçamento estrito de 2 rodadas de revisão Maker ↔ Checker com estacionamento automático (`parked`) e detector de oscilação de diff idêntico para assegurar autonomia contínua durante a madrugada.
+  - Cache local de gates obrigatórios por hash de árvore de arquivos (`tree_sha`) para acelerar conferências idempotentes.
+
 ## [0.9.0] - 2026-09-12
 
 ### Adicionado

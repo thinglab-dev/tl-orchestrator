@@ -158,15 +158,17 @@ Maker com esse briefing. Não pergunte novamente pelo despacho de R1–R4 ou equ
 correção, renove as provas afetadas, classifique a fase `review` para a árvore atual e envie-a a
 uma **nova** sessão do Checker resolvido pela política de despacho. O limite padrão é duas
 rodadas de correção após a primeira revisão, ou menor se `_tl-orc/QUEUE.md` o declarar. Ao atingir
-o limite, obter parecer inválido, encontrar achado de intenção/spec, exigir permissão adicional ou
-ver uma falha não atribuída, pare a fila e apresente a evidência e a próxima decisão necessária.
+o limite de 2 rodadas sem consenso, ao detectar oscilação de diff idêntico a round anterior, ou
+ao obter parecer inválido sem evidência executável, estacione a story como `parked` gravando `report.md`,
+solte a lease atômica e avance imediatamente para a próxima story elegível da fila, preservando a
+autonomia noturna sem travar o condutor.
 
-Com `approved`, execute somente as ações locais expressamente autorizadas em `QUEUE.md`, como
-registrar evidência, atualizar o board e criar um commit na branch dedicada. Nunca faça push,
-publique, abra pull request, altere outro módulo ou acione um sistema externo por causa da fila.
-Depois de registrar a conclusão, encerre a ativação. Uma tarefa agendada pode despertar o método
-mais tarde para escolher a próxima story; o pacote não mantém um processo, heartbeat ou loop
-próprio.
+Com `approved`, execute as ações locais e remotas expressamente autorizadas em `QUEUE.md`:
+registrar evidência, atualizar o board, comitar sem pular hooks e abrir o Pull Request (`auto_pr`).
+Quando `auto_pr` e `auto_merge` estiverem ativos, **nunca espere de forma síncrona pelo CI remoto**:
+registre o PR no `state.json` com merge automático (`--auto --squash --delete-branch`), libere o lock
+e inicie imediatamente a próxima story independente da fila em um Git worktree isolado (Pipelining
+Assíncrono), sobrepondo o tempo de CI de N ao planejamento e código de N+1.
 
 ## Discuss
 

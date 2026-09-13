@@ -167,8 +167,13 @@ Com `approved`, execute as ações locais e remotas expressamente autorizadas em
 registrar evidência, atualizar o board, comitar sem pular hooks e abrir o Pull Request (`auto_pr`).
 Quando `auto_pr` e `auto_merge` estiverem ativos, **nunca espere de forma síncrona pelo CI remoto**:
 registre o PR no `state.json` com merge automático (`--auto --squash --delete-branch`), libere o lock
-e inicie imediatamente a próxima story independente da fila em um Git worktree isolado (Pipelining
-Assíncrono), sobrepondo o tempo de CI de N ao planejamento e código de N+1.
+e avalie as próximas stories independentes da fila para execução em worktrees isolados. Consulte o
+Scope Arbiter antes de cada despacho: **despache concorrentemente somente se `claim_scope` retornar
+sucesso para todas as stories candidatas** e houver vaga retornada por `acquire_worktree_slot`.
+Dependência no DAG, `scope_conflict`, estado ilegível ou pool esgotado mantém a candidata serializada;
+nunca abra primeiro o worktree para arbitrar depois. PRs concluídos entram por `enqueue_merge` e
+somente o topo da Merge Queue Serializada pode chamar `gh pr merge`; o item seguinte aguarda o
+registro terminal do anterior, e um `failed` exige intervenção explícita na fila.
 
 ## Discuss
 

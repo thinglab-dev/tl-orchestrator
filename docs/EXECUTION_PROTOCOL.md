@@ -453,6 +453,37 @@ Para viabilizar execução autônoma prolongada (overnight) e eliminar o tempo o
 4. **Cache de Gates por Hash de Árvore (`tree_sha`):**
    - Resultados de portões locais obrigatórios são indexados pelo hash da árvore de arquivos (`tree_sha`). Quando um parecer do Checker ou uma conferência não alterar o conteúdo da árvore, a reexecução de gates idempotentes é recuperada do cache local instantaneamente.
 
+## Execução Concorrente Multi-Story
+
+O paralelismo real é permitido somente entre stories independentes no DAG e com escopos aceitos.
+O estado de coordenação fica em disco, fora dos worktrees publicados, e cada transição é protegida
+por lock exclusivo e publicada por substituição atômica. Os quatro mecanismos são:
+
+1. **Worktree Pool:** `acquire_worktree_slot(pool_dir, story_id, max_slots)` concede no máximo
+   `max_slots` worktrees ativos em `worktrees/<story-id>`. A concessão só existe depois da publicação
+   de `slot.json`; pool cheio responde `pool_exhausted`, sem abrir outro worktree. Ao terminar,
+   `release_worktree_slot` remove o worktree e libera a vaga.
+2. **Scope Arbiter:** antes de abrir o worktree, `claim_scope(story_id, paths, claims_file)` compara
+   `content_paths` sob o mesmo lock usado para publicar a reivindicação. Igualdade, ancestralidade
+   ou descendência de qualquer path ativo responde `scope_conflict`. Estado ilegível ou gravação
+   incerta falha fechado. `release_scope` ocorre somente depois que a story deixa de escrever.
+3. **Merge Queue Serializada:** `enqueue_merge(story_id, pr_number, queue_file)` acrescenta o PR ao
+   fim da fila FIFO persistida. Somente o item `pending` no topo pode executar `gh pr merge`; o
+   avanço fica serializado e registra `merged` ou `failed`. Durante o runner, o topo fica `merging`
+   com `started_at`; após 120 segundos sem estado terminal, a próxima chamada o recupera e tenta
+   novamente. A persistência terminal tolera por até 30 segundos a contenção transitória do lock.
+   Um topo `failed` bloqueia o seguinte até remoção explícita ou nova tentativa registrada, nunca
+   equivale implicitamente a sucesso. Quando houver mais de uma story para a mesma branch alvo,
+   esta fila substitui o despacho direto de auto-merge descrito no pipelining de pista única.
+4. **Varredura de órfãos:** `sweep_orphan_worktrees(pool_dir, stale_after_seconds)` compara o
+   `heartbeat_ts` da lease de cada `slot.json` com um limiar operacional maior que a tolerância
+   normal do heartbeat. Apenas leases que ultrapassam esse limiar são removidas com
+   `git worktree remove --force`; slot atual ou estado ilegível não é removido otimisticamente.
+
+Resultados de gates continuam indexados por `tree_sha` do worktree correspondente e nunca são
+compartilhados entre stories com árvores diferentes. Escritas no board usam comparação e troca da
+`state_revision`: divergência responde `state_revision_conflict` sem alterar `STATUS.md`.
+
 ## Limites
 
 O supervisor valida transporte, não mérito. Ele não faz lock distribuído, não certifica portões, não

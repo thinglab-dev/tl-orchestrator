@@ -20,11 +20,68 @@ VALID_SELECTION_STATUSES = {"conclusive", "underdetermined", "awaiting_operator"
 VALID_TECHNICAL_ADEQUACIES = {"sufficient", "insufficient", "uncertain"}
 VALID_DISPATCH_ROLES = {"primary", "fallback", "unassigned"}
 
+ROOT_ALLOWED_KEYS = {
+    "schema_version",
+    "story_id",
+    "phase",
+    "context_revision",
+    "catalog_revision",
+    "confidence",
+    "facts",
+    "uncertainties",
+    "reclassify_when",
+    "roles",
+}
+
+V2_ROLE_ALLOWED_KEYS = {"tier", "reason", "candidates"}
+V2_CANDIDATE_ALLOWED_KEYS = {
+    "harness",
+    "model",
+    "effort",
+    "evidence_ids",
+    "cost_basis",
+    "reason",
+}
+
+V3_ROLE_ALLOWED_KEYS = {
+    "tier",
+    "selection_status",
+    "reason",
+    "tie_break_applied",
+    "evaluations",
+    "candidates",
+}
+V3_EVALUATION_ALLOWED_KEYS = {
+    "harness",
+    "model",
+    "effort",
+    "catalog_eligible",
+    "technical_adequacy",
+    "dispatchable",
+    "cost_basis",
+    "evidence_ids",
+    "uncertainty",
+    "reason",
+}
+V3_CANDIDATE_ALLOWED_KEYS = {
+    "harness",
+    "model",
+    "effort",
+    "dispatch_role",
+    "degraded_same_family",
+    "evidence_ids",
+    "cost_basis",
+    "reason",
+}
+
 
 def validate_v2_role(role_name: str, role_data: dict[str, Any], errors: list[str]) -> None:
     if not isinstance(role_data, dict):
         errors.append(f"roles.{role_name} must be an object")
         return
+    for k in role_data.keys():
+        if k not in V2_ROLE_ALLOWED_KEYS:
+            errors.append(f"roles.{role_name}: unexpected additional property '{k}'")
     for req in ("tier", "reason", "candidates"):
         if req not in role_data:
             errors.append(f"roles.{role_name} missing required key: {req}")
@@ -42,6 +99,9 @@ def validate_v2_role(role_name: str, role_data: dict[str, Any], errors: list[str
         if not isinstance(c, dict):
             errors.append(f"roles.{role_name}.candidates[{idx}] must be an object")
             continue
+        for k in c.keys():
+            if k not in V2_CANDIDATE_ALLOWED_KEYS:
+                errors.append(f"roles.{role_name}.candidates[{idx}]: unexpected additional property '{k}'")
         for req in ("harness", "model", "effort", "evidence_ids", "cost_basis", "reason"):
             if req not in c:
                 errors.append(f"roles.{role_name}.candidates[{idx}] missing key: {req}")
@@ -61,17 +121,29 @@ def validate_v2_role(role_name: str, role_data: dict[str, Any], errors: list[str
         ev_ids = c.get("evidence_ids")
         if not isinstance(ev_ids, list):
             errors.append(f"roles.{role_name}.candidates[{idx}].evidence_ids must be array")
+        else:
+            for ev_id in ev_ids:
+                if not isinstance(ev_id, str) or not ev_id:
+                    errors.append(f"roles.{role_name}.candidates[{idx}].evidence_ids contains invalid item: {ev_id}")
+            if len(ev_ids) != len(set(ev_ids)):
+                errors.append(f"roles.{role_name}.candidates[{idx}].evidence_ids contains duplicate items")
         cost_basis = c.get("cost_basis")
         if cost_basis not in VALID_COST_BASES:
             errors.append(f"roles.{role_name}.candidates[{idx}].cost_basis invalid: {cost_basis}")
         elif cost_basis != "unknown" and isinstance(ev_ids, list) and len(ev_ids) < 1:
             errors.append(f"roles.{role_name}.candidates[{idx}]: evidence_ids required when cost_basis != unknown")
+        c_reason = c.get("reason")
+        if not isinstance(c_reason, str) or not c_reason:
+            errors.append(f"roles.{role_name}.candidates[{idx}].reason must be non-empty string")
 
 
 def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str]) -> None:
     if not isinstance(role_data, dict):
         errors.append(f"roles.{role_name} must be an object")
         return
+    for k in role_data.keys():
+        if k not in V3_ROLE_ALLOWED_KEYS:
+            errors.append(f"roles.{role_name}: unexpected additional property '{k}'")
     for req in ("tier", "selection_status", "reason", "tie_break_applied", "evaluations", "candidates"):
         if req not in role_data:
             errors.append(f"roles.{role_name} missing required key: {req}")
@@ -97,6 +169,9 @@ def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str
             if not isinstance(ev, dict):
                 errors.append(f"roles.{role_name}.evaluations[{idx}] must be an object")
                 continue
+            for k in ev.keys():
+                if k not in V3_EVALUATION_ALLOWED_KEYS:
+                    errors.append(f"roles.{role_name}.evaluations[{idx}]: unexpected additional property '{k}'")
             for req in ("harness", "model", "effort", "catalog_eligible", "technical_adequacy", "dispatchable", "evidence_ids", "uncertainty", "reason"):
                 if req not in ev:
                     errors.append(f"roles.{role_name}.evaluations[{idx}] missing key: {req}")
@@ -127,6 +202,24 @@ def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str
                     errors.append(f"roles.{role_name}.evaluations[{idx}]: dispatchable cannot be true unless technical_adequacy==sufficient and catalog_eligible==true")
                 if tech_adeq in ("insufficient", "uncertain") and dispatchable:
                     errors.append(f"roles.{role_name}.evaluations[{idx}]: insufficient/uncertain cannot be dispatchable")
+            cost_basis = ev.get("cost_basis")
+            if cost_basis is not None and cost_basis not in VALID_COST_BASES:
+                errors.append(f"roles.{role_name}.evaluations[{idx}].cost_basis invalid: {cost_basis}")
+            ev_ids = ev.get("evidence_ids")
+            if not isinstance(ev_ids, list):
+                errors.append(f"roles.{role_name}.evaluations[{idx}].evidence_ids must be array")
+            else:
+                for ev_id in ev_ids:
+                    if not isinstance(ev_id, str) or not ev_id:
+                        errors.append(f"roles.{role_name}.evaluations[{idx}].evidence_ids contains invalid item: {ev_id}")
+                if len(ev_ids) != len(set(ev_ids)):
+                    errors.append(f"roles.{role_name}.evaluations[{idx}].evidence_ids contains duplicate items")
+            uncertainty = ev.get("uncertainty")
+            if uncertainty is not None and not isinstance(uncertainty, str):
+                errors.append(f"roles.{role_name}.evaluations[{idx}].uncertainty must be string or null")
+            ev_reason = ev.get("reason")
+            if not isinstance(ev_reason, str) or not ev_reason:
+                errors.append(f"roles.{role_name}.evaluations[{idx}].reason must be non-empty string")
             if model and effort:
                 eval_by_pair[(harness, model, effort)] = ev
 
@@ -140,6 +233,9 @@ def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str
         if not isinstance(c, dict):
             errors.append(f"roles.{role_name}.candidates[{idx}] must be an object")
             continue
+        for k in c.keys():
+            if k not in V3_CANDIDATE_ALLOWED_KEYS:
+                errors.append(f"roles.{role_name}.candidates[{idx}]: unexpected additional property '{k}'")
         for req in ("harness", "model", "effort", "dispatch_role", "evidence_ids", "cost_basis", "reason"):
             if req not in c:
                 errors.append(f"roles.{role_name}.candidates[{idx}] missing key: {req}")
@@ -155,12 +251,26 @@ def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str
         dispatch_role = c.get("dispatch_role")
         if dispatch_role not in VALID_DISPATCH_ROLES:
             errors.append(f"roles.{role_name}.candidates[{idx}].dispatch_role invalid: {dispatch_role}")
+        degraded = c.get("degraded_same_family")
+        if degraded is not None and not isinstance(degraded, bool):
+            errors.append(f"roles.{role_name}.candidates[{idx}].degraded_same_family must be boolean")
         ev_ids = c.get("evidence_ids")
+        if not isinstance(ev_ids, list):
+            errors.append(f"roles.{role_name}.candidates[{idx}].evidence_ids must be array")
+        else:
+            for ev_id in ev_ids:
+                if not isinstance(ev_id, str) or not ev_id:
+                    errors.append(f"roles.{role_name}.candidates[{idx}].evidence_ids contains invalid item: {ev_id}")
+            if len(ev_ids) != len(set(ev_ids)):
+                errors.append(f"roles.{role_name}.candidates[{idx}].evidence_ids contains duplicate items")
         cost_basis = c.get("cost_basis")
         if cost_basis not in VALID_COST_BASES:
             errors.append(f"roles.{role_name}.candidates[{idx}].cost_basis invalid: {cost_basis}")
         elif cost_basis != "unknown" and isinstance(ev_ids, list) and len(ev_ids) < 1:
             errors.append(f"roles.{role_name}.candidates[{idx}]: evidence_ids required when cost_basis != unknown")
+        c_reason = c.get("reason")
+        if not isinstance(c_reason, str) or not c_reason:
+            errors.append(f"roles.{role_name}.candidates[{idx}].reason must be non-empty string")
         # Check against evaluations
         if model and effort:
             matching_ev = eval_by_pair.get((harness, model, effort))
@@ -216,6 +326,10 @@ def validate_classification_data(
     if not isinstance(data, dict):
         return False, ["classification result must be a JSON object"]
 
+    for k in data.keys():
+        if k not in ROOT_ALLOWED_KEYS:
+            errors.append(f"unexpected additional property '{k}' at root")
+
     # Basic root keys
     for req in (
         "schema_version",
@@ -265,8 +379,12 @@ def validate_classification_data(
         arr = data.get(arr_key)
         if not isinstance(arr, list):
             errors.append(f"{arr_key} must be an array")
-        elif arr_key in ("facts", "reclassify_when") and len(arr) < 1:
-            errors.append(f"{arr_key} must contain at least 1 item")
+        else:
+            if arr_key in ("facts", "reclassify_when") and len(arr) < 1:
+                errors.append(f"{arr_key} must contain at least 1 item")
+            for item in arr:
+                if not isinstance(item, str) or not item:
+                    errors.append(f"{arr_key} contains invalid item: {item}")
 
     roles = data.get("roles")
     if not isinstance(roles, dict) or len(roles) < 1:

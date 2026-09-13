@@ -453,6 +453,167 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
         # Budget = 2, fallback = 1, reserve for Checker = 2 -> 1 + 2 = 3 > 2 -> STOP (reserve violated)
         self.assertFalse(can_attempt_fallback(2, 1, 2))
 
+    def test_r06_patch_counterproof_candidates_cannot_have_uncertainty_or_extra_properties(self) -> None:
+        """Finding R6: candidates[] cannot declare uncertainty or extra properties."""
+        data = dict(self.base_v3)
+        data["roles"] = {
+            "maker": {
+                "tier": "heavy",
+                "selection_status": "conclusive",
+                "reason": "Test reason",
+                "tie_break_applied": None,
+                "evaluations": [
+                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
+                ],
+                "candidates": [
+                    self._make_cand("codex", "gpt-5.6-terra", "high", "primary"),
+                ],
+            }
+        }
+        # Baseline is valid
+        valid, errors = validate_classification_data(data)
+        self.assertTrue(valid, f"Expected valid baseline, got: {errors}")
+
+        # Inject uncertainty into candidates[0]
+        data["roles"]["maker"]["candidates"][0]["uncertainty"] = "low"
+        valid, errors = validate_classification_data(data)
+        self.assertFalse(valid, "Expected candidates[0] with uncertainty to be rejected")
+        self.assertTrue(any("unexpected additional property 'uncertainty'" in e for e in errors))
+
+        # Inject arbitrary extra property
+        del data["roles"]["maker"]["candidates"][0]["uncertainty"]
+        data["roles"]["maker"]["candidates"][0]["arbitrary_field"] = "bad"
+        valid, errors = validate_classification_data(data)
+        self.assertFalse(valid, "Expected candidates[0] with arbitrary field to be rejected")
+        self.assertTrue(any("unexpected additional property 'arbitrary_field'" in e for e in errors))
+
+    def test_r06_patch_counterproof_evaluations_cannot_have_extra_properties(self) -> None:
+        """Finding R6: evaluations[] cannot declare unauthorized properties."""
+        data = dict(self.base_v3)
+        data["roles"] = {
+            "maker": {
+                "tier": "heavy",
+                "selection_status": "conclusive",
+                "reason": "Test reason",
+                "tie_break_applied": None,
+                "evaluations": [
+                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
+                ],
+                "candidates": [
+                    self._make_cand("codex", "gpt-5.6-terra", "high", "primary"),
+                ],
+            }
+        }
+        data["roles"]["maker"]["evaluations"][0]["unknown_eval_key"] = "forbidden"
+        valid, errors = validate_classification_data(data)
+        self.assertFalse(valid, "Expected evaluations[0] with unknown key to be rejected")
+        self.assertTrue(any("unexpected additional property 'unknown_eval_key'" in e for e in errors))
+
+    def test_r06_patch_counterproof_root_and_role_cannot_have_extra_properties(self) -> None:
+        """Finding R6: root and roles cannot declare unauthorized properties."""
+        data = dict(self.base_v3)
+        data["roles"] = {
+            "maker": {
+                "tier": "heavy",
+                "selection_status": "conclusive",
+                "reason": "Test reason",
+                "tie_break_applied": None,
+                "evaluations": [
+                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
+                ],
+                "candidates": [
+                    self._make_cand("codex", "gpt-5.6-terra", "high", "primary"),
+                ],
+            }
+        }
+        # Inject extra at role level
+        data["roles"]["maker"]["extra_role_prop"] = True
+        valid, errors = validate_classification_data(data)
+        self.assertFalse(valid, "Expected role with extra property to be rejected")
+        self.assertTrue(any("unexpected additional property 'extra_role_prop'" in e for e in errors))
+
+        # Inject extra at root level
+        del data["roles"]["maker"]["extra_role_prop"]
+        data["extra_root_prop"] = 123
+        valid, errors = validate_classification_data(data)
+        self.assertFalse(valid, "Expected root with extra property to be rejected")
+        self.assertTrue(any("unexpected additional property 'extra_root_prop'" in e for e in errors))
+
+    def test_r06_patch_classifier_prompt_format_fixture_valid(self) -> None:
+        """Finding R6: Fixture formatted strictly per prompts/classifier.md must be fully valid."""
+        fixture = {
+            "schema_version": 3,
+            "story_id": "T019",
+            "phase": "implementation",
+            "context_revision": "tl-orchestrator@f6206f2+T019-spec-124cdbab8122d6bc",
+            "catalog_revision": "PROJECT.md-perfil-de-despacho-2026-09-07",
+            "confidence": "high",
+            "facts": [
+                "Implementation phase for story T019",
+                "13 content paths within scope",
+            ],
+            "uncertainties": [],
+            "reclassify_when": [
+                "Scope changes beyond R1-R22",
+            ],
+            "roles": {
+                "maker": {
+                    "tier": "heavy",
+                    "selection_status": "conclusive",
+                    "reason": "Agy elected as primary with high effort",
+                    "tie_break_applied": None,
+                    "evaluations": [
+                        {
+                            "harness": "agy",
+                            "model": "gemini-3.8-flash-high",
+                            "effort": "high",
+                            "catalog_eligible": True,
+                            "technical_adequacy": "sufficient",
+                            "dispatchable": True,
+                            "cost_basis": "token_price_only",
+                            "evidence_ids": ["price-flash", "transport-flash"],
+                            "uncertainty": None,
+                            "reason": "Adequate for heavy tier",
+                        },
+                        {
+                            "harness": "codex",
+                            "model": "gpt-5.6-terra",
+                            "effort": "high",
+                            "catalog_eligible": True,
+                            "technical_adequacy": "sufficient",
+                            "dispatchable": True,
+                            "cost_basis": "token_price_only",
+                            "evidence_ids": ["price-terra", "gpt56-coding"],
+                            "uncertainty": None,
+                            "reason": "Adequate fallback",
+                        },
+                    ],
+                    "candidates": [
+                        {
+                            "harness": "agy",
+                            "model": "gemini-3.8-flash-high",
+                            "effort": "high",
+                            "dispatch_role": "primary",
+                            "evidence_ids": ["price-flash", "transport-flash"],
+                            "cost_basis": "token_price_only",
+                            "reason": "Primary candidate",
+                        },
+                        {
+                            "harness": "codex",
+                            "model": "gpt-5.6-terra",
+                            "effort": "high",
+                            "dispatch_role": "fallback",
+                            "evidence_ids": ["price-terra", "gpt56-coding"],
+                            "cost_basis": "token_price_only",
+                            "reason": "Fallback candidate",
+                        },
+                    ],
+                }
+            },
+        }
+        valid, errors = validate_classification_data(fixture, expected_story="T019", expected_phase="implementation", expected_version=3)
+        self.assertTrue(valid, f"Expected classifier prompt fixture to be valid, got errors: {errors}")
+
 
 # Helper function implementing the project_priority matching logic per R13 and R20
 def match_project_priority(

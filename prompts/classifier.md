@@ -154,7 +154,7 @@ Conforme [schemas/classification-result-v3.schema.json](../schemas/classificatio
   `evaluations` (avaliação exaustiva de cada par do catálogo) e `candidates` (apenas os pares suficientes,
   ordenados por ranking).
 - Em cada candidato de `candidates`: informe `harness`, `model`, `effort`, `dispatch_role` (`primary`, `fallback`
-  ou `unassigned`), `evidence_ids`, `cost_basis`, `uncertainty` e `reason`.
+  ou `unassigned`), `evidence_ids`, `cost_basis` e `reason` (e `degraded_same_family` quando aplicável). Não inclua `uncertainty` em `candidates[]` (a avaliação de incerteza pertence exclusivamente a `evaluations[]`).
 
 ### Disciplina de evidências e custo
 `cost_basis` declara o alcance da comparação: `local_observed`, `official_task_proxy`, `token_price_only` ou `unknown`.

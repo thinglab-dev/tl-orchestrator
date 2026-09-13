@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "verdict": "approved",
+  "action_items": [],
+  "deferred": [],
+  "rejected": [
+    {
+      "summary": "R1 foi resolvido: identidade de integração está vinculada ao alvo real sem autorreferência de SHA.",
+      "evidence": "HEAD corresponde a b8598cb4da9f3b514fd9be9a23d87e028181b0ce; a seção ## Spec produz spec_revision c1aa4c68fcdd4fe2; o SHA-256 do diff material de integração é 0549648677c932c6..., compatível com integration_content_id."
+    },
+    {
+      "summary": "R2 foi resolvido: runtime_refs usa somente o vocabulário canônico e tipos estritos.",
+      "evidence": "schemas/batch.schema.json declara supervisor_state_dir, worktree_slot, scope_claim, merge_queue_entry e lease_heartbeat_ts, com additionalProperties:false; a documentação enumera o mesmo conjunto e os testes contrafactuais cobrem aliases, tipos inválidos e frozen_scope."
+    },
+    {
+      "summary": "Não foi encontrada regressão nas invariantes de linhagem, bloqueio de T019 ou preservação de T013–T018.",
+      "evidence": "audit_lineage.py --format json executado nesta revisão retornou blockers: []; T019 declara depends_on [T018, T024] e blocked_by [T024]; diff entre fffd5fd e b8598cb para T013, T014, T015 e T018 retornou vazio."
+    },
+    {
+      "summary": "As lentes de concorrência, recursos, fail-closed e falsificabilidade não revelaram defeito material no delta r02.",
+      "evidence": "O delta r02 altera somente a spec T024, o schema e testes contratuais; não introduz estado concorrente, subprocessos, timers ou I/O. A checagem mecânica audit_diff sobre o diff histórico sinalizou falsos positivos de desempacotamento Python com _, além de cópias históricas de evidência, sem defeito reproduzível no conteúdo entregue."
+    }
+  ]
+}

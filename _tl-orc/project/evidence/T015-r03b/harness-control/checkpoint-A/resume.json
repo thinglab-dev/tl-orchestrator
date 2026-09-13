@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "active_work_ref": "native/task/T009@_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/task-T009-spec.md",
+  "phase": "review",
+  "spec_revision": "4197dea48f75cd14",
+  "sources": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/PROJECT.md",
+      "selector": "frontmatter",
+      "digest": "a9a09ac034db46e2f78f20456336f70105c794f282d426c971e9b1fe2c90a5eb"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/T009-r07.md",
+      "selector": "## Review record",
+      "digest": "5834d19c77565cea7238092a97c95a385a61533220531b7a012df2e01e8b0dac"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/T009-r07.md",
+      "selector": "### Verdict (JSON, \u00edntegro)",
+      "digest": "306dd8bf5acaf8506e94b6b4a36f2be859888e2fbee75a81d14d0f0d10f7aeea"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/task-T009-spec.md",
+      "selector": "## Spec",
+      "digest": "4197dea48f75cd14e7a32802e642ef2bf3bdcc3b7530ef4fdfa6439c0db860eb"
+    }
+  ],
+  "resolved_context": [
+    {
+      "artifact": "active_unit.spec",
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/task-T009-spec.md",
+      "selector": "## Spec",
+      "digest": "4197dea48f75cd14e7a32802e642ef2bf3bdcc3b7530ef4fdfa6439c0db860eb",
+      "delivery": "inline",
+      "reason": "Target specification under review"
+    },
+    {
+      "artifact": "content_paths",
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/content_paths/",
+      "selector": "directory",
+      "digest": "on_demand",
+      "delivery": "on_demand",
+      "reason": "Underlying artifacts available for inspection if needed"
+    },
+    {
+      "artifact": "project.constraints",
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/PROJECT.md",
+      "selector": "frontmatter",
+      "digest": "a9a09ac034db46e2f78f20456336f70105c794f282d426c971e9b1fe2c90a5eb",
+      "delivery": "excerpt",
+      "reason": "Catalog and review policies"
+    },
+    {
+      "artifact": "review_record",
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/T009-r07.md",
+      "selector": "## Review record",
+      "digest": "5834d19c77565cea7238092a97c95a385a61533220531b7a012df2e01e8b0dac",
+      "delivery": "inline",
+      "reason": "Checker r07 review findings and verdict"
+    }
+  ],
+  "effective_authors": [
+    "anthropic",
+    "google",
+    "openai"
+  ],
+  "open_items": [],
+  "next_action": "Avaliar veredito r07 do Checker, conferir alvo/provas/autoriza\u00e7\u00e3o e decidir formalmente fechamento com registro ou impedimento",
+  "always_read": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-A/PROJECT.md",
+      "selector": "frontmatter",
+      "reason": "Project catalog policies"
+    }
+  ]
+}

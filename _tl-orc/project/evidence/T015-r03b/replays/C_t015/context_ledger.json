@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "unit": "T015-r03b",
+  "phase": "review",
+  "created_at": "2026-09-12T12:27:05.447964+00:00",
+  "turn_count": 30,
+  "tool_calls": 18,
+  "tokens": {
+    "input_tokens": 58,
+    "cache_creation_input_tokens": 56548,
+    "cache_read_input_tokens": 577651,
+    "output_tokens": 20768,
+    "thinking_tokens": 10471
+  },
+  "tool_metrics": {
+    "raw_result_bytes": 27078,
+    "delivered_result_bytes": 27078,
+    "tool_delivery_ratio": 1.0
+  },
+  "retrieval_amplification": 1.0,
+  "observed_reads": [
+    {
+      "path": "inputs/PROJECT.md",
+      "selector": "frontmatter",
+      "bytes": 63,
+      "digest": "983eafd3f9fd80922a9c925a7437b8d03c5034e392f407153e9da0e0c50dc162",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/PROJECT.md --hea"
+    },
+    {
+      "path": "inputs/checker-dw-6-0a-01-r1.md",
+      "selector": "# Parecer do Checker \u2014 DW-6.0A-01 (rodada 1) > ## Parecer (objeto extra\u00eddo)",
+      "bytes": 1931,
+      "digest": "b4e84a0a857755f052acfe562a3f74e867e59302c8fb9602fa6225a79d18245d",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/checker-dw-6-0a-"
+    },
+    {
+      "path": "inputs/deferred-work.md",
+      "selector": "## Deferred from: code review of 6-0a-configuracao-e-lifecycle-do-control-plane (2026-09-08)",
+      "bytes": 2304,
+      "digest": "1ed58894593bbe3aa22b3b7c65dae45a4e6caa103d7113285e75862cc7ca189a",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/deferred-work.md"
+    },
+    {
+      "path": "inputs/release_test.diff",
+      "selector": "frontmatter",
+      "bytes": 142,
+      "digest": "5ff57a70e45128b5b9c1f145f962a0e908a457095a4db01ff221a8b020410d59",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/release_test.dif"
+    },
+    {
+      "path": "inputs/PROJECT.md",
+      "selector": "## Cat\u00e1logo permitido",
+      "bytes": 799,
+      "digest": "87a61f54aef3bfa37cb9f015ca1076403933301c9fc974e65e2c1d62bce8a96e",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/PROJECT.md --hea"
+    },
+    {
+      "path": "inputs/PROJECT.md",
+      "selector": "## Port\u00f5es",
+      "bytes": 698,
+      "digest": "52f874c3f743fc6378f86bc989beb2caedd9e358482fa38ee1e25ca5fa95c6ce",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/PROJECT.md --hea"
+    },
+    {
+      "path": "inputs/PROJECT.md",
+      "selector": "## Classifica\u00e7\u00e3o e despacho",
+      "bytes": 625,
+      "digest": "29c58806bd659bde32d8b84cb1512bd8e1f30ab63245112ca759495b2a772b93",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/PROJECT.md --hea"
+    },
+    {
+      "path": "inputs/PROJECT.md",
+      "selector": "## Modelo de trabalho",
+      "bytes": 1789,
+      "digest": "473d81367d62663ef5c87c4fa627abb8ca3bddaecf9e12e3d34b9d49f9207fc6",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/PROJECT.md --hea"
+    },
+    {
+      "path": "inputs/PROJECT.md",
+      "selector": "## Prefer\u00eancias operacionais",
+      "bytes": 5016,
+      "digest": "879f888d7a6c69b55c5879d98382ca025f951938e4f235834f6ddc291dc5723c",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/PROJECT.md --hea"
+    },
+    {
+      "path": "inputs/PROJECT.md",
+      "selector": "## Fila sequencial",
+      "bytes": 498,
+      "digest": "aec70aacb9131fca13786833c6e5508ef25e63d5f0d543174c46543a4c361845",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/PROJECT.md --hea"
+    },
+    {
+      "path": "inputs/PROJECT.md",
+      "selector": "## Evid\u00eancias",
+      "bytes": 1359,
+      "digest": "a44e46a1783a32d6d3aa44f11a764e9e3dcd389cdfa4eaaadcc9f2d1abccaa5c",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/PROJECT.md --hea"
+    },
+    {
+      "path": "inputs/checker-dw-6-0a-01-r1.md",
+      "selector": "frontmatter",
+      "bytes": 612,
+      "digest": "19688a434ea65af023849ac61077d2f132819d33e9eb92a89eadb14d9c1d6e0f",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/checker-dw-6-0a-"
+    },
+    {
+      "path": "inputs/checker-dw-6-0a-01-r1.md",
+      "selector": "# Parecer do Checker \u2014 DW-6.0A-01 (rodada 1) > ## Classifica\u00e7\u00e3o (resultado bruto)",
+      "bytes": 2365,
+      "digest": "f7b0ecc317fffa926b38b02e3197a425cb47d7643921ab4c19858c7d70f018af",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/checker-dw-6-0a-"
+    },
+    {
+      "path": "inputs/checker-dw-6-0a-01-r1.md",
+      "selector": "# Parecer do Checker \u2014 DW-6.0A-01 (rodada 1) > ## Envelope original",
+      "bytes": 2307,
+      "digest": "b58dba5f362d3778423605d15ca4b9896051cd72e485dbea90d74a2825edf09c",
+      "reason": "Bash command: python3 tools/read_section.py --file inputs/checker-dw-6-0a-"
+    }
+  ],
+  "failed_read_attempts": [],
+  "reads_outside_allowed_set": [],
+  "disallowed_external_attempts": [],
+  "allowed_set": {
+    "reference": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/wt/t015-freeze/_tl-orc/project/evidence/T015-r03b/allowed_sets/allowed_set_checkpoint-C_t015.json",
+    "inputs": [
+      "inputs/PROJECT.md",
+      "inputs/checker-dw-6-0a-01-r1.md",
+      "inputs/deferred-work.md",
+      "inputs/release_test.diff"
+    ],
+    "allowed_support": [
+      "/dev/null",
+      "README-REPLAY-RULES.md",
+      "tools"
+    ]
+  },
+  "telemetry_divergence": null,
+  "pricing": {
+    "basis": "official_task_proxy",
+    "source": "docs/MODEL_ROUTING.md (proxy rubric)",
+    "verified_at": "2026-09-11",
+    "assumptions": [
+      "Cache read priced at 10% of base input token price",
+      "Cache creation priced at 1.25x of base input token price"
+    ],
+    "observed_tokens": 20826,
+    "estimated_token_cost": 0.3117,
+    "subscription_quota_impact": "unknown"
+  },
+  "rotation": {
+    "rotation_recommended": false,
+    "reason": "not_calibrated",
+    "applied_thresholds": {}
+  },
+  "session_metadata": {
+    "checkpoint": "C",
+    "treatment": "t015",
+    "execution_order": 5,
+    "session_id": "186ef6c8-57f8-4431-b050-addf8a155176",
+    "wall_clock_seconds": 101.23,
+    "runtime_cwd": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/r03b-runtime/checkpoint-C/t015",
+    "allowed_set_sha256": "1303bd733ad9385815c015bcf5ce29fe41d8a68d288c3bbf0936f058cf42dff1"
+  },
+  "confinement_status": "VALID"
+}

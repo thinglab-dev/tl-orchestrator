@@ -1,0 +1,17 @@
+{
+  "checkpoint": "C",
+  "arm": "Alpha",
+  "model": "claude-sonnet-5",
+  "effort": "medium",
+  "tool_policy": "Read,Glob,Grep,Bash,read_section.py",
+  "wall_clock_seconds": null,
+  "turn_count": 30,
+  "delivered_bytes": null,
+  "raw_bytes": null,
+  "cache_read_tokens": null,
+  "reads_outside_allowed_set": [],
+  "failed_read_attempts": [],
+  "disallowed_external_attempts": [],
+  "confinement_status": "VALID",
+  "ac16_status": "PASS"
+}

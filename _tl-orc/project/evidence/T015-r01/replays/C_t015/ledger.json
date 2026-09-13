@@ -1,0 +1,87 @@
+{
+  "allowed_set": {
+    "allowed_support": [],
+    "inputs": []
+  },
+  "created_at": "2026-09-11T17:09:01.364014+00:00",
+  "observed_reads": [
+    {
+      "tool": "Bash",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/PROJECT.md",
+      "bytes": 327,
+      "status": "ok"
+    },
+    {
+      "tool": "Bash",
+      "path": "\"_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/checker-dw-6-0a-01-r1.md\"",
+      "bytes": 2488,
+      "status": "ok"
+    },
+    {
+      "tool": "Bash",
+      "path": "\"_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/deferred-work.md\"",
+      "bytes": 2812,
+      "status": "ok"
+    },
+    {
+      "tool": "Bash",
+      "path": "\"_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/PROJECT.md\"",
+      "bytes": 1176,
+      "status": "ok"
+    },
+    {
+      "tool": "Bash",
+      "path": "\"_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/PROJECT.md\"",
+      "bytes": 976,
+      "status": "ok"
+    },
+    {
+      "tool": "Bash",
+      "path": "\"_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/PROJECT.md\"",
+      "bytes": 5947,
+      "status": "ok"
+    },
+    {
+      "tool": "Bash",
+      "path": "\"_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/PROJECT.md\"",
+      "bytes": 3077,
+      "status": "ok"
+    }
+  ],
+  "phase": "review",
+  "pricing": {
+    "assumptions": [
+      "Cache read priced at 10% of base input token price",
+      "Cache creation priced at 1.25x of base input token price"
+    ],
+    "basis": "official_task_proxy",
+    "estimated_token_cost": 0.2808,
+    "observed_tokens": 18757,
+    "source": "docs/MODEL_ROUTING.md (proxy rubric)",
+    "subscription_quota_impact": "unknown",
+    "verified_at": "2026-09-11"
+  },
+  "reads_outside_allowed_set": [],
+  "rotation": {
+    "reason": "Session metrics within nominal bounds.",
+    "rotation_recommended": false
+  },
+  "schema_version": 1,
+  "tokens": {
+    "cache_creation_input_tokens": 55476,
+    "cache_read_input_tokens": 497933,
+    "input_tokens": 44,
+    "output_tokens": 18713,
+    "thinking_tokens": 9753
+  },
+  "tool_calls": 12,
+  "tool_metrics": {
+    "delivered_result_bytes": 21887,
+    "raw_result_bytes": 21887,
+    "tool_delivery_ratio": 1.0
+  },
+  "turn_count": 23,
+  "unit": "T015-replay-C",
+  "failed_read_attempts": [],
+  "disallowed_external_attempts": []
+}

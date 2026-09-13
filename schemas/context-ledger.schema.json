@@ -1,0 +1,373 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tl-orchestrator Context Ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "unit",
+    "phase",
+    "created_at",
+    "turn_count",
+    "tool_calls",
+    "tokens",
+    "tool_metrics",
+    "retrieval_amplification",
+    "observed_reads",
+    "failed_read_attempts",
+    "reads_outside_allowed_set",
+    "disallowed_external_attempts",
+    "allowed_set",
+    "telemetry_divergence",
+    "pricing",
+    "rotation"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "unit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phase": {
+      "enum": [
+        "planning",
+        "implementation",
+        "review",
+        "rework",
+        "debate"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "turn_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tool_calls": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "output_tokens",
+        "thinking_tokens"
+      ],
+      "properties": {
+        "input_tokens": {
+          "$ref": "#/$defs/token_count"
+        },
+        "cache_creation_input_tokens": {
+          "$ref": "#/$defs/token_count"
+        },
+        "cache_read_input_tokens": {
+          "$ref": "#/$defs/token_count"
+        },
+        "output_tokens": {
+          "$ref": "#/$defs/token_count"
+        },
+        "thinking_tokens": {
+          "$ref": "#/$defs/token_count"
+        }
+      }
+    },
+    "tool_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_result_bytes",
+        "delivered_result_bytes",
+        "tool_delivery_ratio"
+      ],
+      "properties": {
+        "raw_result_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "delivered_result_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_delivery_ratio": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "retrieval_amplification": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "observed_reads": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observed_read_entry"
+      }
+    },
+    "failed_read_attempts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/failed_read_entry"
+      }
+    },
+    "reads_outside_allowed_set": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "disallowed_external_attempts": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "selector": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "allowed_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputs",
+        "allowed_support"
+      ],
+      "properties": {
+        "reference": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowed_support": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "telemetry_divergence": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "divergence_count": {
+          "type": "integer"
+        },
+        "in_transcript_not_in_telemetry": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "in_telemetry_not_in_transcript": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "wrapper_telemetry": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "pricing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "basis",
+        "source",
+        "verified_at",
+        "assumptions",
+        "observed_tokens",
+        "estimated_token_cost",
+        "subscription_quota_impact"
+      ],
+      "properties": {
+        "basis": {
+          "enum": [
+            "official_task_proxy",
+            "token_price_only",
+            "local_observed",
+            "unknown"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "verified_at": {
+          "type": "string"
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "observed_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "estimated_token_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "subscription_quota_impact": {
+          "const": "unknown"
+        }
+      }
+    },
+    "rotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rotation_recommended",
+        "reason"
+      ],
+      "properties": {
+        "rotation_recommended": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "applied_thresholds": {
+          "type": "object",
+          "properties": {
+            "max_turns": {
+              "type": "integer"
+            },
+            "max_tool_bytes": {
+              "type": "integer"
+            },
+            "max_cache_tokens": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "token_count": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "const": "not_observable"
+        }
+      ]
+    },
+    "observed_read_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "selector",
+        "bytes",
+        "digest",
+        "reason"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "digest": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "failed_read_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "outcome",
+        "bytes_delivered",
+        "confinement_effect"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outcome": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bytes_delivered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confinement_effect": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

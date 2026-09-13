@@ -1,0 +1,24 @@
+{
+  "checkpoint": "C",
+  "arm": "Beta",
+  "model": "claude-sonnet-5",
+  "effort": "medium",
+  "tool_policy": "Read,Glob,Grep,Bash",
+  "wall_clock_seconds": 102.25,
+  "turn_count": 20,
+  "exit_code": 0,
+  "reads_outside_allowed_set": [
+    "."
+  ],
+  "failed_read_attempts": [],
+  "disallowed_external_attempts": [
+    {
+      "path": "<repo-root>/_tl-orc/PROJECT.md",
+      "reason": "Target realpath is outside frozen repo root: <repo-root>/_tl-orc/PROJECT.md"
+    }
+  ],
+  "experimental_validity": {
+    "efficiency": "invalid",
+    "robustness": "valid_failure"
+  }
+}

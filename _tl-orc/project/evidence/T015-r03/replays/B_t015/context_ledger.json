@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "unit": "T015-r03",
+  "phase": "rework",
+  "created_at": "2026-09-12T01:46:05.816008+00:00",
+  "turn_count": 15,
+  "tool_calls": 9,
+  "tokens": {
+    "input_tokens": 28,
+    "cache_creation_input_tokens": 34417,
+    "cache_read_input_tokens": 318364,
+    "output_tokens": 7225,
+    "thinking_tokens": 1191
+  },
+  "tool_metrics": {
+    "raw_result_bytes": 18880,
+    "delivered_result_bytes": 18880,
+    "tool_delivery_ratio": 1.0
+  },
+  "retrieval_amplification": 1.0,
+  "observed_reads": [
+    {
+      "path": "/Users/albertiano/.claude/projects/-Users-albertiano-thinglab-tl-orchestrator/memory/tl-orc-operating-lessons.md",
+      "selector": "full_file",
+      "bytes": 11852,
+      "digest": "96d9aaf68e75fd564fe80273e0606d35ecf2fb5bd736899e1e47a97865c9765a",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/checker-6-0a-r1.md",
+      "selector": "# Parecer do Checker \u2014 Story 6.0a (rodada 1) > ## Parecer (objeto extra\u00eddo)",
+      "bytes": 2217,
+      "digest": "7020957d28de8cd944822805530ac74128646ef53e373e9178ab0636fe8172b8",
+      "reason": "Bash command: \\ && python3 scripts/read_section.py --file _tl-orc/project/"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/spec-6-0a.md",
+      "selector": "# Spec 6.0a (Recorte Documental Adaptado) > ## \u00a73. Crit\u00e9rios de aceite",
+      "bytes": 685,
+      "digest": "549a4179d656c8deed5da89e20eb51ff4f7969bf0cea552a3387a557ffe27bb3",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/dev-report-6-0a.md",
+      "selector": "# Dev Report 6.0a (Estado da Rodada 1 \u2014 Pr\u00e9-Rework) > ## Escopo entregue",
+      "bytes": 1047,
+      "digest": "272287fbaf5baa4ad2ac0fc1958fcde108b20ab7076b0763a297c9af93f48373",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/PROJECT.md",
+      "selector": "frontmatter",
+      "bytes": 63,
+      "digest": "983eafd3f9fd80922a9c925a7437b8d03c5034e392f407153e9da0e0c50dc162",
+      "reason": "Bash command: python3 scripts/read_section.py --file _tl-orc/project/evide"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/CODE_TREE_STATUS.txt",
+      "selector": "full_file",
+      "bytes": 72,
+      "digest": "99f0f9e40f3a054ce55bfbe4efab9e0d9d1f7c446cef7d9602b0cfbd6cceeaf0",
+      "reason": "Bash command: cat _tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/CO"
+    }
+  ],
+  "failed_read_attempts": [],
+  "reads_outside_allowed_set": [
+    "/Users/albertiano/.claude/projects/-Users-albertiano-thinglab-tl-orchestrator/memory/tl-orc-operating-lessons.md"
+  ],
+  "disallowed_external_attempts": [
+    {
+      "path": "/Users/albertiano/.claude/projects/-Users-albertiano-thinglab-tl-orchestrator/memory/tl-orc-operating-lessons.md",
+      "selector": "full_file",
+      "reason": "Path outside allowed set: /Users/albertiano/.claude/projects/-Users-albertiano-thinglab-tl-orchestrator/memory/tl-orc-operating-lessons.md"
+    }
+  ],
+  "allowed_set": {
+    "reference": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/wt/t015-freeze/_tl-orc/project/evidence/T015-r03/allowed_sets/allowed_set_checkpoint-B.json",
+    "inputs": [
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/CODE_TREE_STATUS.txt",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/PROJECT.md",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/checker-6-0a-r1.md",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/dev-report-6-0a.md",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/resume.json",
+      "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-B/spec-6-0a.md"
+    ],
+    "allowed_support": [
+      ".git",
+      "/dev/null",
+      "CHANGELOG.md",
+      "README.md",
+      "_tl-orc/PROJECT.md",
+      "_tl-orc/project/STATUS.md",
+      "docs",
+      "prompts",
+      "schemas",
+      "scripts"
+    ]
+  },
+  "telemetry_divergence": null,
+  "pricing": {
+    "basis": "official_task_proxy",
+    "source": "docs/MODEL_ROUTING.md (proxy rubric)",
+    "verified_at": "2026-09-11",
+    "assumptions": [
+      "Cache read priced at 10% of base input token price",
+      "Cache creation priced at 1.25x of base input token price"
+    ],
+    "observed_tokens": 7253,
+    "estimated_token_cost": 0.1085,
+    "subscription_quota_impact": "unknown"
+  },
+  "rotation": {
+    "rotation_recommended": false,
+    "reason": "not_calibrated",
+    "applied_thresholds": {}
+  },
+  "session_metadata": {
+    "checkpoint": "B",
+    "treatment": "t015",
+    "execution_order": 4,
+    "session_id": "53f6b8d0-f420-409b-9c99-13dc5acb6e9b",
+    "wall_clock_seconds": 58.42,
+    "environment_commit": "ef646f8665f85b4e2a8de70b09c327eae832fc6d",
+    "allowed_set_sha256": "532dddc273e86bb2a89a03989a2ccb74e4cf3b494cdff067a1f508d10e7c5ebb"
+  }
+}

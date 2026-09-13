@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "checkpoint": "checkpoint-C",
+  "treatment": "reference",
+  "files": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/PROJECT.md",
+      "bytes": 22008,
+      "sha256": "b3b2f0bc2878389eb20297ea5dad888e0f1148dd924fd974200759f5aa2a9a46"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/checker-dw-6-0a-01-r1.md",
+      "bytes": 6651,
+      "sha256": "bd663cb980fe0b44a70aa20062f218de4952b2edf368bcbce8d911f8b6f43a2a"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/deferred-work.md",
+      "bytes": 2304,
+      "sha256": "1ed58894593bbe3aa22b3b7c65dae45a4e6caa103d7113285e75862cc7ca189a"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r03/inputs/checkpoint-C/release_test.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "file_count": 4,
+  "aggregate_manifest_hash": "9b8cf959837a65bd5c7bb30a763254f8aa9b1716f47a521b4df24d8d0d145e5b",
+  "allowed_set_hash": "c4a360e46de2656b6197225acad90ae8882c5f1ff7f32a877a8ba1c2a4b1414a"
+}

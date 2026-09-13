@@ -1,0 +1,102 @@
+{
+  "allowed_set": {
+    "allowed_support": [],
+    "inputs": []
+  },
+  "created_at": "2026-09-11T17:07:07.925045+00:00",
+  "observed_reads": [
+    {
+      "tool": "Read",
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/manifest.json",
+      "bytes": 0,
+      "status": "failed_outside_allowed",
+      "outcome": "file_not_found"
+    },
+    {
+      "tool": "Read",
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/resume.json",
+      "bytes": 0,
+      "status": "failed_outside_allowed",
+      "outcome": "file_not_found"
+    },
+    {
+      "tool": "Read",
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/deferred-work.md",
+      "bytes": 0,
+      "status": "failed_outside_allowed",
+      "outcome": "file_not_found"
+    },
+    {
+      "tool": "Read",
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/checker-dw-6-0a-01-r1.md",
+      "bytes": 0,
+      "status": "failed_outside_allowed",
+      "outcome": "file_not_found"
+    }
+  ],
+  "phase": "review",
+  "pricing": {
+    "assumptions": [
+      "Cache read priced at 10% of base input token price",
+      "Cache creation priced at 1.25x of base input token price"
+    ],
+    "basis": "official_task_proxy",
+    "estimated_token_cost": 0.4177,
+    "observed_tokens": 27886,
+    "source": "docs/MODEL_ROUTING.md (proxy rubric)",
+    "subscription_quota_impact": "unknown",
+    "verified_at": "2026-09-11"
+  },
+  "reads_outside_allowed_set": [],
+  "rotation": {
+    "reason": "Session metrics within nominal bounds.",
+    "rotation_recommended": false
+  },
+  "schema_version": 1,
+  "tokens": {
+    "cache_creation_input_tokens": 76157,
+    "cache_read_input_tokens": 497634,
+    "input_tokens": 48,
+    "output_tokens": 27838,
+    "thinking_tokens": 14254
+  },
+  "tool_calls": 13,
+  "tool_metrics": {
+    "delivered_result_bytes": 38530,
+    "raw_result_bytes": 38530,
+    "tool_delivery_ratio": 1.0
+  },
+  "turn_count": 25,
+  "unit": "T015-replay-C",
+  "failed_read_attempts": [
+    {
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/manifest.json",
+      "tool": "Read",
+      "outcome": "file_not_found",
+      "bytes_delivered": 0,
+      "confinement_effect": "none"
+    },
+    {
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/resume.json",
+      "tool": "Read",
+      "outcome": "file_not_found",
+      "bytes_delivered": 0,
+      "confinement_effect": "none"
+    },
+    {
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/deferred-work.md",
+      "tool": "Read",
+      "outcome": "file_not_found",
+      "bytes_delivered": 0,
+      "confinement_effect": "none"
+    },
+    {
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/checker-dw-6-0a-01-r1.md",
+      "tool": "Read",
+      "outcome": "file_not_found",
+      "bytes_delivered": 0,
+      "confinement_effect": "none"
+    }
+  ],
+  "disallowed_external_attempts": []
+}

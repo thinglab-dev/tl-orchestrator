@@ -1,0 +1,26 @@
+{
+  "A'": {
+    "Alpha": "t015",
+    "Beta": "reference",
+    "execution_order": [
+      "t015",
+      "reference"
+    ]
+  },
+  "B": {
+    "Alpha": "reference",
+    "Beta": "t015",
+    "execution_order": [
+      "reference",
+      "t015"
+    ]
+  },
+  "C": {
+    "Alpha": "t015",
+    "Beta": "reference",
+    "execution_order": [
+      "t015",
+      "reference"
+    ]
+  }
+}

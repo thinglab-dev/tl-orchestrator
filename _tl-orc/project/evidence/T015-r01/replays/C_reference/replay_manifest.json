@@ -1,0 +1,46 @@
+{
+  "checkpoint": "C",
+  "treatment": "reference",
+  "execution_order": 5,
+  "environment_commit": "3e9ecc356b839dbe5e736e5356219bb092a4ff00",
+  "input_manifest_sha256": "f25973e87b5260884630dc45aaff30493582c2702ddc816289e610b0758b4ad3",
+  "allowed_set_sha256": "448d2d030b245bea595cb9dfec6b6d3ad5cd96da48b7dc64420b09ee1721cae8",
+  "model": "claude-sonnet-5",
+  "effort": "medium",
+  "tool_policy": "Read,Glob,Grep,Bash",
+  "session_id": "7e3b6738-8541-4a23-8f26-7ae7cc04d3a8",
+  "wall_clock_seconds": 134.29,
+  "exit_code": 0,
+  "reads_outside_allowed_set": [],
+  "failed_read_attempts": [
+    {
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/manifest.json",
+      "tool": "Read",
+      "outcome": "file_not_found",
+      "bytes_delivered": 0,
+      "confinement_effect": "none"
+    },
+    {
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/resume.json",
+      "tool": "Read",
+      "outcome": "file_not_found",
+      "bytes_delivered": 0,
+      "confinement_effect": "none"
+    },
+    {
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/deferred-work.md",
+      "tool": "Read",
+      "outcome": "file_not_found",
+      "bytes_delivered": 0,
+      "confinement_effect": "none"
+    },
+    {
+      "path": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/replay-env/reference/checker-dw-6-0a-01-r1.md",
+      "tool": "Read",
+      "outcome": "file_not_found",
+      "bytes_delivered": 0,
+      "confinement_effect": "none"
+    }
+  ],
+  "disallowed_external_attempts": []
+}

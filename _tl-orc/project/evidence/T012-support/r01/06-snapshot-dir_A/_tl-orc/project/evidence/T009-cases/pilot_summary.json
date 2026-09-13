@@ -1,0 +1,941 @@
+[
+  {
+    "case": "case_01_valid",
+    "name": "Caso válido real (T005 review classification sob restrição required)",
+    "alteration": "nenhuma (objeto íntegro adotado em T005 review sob restrição required e julgamento confirmado)",
+    "stage_1_mechanical": "APROVADA",
+    "stage_2_judgment": "CONFIRMADO",
+    "stage_3_dispatch": "LIBERADO",
+    "status": "ACEITA",
+    "dispatch": "checker:codex/gpt-6-astra/high",
+    "motivos": "Conforme catálogo, schema, evidências e julgamento confirmado",
+    "problems": [],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_02_invalid_catalog",
+    "name": "Alteração (i): Par fora do catálogo",
+    "alteration": "candidato 2 trocado para claude/claude-opus-5/medium (fora do catálogo de Checker)",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "checker ('claude', 'claude-opus-5', 'medium'): catálogo=False ids_desconhecidos=[] cost_basis=token_price_only sustentado=True pin=True",
+    "problems": [
+      "checker ('claude', 'claude-opus-5', 'medium'): catálogo=False ids_desconhecidos=[] cost_basis=token_price_only sustentado=True pin=True"
+    ],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "claude-opus-5",
+          "medium"
+        ],
+        false,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        false
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_03_invalid_story_id",
+    "name": "Alteração (ii): story_id indevido (esperado 'T005', obtido null)",
+    "alteration": "story_id preenchido com null quando briefing exigia 'T005'",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "story_id: esperado 'T005', obtido None",
+    "problems": [
+      "story_id: esperado 'T005', obtido None"
+    ],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_03b_invalid_story_id_null",
+    "name": "Alteração (ii-b): story_id indevido inverso (esperado null, obtido 'T005')",
+    "alteration": "story_id preenchido com 'T005' quando briefing exigia null (smoke platform v0.5.0 r3)",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "story_id: esperado None, obtido 'T005'",
+    "problems": [
+      "story_id: esperado None, obtido 'T005'"
+    ],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "elegível só com indisponibilidade comprovada (fallback)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_04_invalid_evidence_id",
+    "name": "Alteração (iii): ID de evidência inexistente",
+    "alteration": "candidato 3 cita 'price-gemini-pro' (não existe em MODEL_ROUTING)",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "checker ('agy', 'gemini-3.1-pro-high', 'high'): catálogo=True ids_desconhecidos=['price-gemini-pro'] cost_basis=token_price_only sustentado=False pin=True",
+    "problems": [
+      "checker ('agy', 'gemini-3.1-pro-high', 'high'): catálogo=True ids_desconhecidos=['price-gemini-pro'] cost_basis=token_price_only sustentado=False pin=True"
+    ],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [
+          "price-gemini-pro"
+        ],
+        "token_price_only",
+        false,
+        true,
+        "inelegível(required, mesma família)",
+        false
+      ]
+    ]
+  },
+  {
+    "case": "case_05_incompatible_evidence",
+    "name": "Alteração (iv): Evidência existente sustentando conclusão incompatível",
+    "alteration": "candidato 2 sonnet com cost_basis official_task_proxy sustentado só por sonnet-effort",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "checker ('claude', 'sonnet', 'high'): catálogo=True ids_desconhecidos=[] cost_basis=official_task_proxy sustentado=False pin=True",
+    "problems": [
+      "checker ('claude', 'sonnet', 'high'): catálogo=True ids_desconhecidos=[] cost_basis=official_task_proxy sustentado=False pin=True"
+    ],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        false,
+        true,
+        "elegível",
+        false
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_06_control_preserved_rules",
+    "name": "Controle: Regras preservadas (mesma família sob preferred + unknown com [])",
+    "alteration": "controle: agy Google sob preferred marcado elegível como fallback; cost_basis unknown com [] aceito",
+    "stage_1_mechanical": "APROVADA",
+    "stage_2_judgment": "CONFIRMADO",
+    "stage_3_dispatch": "LIBERADO",
+    "status": "ACEITA",
+    "dispatch": "checker:codex/gpt-6-astra/high",
+    "motivos": "Conforme catálogo, schema, evidências e julgamento confirmado",
+    "problems": [],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "elegível só com indisponibilidade comprovada (fallback)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_07_r2_unregistered_local_id",
+    "name": "Controle R2: ID local fabricado em arquivo existente sem registro efetivo",
+    "alteration": "controle R2: expected declara local-fake com source README.md sem que o ID exista no arquivo",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "ID local 'local-fake' em 'local_ids' rejeitado: não registrado efetivamente no arquivo 'README.md' (ID literal ausente no conteúdo).",
+    "problems": [
+      "ID local 'local-fake' em 'local_ids' rejeitado: não registrado efetivamente no arquivo 'README.md' (ID literal ausente no conteúdo)."
+    ],
+    "cand_rows": []
+  },
+  {
+    "case": "case_08_r2_invalid_proxy_card",
+    "name": "Controle R2: Cartão de capacidade (sonnet-effort) declarado como proxy econômico",
+    "alteration": "controle R2: expected declara sonnet-effort em proxy_ids, mas cartão não contém custo por tarefa",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "ID 'sonnet-effort' em 'proxy_ids' rejeitado: cartão em docs/MODEL_ROUTING.md não contém comprovação de custo por tarefa (incompatível com official_task_proxy).",
+    "problems": [
+      "ID 'sonnet-effort' em 'proxy_ids' rejeitado: cartão em docs/MODEL_ROUTING.md não contém comprovação de custo por tarefa (incompatível com official_task_proxy)."
+    ],
+    "cand_rows": []
+  },
+  {
+    "case": "case_09_r2_official_marker_as_evidence",
+    "name": "Controle R2: Marcador documental 'official-2026-09-05' citado como evidence_id",
+    "alteration": "controle R2: candidato 1 cita marcador de revisão documental official-2026-09-05 como evidência",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "checker ('codex', 'gpt-6-astra', 'high'): catálogo=True ids_desconhecidos=['official-2026-09-05'] cost_basis=official_task_proxy sustentado=False pin=True",
+    "problems": [
+      "checker ('codex', 'gpt-6-astra', 'high'): catálogo=True ids_desconhecidos=['official-2026-09-05'] cost_basis=official_task_proxy sustentado=False pin=True"
+    ],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [
+          "official-2026-09-05"
+        ],
+        "official_task_proxy",
+        false,
+        true,
+        "elegível",
+        false
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_10_r3_missing_candidate_reason",
+    "name": "Controle R3: Candidato sem campo obrigatório 'reason'",
+    "alteration": "controle R3: candidato 1 sem a propriedade obrigatória 'reason'",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "schema: $.roles.checker.candidates[0] faltando campo obrigatório 'reason'",
+    "problems": [
+      "schema: $.roles.checker.candidates[0] faltando campo obrigatório 'reason'"
+    ],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_11_r3_empty_facts",
+    "name": "Controle R3: Lista de fatos vazia ('facts: []')",
+    "alteration": "controle R3: array 'facts' vazio violando minItems: 1",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "schema: $.facts deve ter no mínimo 1 itens, obtido 0 (minItems: 1)",
+    "problems": [
+      "schema: $.facts deve ter no mínimo 1 itens, obtido 0 (minItems: 1)"
+    ],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_12_r3_extra_property",
+    "name": "Controle R3: Propriedade adicional proibida por additionalProperties: false",
+    "alteration": "controle R3: objeto raiz com propriedade extra não permitida 'extra_property'",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "schema: propriedade adicional não permitida 'extra_property' em $",
+    "problems": [
+      "schema: propriedade adicional não permitida 'extra_property' em $"
+    ],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_13_r4_preferred_unproven_fallback",
+    "name": "Controle R4: Fallback de mesma família sob preferred sem prova de indisponibilidade",
+    "alteration": "controle R4: candidatos de família distinta sem disponibilidade comprovada (status unknown / sem prova)",
+    "stage_1_mechanical": "APROVADA",
+    "stage_2_judgment": "CONFIRMADO",
+    "stage_3_dispatch": "BLOQUEADO",
+    "status": "BLOQUEADO",
+    "dispatch": "nenhum",
+    "motivos": "nenhum (bloqueado com ponto de retomada: fallback de mesma família sob preferred exige prova de indisponibilidade dos candidatos de família distinta (candidato 'codex/gpt-6-astra' com status 'unknown' (exige 'unavailable')))",
+    "problems": [],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "elegível só com indisponibilidade comprovada (fallback)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_14_r4_preferred_proven_fallback",
+    "name": "Controle R4: Fallback de mesma família sob preferred com indisponibilidade comprovada",
+    "alteration": "controle R4: candidatos distintos indisponíveis com erro literal comprovado em evidência sintética",
+    "stage_1_mechanical": "APROVADA",
+    "stage_2_judgment": "CONFIRMADO",
+    "stage_3_dispatch": "LIBERADO",
+    "status": "ACEITA",
+    "dispatch": "checker:agy/gemini-3.1-pro-high/high (fallback: same_family_fresh_session)",
+    "motivos": "Conforme catálogo, schema, evidências e julgamento confirmado",
+    "problems": [],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "elegível só com indisponibilidade comprovada (fallback)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_15_r4_required_same_family",
+    "name": "Controle R4: Candidatos de mesma família sob required (inelegíveis)",
+    "alteration": "controle R4: todos os candidatos pertencem a famílias autoras sob política required",
+    "stage_1_mechanical": "REJEITADA",
+    "stage_2_judgment": "N/A",
+    "stage_3_dispatch": "NENHUM",
+    "status": "REJEITADA",
+    "dispatch": "nenhum",
+    "motivos": "checker: nenhum candidato elegível sob required (todas as famílias são autoras)",
+    "problems": [
+      "checker: nenhum candidato elegível sob required (todas as famílias são autoras)"
+    ],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ]
+    ]
+  },
+  {
+    "case": "case_16_r5_valid_without_judgment",
+    "name": "Controle R5: Caso válido sem julgamento registrado (despacho não liberado)",
+    "alteration": "controle R5: caso estruturalmente válido mas sem entrada judgment (aguardando julgamento)",
+    "stage_1_mechanical": "APROVADA",
+    "stage_2_judgment": "PENDENTE (aguardando julgamento)",
+    "stage_3_dispatch": "NENHUM",
+    "status": "ACEITA (aguardando julgamento)",
+    "dispatch": "nenhum",
+    "motivos": "nenhum (aceita mecanicamente; despacho não liberado (aguardando julgamento))",
+    "problems": [],
+    "cand_rows": [
+      [
+        "checker",
+        [
+          "codex",
+          "gpt-6-astra",
+          "high"
+        ],
+        true,
+        [],
+        "official_task_proxy",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "claude",
+          "sonnet",
+          "high"
+        ],
+        true,
+        [],
+        "token_price_only",
+        true,
+        true,
+        "elegível",
+        true
+      ],
+      [
+        "checker",
+        [
+          "agy",
+          "gemini-3.1-pro-high",
+          "high"
+        ],
+        true,
+        [],
+        "unknown",
+        true,
+        true,
+        "inelegível(required, mesma família)",
+        true
+      ]
+    ]
+  }
+]

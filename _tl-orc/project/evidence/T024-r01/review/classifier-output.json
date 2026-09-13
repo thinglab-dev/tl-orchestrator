@@ -1,0 +1,63 @@
+{
+  "schema_version": 2,
+  "story_id": "T024",
+  "phase": "review",
+  "context_revision": "tl-orchestrator@fffd5fdd1b96ef9d25667503507f2a88fdad90ac+T024-spec-948c44332c6f8195+integration-content-2aca4f42bdd399c943ad4a5afeb403725018f6ae:651a76ce753ec023",
+  "catalog_revision": "PROJECT.md-perfil-de-despacho-2026-09-07",
+  "confidence": "high",
+  "facts": [
+    "A fase a classificar é review (rodada r01) da tarefa T024 (Reconciliação de Linhagem de Governança e Integração T018/v0.11).",
+    "A autoria acumulada de T024 é formalmente compartilhada entre Anthropic e Google (effective_authors: [google, anthropic]), com Anthropic atuando como Planner e parecer consultivo prévio do Advisor, e Google atuando como Maker da implementação.",
+    "A política de independência mandatória e inegociável é checker_independence: required, tornando as famílias participantes Anthropic e Google estritamente inelegíveis para o papel Checker.",
+    "A única família elegível no catálogo com independência cruzada total (cross-family) é OpenAI Codex (gpt-5.6-terra).",
+    "O candidato primário obrigatório para Checker é codex: model: gpt-5.6-terra, effort: high, com base de custo token_price_only suportada pelas evidências price-terra, terra-effort e transport-codex.",
+    "A entrega de implementação está congelada no commit target fffd5fdd1b96ef9d25667503507f2a88fdad90ac, com base 2aca4f42bdd399c943ad4a5afeb403725018f6ae, spec_revision 948c44332c6f8195 e integration_content_id 2aca4f42bdd399c943ad4a5afeb403725018f6ae:651a76ce753ec023 abrangendo 23 content_paths.",
+    "A cadeia nominal autorizada para Checker no catálogo é codex -> claude -> agy, com apenas o primeiro candidato elegível sob checker_independence: required."
+  ],
+  "uncertainties": [
+    "Disponibilidade operacional e latência de transporte do harness OpenAI Codex sob effort high durante a execução da verificação integral.",
+    "Tempo de execução e consumo de contexto necessários para auditar exaustivamente as 14 invariantes L01–L14, os 23 content_paths e os 200 testes de regressão."
+  ],
+  "reclassify_when": [
+    "Houver indisponibilidade técnica de infraestrutura no harness Codex impossibilitando a execução de gpt-5.6-terra sob a exigência mandatória checker_independence: required.",
+    "Ocorrer alteração na spec_revision 948c44332c6f8195, desvio nos 23 content_paths ou descongelamento do target commit fffd5fdd1b96ef9d25667503507f2a88fdad90ac.",
+    "A política de independência for flexibilizada para preferred pelo mantenedor, admitindo alternativas de mesma família em sessão limpa.",
+    "O parecer da revisão r01 resultar em changes_requested demandando nova rodada de retrabalho."
+  ],
+  "roles": {
+    "checker": {
+      "tier": "heavy",
+      "reason": "Auditoria abrangente de integridade relacional de governança L01–L14, validação de grafo acíclico, bijeção de IDs e board STATUS.md, suporte a CAS v0.11, conformidade dos 23 content_paths contra AC01–AC27, invariantes batch_concurrency: 1 e runtime_refs, além de regressão integral de 200 testes e portão canônico.",
+      "candidates": [
+        {
+          "harness": "codex",
+          "model": "gpt-5.6-terra",
+          "effort": "high",
+          "evidence_ids": [
+            "price-terra",
+            "terra-effort",
+            "transport-codex"
+          ],
+          "cost_basis": "token_price_only",
+          "reason": "Candidato primário obrigatório e único elegível no catálogo com independência total de família cruzada (OpenAI) em relação aos autores Anthropic e Google; effort high adequado ao tier heavy."
+        },
+        {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "evidence_ids": [],
+          "cost_basis": "unknown",
+          "reason": "Inelegível por política de independência (checker_independence: required): a família Anthropic participou da autoria efetiva da Story T024 como Planner e Advisor prévio."
+        },
+        {
+          "harness": "agy",
+          "model": null,
+          "effort": null,
+          "evidence_ids": [],
+          "cost_basis": "unknown",
+          "reason": "Inelegível por política de independência (checker_independence: required): a família Google participou da autoria efetiva da Story T024 como Maker da implementação."
+        }
+      ]
+    }
+  }
+}

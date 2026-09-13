@@ -1,0 +1,17 @@
+{
+  "checkpoint": "C",
+  "arm": "Alpha",
+  "model": "claude-sonnet-5",
+  "effort": "medium",
+  "tool_policy": "Read,Glob,Grep,Bash",
+  "wall_clock_seconds": 143.44,
+  "turn_count": 22,
+  "exit_code": 0,
+  "reads_outside_allowed_set": [],
+  "failed_read_attempts": [],
+  "disallowed_external_attempts": [],
+  "experimental_validity": {
+    "efficiency": "invalid",
+    "robustness": "valid_pass"
+  }
+}

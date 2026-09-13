@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "active_work_ref": "bmad/story/6.0a@_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/spec-6-0a.md",
+  "phase": "rework",
+  "spec_revision": "story-6.0a-r1",
+  "sources": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/PROJECT.md",
+      "selector": "frontmatter",
+      "digest": "adcd36f9e0ceba9cb6ab2d1bb05799ca3a72c332c48edbee6681a98ad8b4bd73"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/checker-6-0a-r1.md",
+      "selector": "## Parecer (objeto extra\u00eddo)",
+      "digest": "670eebe57bf7025988223e21c1c8f273d52e4fe664eee6a610e4445e676402de"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/dev-report-6-0a.md",
+      "selector": "## Escopo entregue",
+      "digest": "80af0230e38988460aca5257a28e0e351551cf724b23466851913a55dc8c2cd5"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/spec-6-0a.md",
+      "selector": "## \u00a73. Crit\u00e9rios de aceite",
+      "digest": "da77d7eb4c1dcd36663c65144064074b3bc644b6f16cd742e446f1aee8c7a9db"
+    }
+  ],
+  "resolved_context": [
+    {
+      "artifact": "active_unit.spec",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/spec-6-0a.md",
+      "selector": "## \u00a73. Crit\u00e9rios de aceite",
+      "digest": "da77d7eb4c1dcd36663c65144064074b3bc644b6f16cd742e446f1aee8c7a9db",
+      "delivery": "inline",
+      "reason": "Story acceptance criteria"
+    },
+    {
+      "artifact": "dev_report",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/dev-report-6-0a.md",
+      "selector": "## Escopo entregue",
+      "digest": "80af0230e38988460aca5257a28e0e351551cf724b23466851913a55dc8c2cd5",
+      "delivery": "excerpt",
+      "reason": "Round 1 delivered scope"
+    },
+    {
+      "artifact": "project.constraints",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/PROJECT.md",
+      "selector": "frontmatter",
+      "digest": "adcd36f9e0ceba9cb6ab2d1bb05799ca3a72c332c48edbee6681a98ad8b4bd73",
+      "delivery": "excerpt",
+      "reason": "Project governance constraints"
+    },
+    {
+      "artifact": "review_record",
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/checker-6-0a-r1.md",
+      "selector": "## Parecer (objeto extra\u00eddo)",
+      "digest": "670eebe57bf7025988223e21c1c8f273d52e4fe664eee6a610e4445e676402de",
+      "delivery": "inline",
+      "reason": "Checker r1 changes_requested with R1 finding"
+    }
+  ],
+  "effective_authors": [
+    "openai"
+  ],
+  "open_items": [
+    "R1"
+  ],
+  "next_action": "Avaliar parecer r1 (changes_requested), verificar achado R1 e propor rework delimitado ao achado",
+  "always_read": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/PROJECT.md",
+      "selector": "frontmatter",
+      "reason": "Project catalog policies"
+    }
+  ]
+}

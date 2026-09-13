@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "verdict": "approved",
+  "action_items": [],
+  "deferred": [],
+  "rejected": [
+    {
+      "summary": "A política não permite converter o full gate de fronteira em gate rotineiro por Story.",
+      "evidence": "WORK_MODEL.md §§442–506, orchestrator.md:102 e orchestrator-playbook.md:300–306 exigem verificação targeted intragrupo e reservam canonical_full_gate para integration_boundary; checker-report-only.md:43–46 proíbe reprovar escopo targeted pela ausência desse gate.",
+      "location": "docs/WORK_MODEL.md; prompts/orchestrator.md; prompts/orchestrator-playbook.md; prompts/checker-report-only.md"
+    },
+    {
+      "summary": "Não há conflito textual residual que mande executar todos os portões ou a suíte completa por tarefa/rework sem respeitar verification_scope.",
+      "evidence": "Busca direcionada nos três arquivos críticos encontrou apenas vedações explícitas a suíte global por tarefa: WORK_MODEL.md:447 e orchestrator-playbook.md:301. As regras genéricas de portões ficam subordinadas à cadência expressamente obrigatória.",
+      "location": "docs/WORK_MODEL.md; prompts/orchestrator.md; prompts/orchestrator-playbook.md"
+    },
+    {
+      "summary": "canonical_full_gate: not_configured não pode ser contornado silenciosamente na transição de fronteira.",
+      "evidence": "WORK_MODEL.md:493–500, PROJECT_CONFIGURATION.md e orchestrator-playbook.md:302 exigem pendência bloqueante e vedam inferir comandos. A suíte contratual aprovada cobre tanto configuração ausente quanto not_configured bloqueando a transição.",
+      "location": "docs/WORK_MODEL.md; docs/PROJECT_CONFIGURATION.md; prompts/orchestrator-playbook.md; scripts/tests/test_verification_cadence.py"
+    },
+    {
+      "summary": "O reaproveitamento de CI não aceita definição ou revisão alterada do gate.",
+      "evidence": "WORK_MODEL.md:485–491, PROJECT_CONFIGURATION.md e orchestrator-playbook.md:304 exigem SHA exato, mesma definição/revisão e logs auditáveis; validate_ci_proof_reuse também rejeita divergência de commit, definição, revisão, logs e status.",
+      "location": "docs/WORK_MODEL.md; docs/PROJECT_CONFIGURATION.md; prompts/orchestrator-playbook.md; scripts/tests/test_verification_cadence.py"
+    },
+    {
+      "summary": "Native Standalone Task não cria ciclo sem full gate.",
+      "evidence": "WORK_MODEL.md:457–461 e orchestrator-playbook.md:302 definem a tarefa standalone como seu próprio integration_group e exigem o gate antes da transição. A suíte contratual cobre resolução native_standalone e scope integration_boundary.",
+      "location": "docs/WORK_MODEL.md; prompts/orchestrator-playbook.md; scripts/tests/test_verification_cadence.py"
+    },
+    {
+      "summary": "Os AC01–AC12 possuem cobertura documental e contratual suficiente para esta entrega targeted.",
+      "evidence": "O diff corresponde aos sete content_paths informados, HEAD coincide com cccc144e0cc717deb72e30d0b041bc527fbfc3cf, git diff --check passou e python3 -B -m unittest scripts/tests/test_verification_cadence.py passou com 25 testes. A evidência fornecida também registra validate_repository.py e a regressão direcionada verdes.",
+      "location": "docs/WORK_MODEL.md; prompts/checker-report-only.md; scripts/tests/test_verification_cadence.py"
+    }
+  ]
+}

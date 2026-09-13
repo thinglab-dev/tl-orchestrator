@@ -1,0 +1,17 @@
+{
+  "checkpoint": "checkpoint-B",
+  "treatment": "t015",
+  "inputs": [
+    "inputs/CODE_TREE_STATUS.txt",
+    "inputs/PROJECT.md",
+    "inputs/checker-6-0a-r1.md",
+    "inputs/dev-report-6-0a.md",
+    "inputs/spec-6-0a.md"
+  ],
+  "allowed_support": [
+    "/dev/null",
+    "README-REPLAY-RULES.md",
+    "tools"
+  ],
+  "allowed_set_sha256": "863349f788e69894348387f09d62a79e3b61b05730578758e88003d4ad44f537"
+}

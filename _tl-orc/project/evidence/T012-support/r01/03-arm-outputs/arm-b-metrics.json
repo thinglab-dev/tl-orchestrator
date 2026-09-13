@@ -1,0 +1,150 @@
+{
+  "arm": "Arm_B",
+  "description": "Bra\u00e7o B (Sess\u00e3o Nova + Pacote Curto de Retomada)",
+  "wall_clock_seconds": 457.56158900260925,
+  "exit_code": 0,
+  "session_file": "/Users/albertiano/.claude/projects/-Users-albertiano--gemini-antigravity-brain-c35bdc15-8391-494c-8de0-190630cac49e-scratch-t012-pilot-dir-B/c38f8cc5-2e25-4a17-98b8-e39172f2a9d6.jsonl",
+  "input_tokens": 68,
+  "cache_creation_input_tokens": 246590,
+  "cache_read_input_tokens": 1466990,
+  "output_tokens": 80994,
+  "thinking_tokens": 41757,
+  "turns": 34,
+  "tool_calls": [
+    {
+      "name": "Glob",
+      "input": {
+        "pattern": "**/*.md",
+        "path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B"
+      }
+    },
+    {
+      "name": "Glob",
+      "input": {
+        "pattern": "**/T009*",
+        "path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/_tl-orc/project/tasks/T009-validacao-semantica-da-classificacao-pelo-orquestrador.md"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/_tl-orc/project/evidence/T009-r02.md"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/_tl-orc/PROJECT.md"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/prompts/orchestrator-perfis.md"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/prompts/orchestrator.md"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/prompts/orchestrator-playbook.md"
+      }
+    },
+    {
+      "name": "Glob",
+      "input": {
+        "pattern": "_tl-orc/project/evidence/**",
+        "path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/_tl-orc/project/STATUS.md"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/_tl-orc/project/evidence/T009-analysis.md"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/_tl-orc/project/evidence/T009-mechanical-check.py",
+        "offset": 20,
+        "limit": 180
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/_tl-orc/project/evidence/T009-mechanical-check.py",
+        "offset": 495,
+        "limit": 150
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/_tl-orc/project/evidence/T009-cases/synthetic_unavailable_evidence.md"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/docs/MODEL_ROUTING.md",
+        "offset": 40,
+        "limit": 50
+      }
+    },
+    {
+      "name": "Glob",
+      "input": {
+        "pattern": "_tl-orc/**",
+        "path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/_tl-orc/project/evidence/T009-cases/expected_r4_preferred_proven_fallback.json"
+      }
+    },
+    {
+      "name": "Read",
+      "input": {
+        "file_path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/_tl-orc/project/evidence/T009-cases/expected_t005_review.json"
+      }
+    },
+    {
+      "name": "Glob",
+      "input": {
+        "pattern": "scripts/**",
+        "path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B"
+      }
+    },
+    {
+      "name": "Grep",
+      "input": {
+        "pattern": "astra-domain|astra-coding|price-astra",
+        "path": "/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/t012-pilot/dir_B/_tl-orc/project/evidence/T009-mechanical-check.py",
+        "output_mode": "content",
+        "-n": true
+      }
+    }
+  ],
+  "tool_results_bytes": 155225
+}

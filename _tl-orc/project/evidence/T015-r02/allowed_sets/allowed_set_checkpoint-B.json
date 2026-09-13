@@ -1,0 +1,25 @@
+{
+  "allowed_set_sha256": "ab034ecdd0c5785cc8013e4191d079622c1f51652f3b3eec48792582b60a76f2",
+  "allowed_support": [
+    ".git",
+    "/dev/null",
+    "CHANGELOG.md",
+    "README.md",
+    "_tl-orc/PROJECT.md",
+    "_tl-orc/project/STATUS.md",
+    "docs",
+    "prompts",
+    "schemas",
+    "scripts"
+  ],
+  "checkpoint": "checkpoint-B",
+  "inputs": [
+    "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/CODE_TREE_STATUS.txt",
+    "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/PROJECT.md",
+    "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/checker-6-0a-r1.md",
+    "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/dev-report-6-0a.md",
+    "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/manifest.json",
+    "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/resume.json",
+    "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-B/spec-6-0a.md"
+  ]
+}

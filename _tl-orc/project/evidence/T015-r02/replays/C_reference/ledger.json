@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "unit": "T015-replay-C",
+  "phase": "review",
+  "created_at": "2026-09-12T00:22:37.453042+00:00",
+  "turn_count": 20,
+  "tool_calls": 10,
+  "tokens": {
+    "input_tokens": 38,
+    "cache_creation_input_tokens": 61749,
+    "cache_read_input_tokens": 465356,
+    "output_tokens": 19298,
+    "thinking_tokens": 10130
+  },
+  "tool_metrics": {
+    "raw_result_bytes": 43436,
+    "delivered_result_bytes": 43436,
+    "tool_delivery_ratio": 1.0
+  },
+  "retrieval_amplification": 1.0,
+  "observed_reads": [
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/manifest.json",
+      "selector": "full_file",
+      "bytes": 841,
+      "digest": "b09be124802c29f600a846edf063db818e906fb1de4f04aa86508ab0024482ad",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/resume.json",
+      "selector": "full_file",
+      "bytes": 3297,
+      "digest": "9be86d5503edf5a503d5cfb1281d1f255e755c358081a13e54a30b7a82f681b3",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/deferred-work.md",
+      "selector": "full_file",
+      "bytes": 2316,
+      "digest": "40b0fb1af3836e5fb650b17d91c078bd79f00d361a68714e38510783755b7cd7",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/checker-dw-6-0a-01-r1.md",
+      "selector": "full_file",
+      "bytes": 6816,
+      "digest": "02f9b81c71c980b585868d3dafcde12b0408f0a4f566c37c12699afe26ed7780",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/PROJECT.md",
+      "selector": "full_file",
+      "bytes": 22852,
+      "digest": "b189f6d233bb42de1420ea5dbb5cfd9b17cc71e6e0738d25e7b82da0ffc70a1e",
+      "reason": "Tool execution: Read"
+    },
+    {
+      "path": "_tl-orc/PROJECT.md",
+      "selector": "full_file",
+      "bytes": 5810,
+      "digest": "9058585fbee4837544f93f0b993977e5a7b191c604feff5270ed83ac2ebb7e5d",
+      "reason": "Tool execution: Read"
+    }
+  ],
+  "failed_read_attempts": [],
+  "reads_outside_allowed_set": [
+    "."
+  ],
+  "disallowed_external_attempts": [
+    {
+      "path": "/Users/albertiano/thinglab-platform/_tl-orc/PROJECT.md",
+      "reason": "Target realpath is outside frozen repo root: /Users/albertiano/thinglab-platform/_tl-orc/PROJECT.md"
+    }
+  ],
+  "allowed_set": {
+    "reference": "/private/tmp/claude-501/-Users-albertiano-thinglab-platform/b5b7f943-448c-4310-a060-658f630c335f/scratchpad/wt/t015-freeze/_tl-orc/project/evidence/T015-r02/allowed_sets/allowed_set_checkpoint-C.json",
+    "inputs": [
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/PROJECT.md",
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/checker-dw-6-0a-01-r1.md",
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/deferred-work.md",
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/manifest.json",
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/release_test.diff",
+      "_tl-orc/project/evidence/T015-r01/inputs/checkpoint-C/resume.json"
+    ],
+    "allowed_support": [
+      ".git",
+      "/dev/null",
+      "CHANGELOG.md",
+      "README.md",
+      "_tl-orc/PROJECT.md",
+      "_tl-orc/project/STATUS.md",
+      "docs",
+      "prompts",
+      "schemas",
+      "scripts"
+    ]
+  },
+  "telemetry_divergence": null,
+  "pricing": {
+    "basis": "official_task_proxy",
+    "source": "docs/MODEL_ROUTING.md (proxy rubric)",
+    "verified_at": "2026-09-11",
+    "assumptions": [
+      "Cache read priced at 10% of base input token price",
+      "Cache creation priced at 1.25x of base input token price"
+    ],
+    "observed_tokens": 19336,
+    "estimated_token_cost": 0.2896,
+    "subscription_quota_impact": "unknown"
+  },
+  "rotation": {
+    "rotation_recommended": false,
+    "reason": "Session metrics within nominal bounds.",
+    "applied_thresholds": {
+      "max_turns": 30,
+      "max_tool_bytes": 500000,
+      "max_cache_tokens": 1000000
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "checkpoint": "checkpoint-C",
+  "treatment": "t015",
+  "inputs": [
+    "inputs/PROJECT.md",
+    "inputs/checker-dw-6-0a-01-r1.md",
+    "inputs/deferred-work.md",
+    "inputs/release_test.diff"
+  ],
+  "allowed_support": [
+    "/dev/null",
+    "README-REPLAY-RULES.md",
+    "tools"
+  ],
+  "allowed_set_sha256": "1303bd733ad9385815c015bcf5ce29fe41d8a68d288c3bbf0936f058cf42dff1"
+}

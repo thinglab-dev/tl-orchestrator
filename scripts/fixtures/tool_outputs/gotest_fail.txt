@@ -1,0 +1,10 @@
+=== RUN   TestLogin
+--- PASS: TestLogin (0.01s)
+=== RUN   TestLoginFailure
+--- FAIL: TestLoginFailure (0.02s)
+=== RUN   TestLoginFailure/Invalid_Password
+--- FAIL: TestLoginFailure/Invalid_Password (0.01s)
+=== RUN   TestSkipMe
+--- SKIP: TestSkipMe (0.00s)
+FAIL	github.com/thinglab/auth	0.051s
+FAIL

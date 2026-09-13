@@ -1,0 +1,32 @@
+{
+  "checkpoint": "checkpoint-B",
+  "files": [
+    {
+      "bytes": 73,
+      "path": "CODE_TREE_STATUS.txt",
+      "sha256": "2f6fb4b308dbf65118c896a604eaeb8f3f9b6d961389ccd50a27d9bfb24a6fea"
+    },
+    {
+      "bytes": 22008,
+      "path": "PROJECT.md",
+      "sha256": "b3b2f0bc2878389eb20297ea5dad888e0f1148dd924fd974200759f5aa2a9a46"
+    },
+    {
+      "bytes": 10057,
+      "path": "checker-6-0a-r1.md",
+      "sha256": "3de73f599f706f87cee42e5b5d1598ed38c474eea23ebc1683e22cabec30b452"
+    },
+    {
+      "bytes": 5002,
+      "path": "dev-report-6-0a.md",
+      "sha256": "07bba24b3c646e220d72954850e9fb56441f0937867e83cf31b0c04cd9839c36"
+    },
+    {
+      "bytes": 3111,
+      "path": "spec-6-0a.md",
+      "sha256": "705998812b39fd7bda79e901b8fe7734581e94f03fec7127a7a2f5b7d1ff5988"
+    }
+  ],
+  "files_count": 5,
+  "manifest_sha256": "80bb06444491d44b9cb19966f21d6d5d6b2d6ac985cf4dacf2355cdce7a91194"
+}

@@ -2,18 +2,21 @@ format_version: 1
 work_method: native
 active_work_ref: none
 current_role: none
-next_action: T002 done com retificação (alcance da medição; execução sem autorização explícita registrada); aplicar o delta do briefing mínimo ao pacote e regras de escrita/permissões de Checker exigem Tasks fix autorizadas; nenhuma chamada paga sem autorização expressa
+next_action: Reconciliação T024 (Governança e Integração T018 × v0.11) em andamento. T019 permanece estritamente bloqueada até conclusão de T024.
 coordinator:
   harness: claude
-  session: claude-code-b1467fdf
-  started_at: 20260907T210307Z
-  last_write_at: 20260908T105215Z
+  session: claude-code-b5b7f943
+  started_at: 20260911T121833Z
+  last_write_at: 20260911T161300Z
   released: true
+active_batch: none
+batch_status: none
 review_followups: []
-next_task_id: 16
+next_task_id: 25
 next_deliverable_id: 1
 next_decision_id: 1
 next_discussion_id: 1
+next_batch_id: 1
 open_discussions: []
 
 ## Tasks
@@ -29,8 +32,17 @@ open_discussions: []
 | T008 | analysis | none | draft | [] | [] | 0 | - |
 | T009 | analysis | none | done | [] | [] | 9 | evidence/T009-r07.md |
 | T010 | fix | none | done | [T009] | [] | 11 | evidence/T010-r07.md |
-| T011 | analysis | none | draft | [T010] | [] | 0 | - |
+| T011 | analysis | none | done | [T010] | [] | 2 | evidence/T011-r02.md |
 | T012 | feature | package | done | [] | [] | 565 | evidence/T012-verification.md |
 | T013 | feat | package | done | [] | [] | 1 | - |
 | T014 | feat | package | done | [T013] | [] | 1 | - |
 | T015 | feat | package | done | [T014] | [] | 1 | evidence/T015-verification.md |
+| T016 | gov | none | done | [T022] | [] | 2 | evidence/T016-r01.md |
+| T017 | gov | none | done | [T016] | [] | 2 | evidence/T017-r02.md |
+| T018 | feat | none | done | [T017] | [] | 2 | evidence/T018-r05.md |
+| T019 | feat | none | ready | [T018, T024] | [] | 0 | - |
+| T020 | fix | none | done | [T011] | [] | 2 | evidence/T013-r01.md |
+| T021 | feat | none | done | [T020] | [] | 2 | evidence/T014-r01.md |
+| T022 | feat | none | done | [] | [] | 2 | evidence/T015-r03b.md |
+| T023 | analysis | none | ready | [T010, T021] | [] | 1 | evidence/T012-r01.md |
+| T024 | gov | none | done | [T015, T018] | [] | 1 | evidence/T024-r02.md |

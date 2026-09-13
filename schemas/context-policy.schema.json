@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tl-orchestrator Context Policy Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "classes",
+    "phases"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "classes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "active_unit.spec",
+          "authorization.current",
+          "unresolved_items",
+          "project.constraints",
+          "applicable_decisions",
+          "dependency_outputs",
+          "previous_rounds",
+          "discussions",
+          "raw_logs",
+          "full_architecture"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "phases": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planning",
+        "implementation",
+        "review",
+        "rework",
+        "debate"
+      ],
+      "properties": {
+        "planning": {
+          "$ref": "#/$defs/phase_policy"
+        },
+        "implementation": {
+          "$ref": "#/$defs/phase_policy"
+        },
+        "review": {
+          "$ref": "#/$defs/phase_policy"
+        },
+        "rework": {
+          "$ref": "#/$defs/phase_policy"
+        },
+        "debate": {
+          "$ref": "#/$defs/phase_policy"
+        }
+      }
+    },
+    "resolvers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "required": [
+            "path_template",
+            "selector_template"
+          ],
+          "properties": {
+            "path_template": {
+              "type": "string"
+            },
+            "selector_template": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "phase_policy": {
+      "type": "object",
+      "additionalProperties": {
+        "enum": [
+          "inline",
+          "excerpt",
+          "on_demand"
+        ]
+      },
+      "propertyNames": {
+        "enum": [
+          "active_unit.spec",
+          "authorization.current",
+          "unresolved_items",
+          "project.constraints",
+          "applicable_decisions",
+          "dependency_outputs",
+          "previous_rounds",
+          "discussions",
+          "raw_logs",
+          "full_architecture"
+        ]
+      }
+    }
+  }
+}

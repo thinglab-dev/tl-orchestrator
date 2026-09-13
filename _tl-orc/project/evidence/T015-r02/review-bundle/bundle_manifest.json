@@ -1,0 +1,32 @@
+{
+  "bundle_schema_version": 2,
+  "round": "r02",
+  "description": "Blind comparison bundle for T015-r02 experimental replays across Checkpoints A, B, and C.",
+  "checkpoints": [
+    "A",
+    "B",
+    "C"
+  ],
+  "arms": [
+    "Alpha",
+    "Beta"
+  ],
+  "experimental_protocol": {
+    "model": "claude-sonnet-5",
+    "effort": "medium",
+    "tool_policy": "Read,Glob,Grep,Bash",
+    "harness_gate": "Hardened auditor with realpath confinement, bash command parser and canonical allowed_set",
+    "paired_replays_count": 6
+  },
+  "findings_summary": {
+    "checkpoint_A": "Valid for efficiency comparison. Favors treatment with selective retrieval.",
+    "checkpoint_B": "Valid for efficiency comparison. Mixed trade-off: significant delivered byte reduction (-69.5%) accompanied by higher turn count, output tokens, and cache_read (+80.3%).",
+    "checkpoint_C": "Comparison of efficiency is INVALID due to baseline reference confinement failure (AC16 violation: 292 bytes external metadata delivered via Glob and 1 disallowed external grep attempt). Valid only as robustness and baseline failure proof. Selective retrieval arm achieved 100% confinement.",
+    "tool_delivery_ratio": "Raw tool result bytes == delivered bytes (1.00 ratio across all replays). Tool-result compaction (AC09/AC10) was not empirically exercised in this benchmark and remains verified by deterministic unit tests."
+  },
+  "sanitization": [
+    "Physical environment paths normalized to <repo-root>",
+    "Session UUIDs and treatment identifiers blinded to Alpha/Beta",
+    "Model parameters and evaluation criteria held constant"
+  ]
+}

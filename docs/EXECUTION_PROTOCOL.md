@@ -25,9 +25,13 @@ acompanhamento: se cada papel volta ao condutor para ser empurrado adiante, a co
 acompanhamento apenas mudou de nome.
 
 Limite real: encadear os papéis dentro de uma unidade exige um condutor adaptado no consumidor, que
-leia o `result_file` de cada papel e decida o próximo despacho sem perguntar. Sem esse condutor e sem
+leia o `result_file` de cada papel e decida o próximo despacho sem perguntar. Sem daemon ou
 callback comprovado no ambiente, o que existe é uma unidade por vez, despachada pela ativação
 corrente. Declare esse limite em vez de prometer uma automação que ainda não existe ali.
+
+### Execução sob Modo Automático (batches)
+
+Quando o condutor opera sob um lote autorizado no Modo Automático ([WORK_MODEL.md](WORK_MODEL.md#modo-automático-execução-de-lote-finito-autorizado)), a execução de cada unidade individual no estado `EXECUTE` segue este protocolo por artefatos. O snapshot congelado do batch (`_tl-orc/project/batches/Bnnn.md`) fornece os limites de escopo e autoridade; o condutor consome o recibo terminal compacto (< 4 KiB) de cada unidade para validar o critério de aceite, registrar o encerramento da unidade e avançar para a próxima unidade elegível ou disparar os portões canônicos de fronteira de integração (T016), sem subir logs intermediários para a conversa principal.
 
 O envelope de despacho declara, em texto ou em arquivo:
 
@@ -439,7 +443,7 @@ Para viabilizar execução autônoma prolongada (overnight) e eliminar o tempo o
 1. **Desacoplamento do CI Remoto (Pipelining de Worktrees):**
    - A fase de entrega (`phase_deliver`) conclui no momento em que os portões locais passam, o commit é realizado e o Pull Request é criado (`gh pr create`).
    - O condutor NÃO deve bloquear turnos ou pausar a sessão esperando de forma síncrona a conclusão do CI remoto (ex: 10 minutos de GitHub Actions).
-   - O PR é registrado com auto-merge atômico (`gh pr merge --auto --squash --delete-branch`) ou delegado a um supervisor/reaper leve de background.
+   - O PR é publicado e entregue à Merge Queue serializada quando o merge for expressamente autorizado; a execução física de merge em `main` exige autorização humana explícita ou autorização prévia por `permitted_effects` do lote.
    - Imediatamente após a publicação do PR da Story N, a capacidade de desenvolvimento é liberada: se a Story N+1 for independente no grafo de dependências (DAG), ela é despachada imediatamente em um Git worktree isolado (`worktrees/<story-id>`), sobrepondo o tempo de CI de N ao tempo de planejamento/código de N+1.
 
 2. **Heartbeat e Fencing de Leases:**
@@ -473,8 +477,7 @@ por lock exclusivo e publicada por substituição atômica. Os quatro mecanismos
    com `started_at`; após 120 segundos sem estado terminal, a próxima chamada o recupera e tenta
    novamente. A persistência terminal tolera por até 30 segundos a contenção transitória do lock.
    Um topo `failed` bloqueia o seguinte até remoção explícita ou nova tentativa registrada, nunca
-   equivale implicitamente a sucesso. Quando houver mais de uma story para a mesma branch alvo,
-   esta fila substitui o despacho direto de auto-merge descrito no pipelining de pista única.
+   equivale implicitamente a sucesso. A Merge Queue ordena merges já autorizados, mas nunca concede autoridade para merge em `main`: merge em `main` exige autorização humana explícita ou prévia por `permitted_effects` do lote.
 4. **Varredura de órfãos:** `sweep_orphan_worktrees(pool_dir, stale_after_seconds)` compara o
    `heartbeat_ts` da lease de cada `slot.json` com um limiar operacional maior que a tolerância
    normal do heartbeat. Apenas leases que ultrapassam esse limiar são removidas com
@@ -483,6 +486,30 @@ por lock exclusivo e publicada por substituição atômica. Os quatro mecanismos
 Resultados de gates continuam indexados por `tree_sha` do worktree correspondente e nunca são
 compartilhados entre stories com árvores diferentes. Escritas no board usam comparação e troca da
 `state_revision`: divergência responde `state_revision_conflict` sem alterar `STATUS.md`.
+
+### Relação entre Governança de Lote (T018) e Runtime Físico Concorrente (v0.11)
+
+A arquitetura do método separa estritamente a camada de governança da camada de execução física:
+**T018 decide se pode; v0.11 decide se dá.**
+
+1. **Matriz de Responsabilidades:**
+   - *Autorização humana e digest:* T018 exclusiva (`authorization.proposal_digest`, `permitted_effects`).
+   - *Freeze de escopo:* T018 exclusiva (`frozen_scope`, `immutable_digest`).
+   - *Admission semântico e orçamentos:* T018 exclusiva (write-ahead contábil de chamadas, saldo e reserva dinâmica mandatória).
+   - *Alocação de worktrees:* v0.11 runtime físico (`acquire_worktree_slot`).
+   - *Detecção de colisão de escopo:* v0.11 runtime físico (`claim_scope`). Em lote congelado, colisão é stop condition mandatória.
+   - *Recuperação de leases e órfãos:* v0.11 runtime físico (`heartbeat_ts`, `sweep_orphan_worktrees`). Débito contábil conservador por T018 em caso de timeout.
+   - *Serialização de merge:* v0.11 ordena na FIFO; T018 autoriza o efeito via `permitted_effects`.
+   - *Escrita atômica do board:* T018 é a autoridade soberana de estado; v0.11 executa o CAS mecânico por `state_revision`.
+
+2. **Serialidade Declarada do Lote (`batch_concurrency: 1`):**
+   Dentro de um lote autorizado do Modo Automático, a execução de unidades é estritamente sequencial (`batch_concurrency: 1` no `frozen_scope`). O Modo Automático não despacha mais de uma unidade concorrente do mesmo lote. A concorrência multi-story de v0.11 permanece disponível para stories independentes fora do lote.
+
+3. **Precedência sobre `parked`:**
+   Dentro de um lote autorizado, a marcação de uma story como `parked` solta a lease mas **não autoriza o avanço** para unidades subsequentes caso a autorização humana fixe `continue_independent_after_block: false`. O lote suspende imediatamente a execução na unidade estacionada.
+
+4. **Isolamento de `runtime_refs`:**
+   Identificadores opacos de correlação com o runtime físico (`supervisor_state_dir`, `worktree_slot`, `scope_claim`, `merge_queue_entry`, `lease_heartbeat_ts`) residem exclusivamente no bloco mutável `execution.runtime_refs` do envelope `Bnnn.md`. O snapshot imutável `frozen_scope` (com `additionalProperties: false`) e seu `immutable_digest` nunca são contaminados por referências voláteis de runtime.
 
 ## Limites
 

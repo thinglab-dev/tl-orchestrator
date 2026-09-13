@@ -3,19 +3,19 @@ type: feat
 deliverable: none
 standalone: true
 method: native
-status: ready
-state_revision: 0
+status: done
+state_revision: 1
 depends_on: [T018, T024]
 blocked_by: []
 origin: instrução normativa do mantenedor em 2026-09-13 (formalização da seleção dinâmica de primário T019 com R1 a R22)
 decisions: []
 spec_author: orchestrator
-spec_revision: 124cdbab8122d6bc
-rework_round: 0
+spec_revision: cefc2cfbaba4944c
+rework_round: 5
 affects_context: []
-content_paths: [distribution-manifest.json, README.md, SKILL.md, docs/PROJECT_CONFIGURATION.md, docs/WORK_MODEL.md, prompts/classifier.md, prompts/orchestrator.md, prompts/orchestrator-perfis.md, schemas/classification-result-v3.schema.json, scripts/validate_classification.py, scripts/tests/test_dynamic_primary_selection.py, CHANGELOG.md]
-content_id: unknown até a implementação
-effective_authors: [openai, google, anthropic]
+content_paths: [distribution-manifest.json, README.md, SKILL.md, docs/PROJECT_CONFIGURATION.md, docs/WORK_MODEL.md, prompts/classifier.md, prompts/orchestrator.md, prompts/orchestrator-perfis.md, schemas/classification-result-v3.schema.json, scripts/validate_classification.py, scripts/tests/test_dynamic_primary_selection.py, scripts/tests/test_automatic_mode.py, CHANGELOG.md]
+content_id: f6206f271328c8f6da798f49d9a55cf83c09439b:7f1e4a994e46d32d
+effective_authors: [google, anthropic]
 checker_independence: preferred
 
 ## Finding
@@ -50,6 +50,7 @@ Desacoplar formalmente a avaliação semântica de qualidade do Classificador da
 - schemas/classification-result-v3.schema.json [NEW]: novo schema Draft 2020-12 validando a matriz de 4 estados (conclusive, underdetermined, awaiting_operator, infeasible), evaluations granular por par e candidates como autoridade única de ranking. O schema v2 legado (schemas/classification-result.schema.json) permanece inalterado para compatibilidade opt-in.
 - scripts/validate_classification.py [NEW]: novo validador canônico upstream (distribuído no pacote), responsável pelo dispatch e validação formal de contratos de classificação v2 e v3 com base em classification_schema_version.
 - scripts/tests/test_dynamic_primary_selection.py [NEW]: nova suíte de testes determinísticos cobrindo seleção de Codex/Agy como primário, tie-break determinístico sem viés contra unknown, minimum technical adequacy gate, preflight local vs remoto, auditoria EXECUTION_PROTOCOL e prevenção de fallback ambíguo de Maker.
+- scripts/tests/test_automatic_mode.py: ajuste durável da asserção de integridade do manifesto herdada de T018 (paridade entre package_file_count e len(package_files), preservando as garantias e presenças contratuais de artefatos da T018 sem hardcode incidental da contagem global do pacote).
 - CHANGELOG.md: registro formal da introdução da Seleção Dinâmica de Primário (T019) sob [Unreleased].
 
 ### Invariants (R1 a R22)
@@ -91,6 +92,7 @@ Desacoplar formalmente a avaliação semântica de qualidade do Classificador da
 - AC08 (Composição Orçamentária com T018): Toda tentativa de despacho registra write-ahead; tentativas ambíguas são debitadas; fallback é condicionado à preservação da reserva dinâmica required_call_reserve(current_checkpoint).
 - AC09 (Disciplina de Preço Unitário vs Custo Total): O contrato e prompt distinguem unit_token_price de expected_task_cost, proibindo alegações de custo total inferior da tarefa fundamentadas puramente em token_price_only.
 - AC10 (Validador Dual Upstream e Rollout Opt-In): Novo scripts/validate_classification.py adicionado à distribuição canônica suportando nativamente v2 e v3 com base em classification_schema_version, assegurando zero impacto regressivo em projetos consumidores v0.8.0.
+- AC11 (Preservação de Consumidores Contratuais do Manifesto): A ampliação de distribution-manifest.json por T019 preserva os consumidores contratuais existentes que validam a integridade do manifesto, em particular scripts/tests/test_automatic_mode.py herdado de T018, que reconfirma dinamicamente package_file_count == len(package_files) e a presença contratual dos artefatos de T018 (schemas/batch.schema.json, docs/EXECUTION_PROTOCOL.md, scripts/tl_job.py) no manifesto ampliado, sem qualquer hardcode incidental da contagem global do pacote.
 
 ### State machine de fallback seguro e recuperação
 A execução de despacho compõe o protocolo de execução (docs/EXECUTION_PROTOCOL.md) com a contabilidade do Modo Automático (T018):
@@ -121,6 +123,7 @@ A suíte scripts/tests/test_dynamic_primary_selection.py cobrirá:
 5. Teste contrafactual de segurança de Maker: simulação de processo falho com árvore dirty garantindo emissão de STOP e bloqueio de fallback.
 6. Teste de controle orçamentário write-ahead: garantia de que tentativas falhas debitam saldo e que a reserva dinâmica T018 impede fallbacks que deixariam a Story sem saldo para Checker.
 7. Teste de compatibilidade dual: execução de scripts/validate_classification.py validando fixture v2 (ordem estática) e fixture v3 (ranking dinâmico).
+8. Verificação durável de paridade do manifesto em consumidor contratual existente (scripts/tests/test_automatic_mode.py, herdado de T018): reconfirmação de que package_file_count == len(package_files) e da presença contratual dos artefatos de T018 (schemas/batch.schema.json, docs/EXECUTION_PROTOCOL.md, scripts/tl_job.py) no manifesto ampliado por T019, sem acoplamento a uma contagem fixa (hardcoded) do total de arquivos do pacote.
 
 ### Rollout e compatibilidade opt-in
 1. Projetos v0.8.0 mantendo classification_schema_version: 2 (ou ausente) permanecem 100% no pipeline legado, sem qualquer alteração comportamental.

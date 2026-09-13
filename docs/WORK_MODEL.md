@@ -866,6 +866,27 @@ Ao reiniciar a execução do lote após falha de processo, timeout ou encerramen
   * Se o despacho comprovadamente não ocorreu: libera a reserva e prossegue;
   * Em caso ambíguo: contabiliza conservadoramente como `consumed` e interrompe imediatamente com `STOP`, impedindo estouro silencioso de orçamento.
 
+### 4.1. Máquina de fallback side-effect safe e classes formais de despacho (T019)
+
+A execução e recuperação de despachos no Modo Automático compõe o protocolo de execução ([EXECUTION_PROTOCOL.md](EXECUTION_PROTOCOL.md)) com o desacoplamento de ranking semântico e fallback de infraestrutura de T019:
+
+#### Preflight local vs remoto (R21)
+- **Preflight local:** Inspeciona executáveis no `PATH`, variáveis de ambiente, arquivos locais de configuração e credenciais estáticas sem tráfego de rede e sem invocação de CLI pesada. Se falhar, é classificado como `PRE_DISPATCH_UNAVAILABLE`. Zero chamadas são debitadas do orçamento (`reservation released`), permitindo avançar imediatamente para o próximo candidato.
+- **Preflight remoto ou CLI:** Qualquer sondagem remota, handshake de rede ou invocação de CLI constitui tentativa formal. Exige gravação write-ahead no journal (`pending_call`), compromete 1 slot do orçamento e passa a auditar efeitos colaterais.
+
+#### As quatro classes formais de resultado de despacho (R5)
+1. **`PRE_DISPATCH_UNAVAILABLE`:** Indisponibilidade detectada em preflight puramente local. Zero slots consumidos. O Runtime avança com segurança para o próximo candidato da cadeia de fallback.
+2. **`DISPATCH_FAILED_PROVEN_NO_EFFECT`:** Falha operacional durante execução (timeout, crash com código não-zero, recusa 429 persistente de quota). O slot é debitado como `consumed`. O fallback automático para o próximo candidato só é permitido se comprovado cumulativamente ([R14]):
+   - Árvore de processos da tentativa anterior inteiramente finalizada (`process-tree terminal`);
+   - Checkpoint Git limpo (`git status --porcelain` vazio);
+   - `content_paths` da tarefa estritamente inalterados;
+   - Ausência comprovada de efeitos externos/rede via recibo e auditoria de execução;
+   - Preservação da reserva mandatória de orçamento ([R22]):
+     $$\text{remaining\_budget} \ge \text{fallback\_attempt\_cost} + \text{required\_call\_reserve}(\text{current\_checkpoint})$$
+3. **`DISPATCH_OUTCOME_AMBIGUOUS`:** O processo sofreu timeout, encerramento anômalo ou falha, deixando a árvore de trabalho modificada (`dirty`), arquivos não rastreados ou impossibilidade de garantir ausência de efeitos externos. 1 slot é debitado como `consumed`.
+   **O fallback automático é terminantemente PROIBIDO.** O Runtime emite STOP imediato (`dispatch_outcome_ambiguous`), congela o lote e preserva o estado dirty para reconciliação humana, impedindo que um candidato subsequente sobrescreva ou corrompa modificações parciais.
+4. **`SEMANTIC_FAILURE`:** O processo encerra com código 0 e recibo terminal válido (< 4 KiB), mas a solução falha em testes de verificação ou o Checker emite achados no parecer. Não aciona fallback de infraestrutura; avança para o fluxo formal de retrabalho (*rework*) ou reclassificação.
+
 ### 5. Admission gate por unidade e reserva dinâmica de orçamento
 
 #### Admission gate por unidade
@@ -931,7 +952,7 @@ A execução do lote é imediatamente interrompida (`STOP`), projetando a interr
 14. `unexpected_tree_state`: árvore de trabalho não condiz com `expected_tree_checkpoint`.
 15. `unexpected_revision_drift`: divergência de revisão em relação ao snapshot congelado.
 16. `external_effect_not_authorized`: tentativa de invocar push, PR, merge, tag ou rede sem autorização.
-17. `unrecoverable_harness_failure`: falha persistente de infraestrutura de harness.
+17. `unrecoverable_harness_failure_or_ambiguous_dispatch`: falha persistente de infraestrutura de harness ou desfecho de despacho ambíguo (`DISPATCH_OUTCOME_AMBIGUOUS` com árvore de trabalho dirty), bloqueando fallback automático para evitar corrupção de workspace.
 18. `dependency_block`: bloqueio de dependência de unidade no lote.
     - O comportamento padrão é `continue_independent_after_block: false` (interrompe no primeiro bloqueio). Continuidade restrita a ramos topologicamente independentes exige autorização expressa no lote.
 

@@ -30,9 +30,11 @@ Confirme o modelo concreto resolvido por aliases como `sonnet`. O Classificador 
 próprio modelo ou effort e não herda os parâmetros do Orquestrador.
 
 Para os papéis de trabalho, o Classificador escolhe **modelo e effort por papel e por harness**.
-A ordem de preferência dos harnesses é operacional:
+As cadeias de harnesses definem o domínio de elegibilidade e a sequência de fallback de emergência
+(sob Schema v3, a seleção do primário é dinâmica e desacoplada da cadeia física; sob Schema v2 legado,
+a cadeia define a ordem nominal de preferência):
 
-| Papel | Cadeia de preferência e fallback |
+| Papel | Domínio de elegibilidade e cadeia de fallback |
 | :--- | :--- |
 | Planner | Claude → Codex → Agy |
 | Maker | Agy → Codex → Claude |
@@ -48,9 +50,14 @@ Essas cadeias publicadas constituem a política global padrão do pacote quando 
 - **Searcher**: Agy `gemini-3.8-flash-medium` (`medium`) → Claude → Codex.
 - **Advisor**: Cross-family preferido em sessão limpa (`fresh_session: required`), subordinado a `advisor_independence` (preferred vs required) e contra-família da proposta desafiada.
 
+Sob Schema v3 (`classification_schema_version: 3`), o Classificador elege o primário (`candidates[0]`)
+dinamicamente entre todos os pares autorizados cross-harness com base em mérito técnico e evidência
+econômica comprovada; as cadeias acima atuam como catálogo de elegibilidade e ordem de recuperação de infraestrutura.
+Sob Schema v2 legado, preserva-se o mapeamento posicional da cadeia física.
+
 A cadeia nominal do Checker (`Codex → Claude → Agy`) permanece **estritamente subordinada a `checker_independence` e à autoria efetiva completa** (incluindo Maker inicial, reworks e correções do Orquestrador): se OpenAI participou da autoria, Codex é inelegível; se Google participou, Agy é inelegível; se Anthropic participou, Claude é inelegível; se Google e OpenAI participaram, Claude é o único elegível.
 
-Essas escolhas são preferências operacionais e econômicas, não pins rígidos: o Classificador pode alterar modelo/effort diante de complexidade, disponibilidade comprovada ou pressão de quota. A hierarquia de autoridade preserva:
+Essas escolhas são preferências operacionais e econômicas, não pins rígidos: sob Schema v2 legado, o Classificador dimensionava modelo/effort respeitando a ordem posicional da cadeia; sob Schema v3, o Classificador elege o primário recomendado puramente por adequação técnica e evidência econômica durável (R1/R3), enquanto disponibilidade factual (preflight R21) e pressão de quota são gerenciadas exclusivamente pelo Runtime na escolha de `effective_primary` imediatamente antes do despacho. A hierarquia de autoridade preserva:
 $$\text{instrução explícita do usuário} > \text{configuração local do projeto (_tl-orc/PROJECT.md)} > \text{perfil-padrão publicado}$$
 
 Projetos consumidores herdam este perfil publicado por omissão. O arquivo local `_tl-orc/PROJECT.md` deve conter apenas fontes autoritativas, portões e exceções/overrides locais deliberados, sem duplicar desnecessariamente tabelas de participantes que reproduzam o padrão. Em projetos com os três harnesses disponíveis, o fluxo canônico esperado é:
@@ -97,21 +104,24 @@ permitido no catálogo e selecionado pelo Classificador para aquela tarefa.
    recorte relevante de evidências oficiais e medições locais, sempre com IDs. Não envie pacote,
    artigos, histórico ou diff inteiros. Ausência de perfil local não impede usar o padrão publicado
    depois de conferir as capacidades necessárias.
-2. Despache o [Classificador](classifier.md) com seu perfil fixo. Ele devolve tier, justificativa e
-   pares modelo/effort para **cada harness de cada papel solicitado**, incluindo alternativas de
-   fallback. Entregue contrato, schema compacto e briefing na própria chamada: a sessão não usa
+2. Despache o [Classificador](classifier.md) com seu perfil fixo. Sob Schema v3, ele avalia todos os
+   pares cross-harness em `evaluations[]`, aplica o Minimum Technical Adequacy Gate e elege o primário
+   recomendado em `candidates[0]`; sob Schema v2 legado, devolve pares modelo/effort por harness na ordem da
+   cadeia. Entregue contrato, schema compacto e briefing na própria chamada: a sessão não usa
    ferramentas nem explora o projeto. Uma escolha para Maker não dimensiona automaticamente
    Planner ou Checker.
-3. Valide o objeto contra o [schema](../schemas/classification-result.schema.json) e confira a
-   semântica: schema versão 2; correspondência exata de story, fase e revisões de contexto e
-   catálogo; papéis exatos; um candidato por harness na ordem configurada; pares, efforts, pins,
-   restrições e orçamento; `model: null` se e somente se `effort: null`; e cada `evidence_id`
-   fornecido no briefing e pertinente ao modelo/tarefa. Confira também se `cost_basis` não promete
-   mais que a evidência e, quando diferente de `unknown`, tem ao menos um ID econômico pertinente;
-   fontes apenas de capacidade não satisfazem esse vínculo. Não complete IDs ausentes durante a
-   validação. Confira ainda se razões são curtas e se `max`/`ultra` têm risco e ganho concretos,
-   além de orçamento e, para `ultra`, autorização multiagente. Use validador existente; sem ele,
-   declare a conferência manual e sua limitação. A confiança declarada não prova acerto.
+3. Valide o objeto com `scripts/validate_classification.py` contra o schema correspondente
+   ([schemas/classification-result-v3.schema.json](../schemas/classification-result-v3.schema.json) para v3 ou
+   [schemas/classification-result.schema.json](../schemas/classification-result.schema.json) para v2).
+   Confira a semântica: versão do schema compatível; correspondência exata de story, fase e revisões;
+   papéis exatos; matriz de estados fechada em v3 (`conclusive`, `underdetermined`, `awaiting_operator`, `infeasible`);
+   ausência de pares insuficientes em `candidates[]`; pares, efforts, pins, restrições e orçamento;
+   `model: null` se e somente se `effort: null` em v2; e cada `evidence_id` fornecido no briefing e pertinente
+   ao modelo/tarefa. Confira também se `cost_basis` não promete mais que a evidência e, quando diferente de
+   `unknown`, tem ao menos um ID econômico pertinente; fontes apenas de capacidade não satisfazem esse vínculo.
+   Não complete IDs ausentes durante a validação. Confira ainda se razões são curtas e se `max`/`ultra` têm
+   risco e ganho concretos, além de orçamento e, para `ultra`, autorização multiagente. Use o validador canônico;
+   sem ele, declare a conferência manual e sua limitação. A confiança declarada não prova acerto.
 4. Preserve a resposta canônica do harness. A única normalização adicional admitida é remover uma
    cerca JSON que envolva a resposta inteira, nos mesmos limites do
    [playbook](orchestrator-playbook.md#revisão-externa). Saída inválida permite no máximo uma correção

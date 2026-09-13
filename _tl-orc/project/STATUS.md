@@ -2,7 +2,7 @@ format_version: 1
 work_method: native
 active_work_ref: none
 current_role: none
-next_action: Reconciliação T024 (Governança e Integração T018 × v0.11) em andamento. T019 permanece estritamente bloqueada até conclusão de T024.
+next_action: T019 concluída (Dynamic Primary Harness Selection implementada e aprovada em r05). Pronto para dogfood controlado no consumidor platform.
 coordinator:
   harness: claude
   session: claude-code-b5b7f943
@@ -40,7 +40,7 @@ open_discussions: []
 | T016 | gov | none | done | [T022] | [] | 2 | evidence/T016-r01.md |
 | T017 | gov | none | done | [T016] | [] | 2 | evidence/T017-r02.md |
 | T018 | feat | none | done | [T017] | [] | 2 | evidence/T018-r05.md |
-| T019 | feat | none | ready | [T018, T024] | [] | 0 | - |
+| T019 | feat | none | done | [T018, T024] | [] | 1 | evidence/T019-r05.md |
 | T020 | fix | none | done | [T011] | [] | 2 | evidence/T013-r01.md |
 | T021 | feat | none | done | [T020] | [] | 2 | evidence/T014-r01.md |
 | T022 | feat | none | done | [] | [] | 2 | evidence/T015-r03b.md |

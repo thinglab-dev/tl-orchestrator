@@ -1770,9 +1770,12 @@ class TestAutomaticModeContract(unittest.TestCase):
         self.assertIn("checker_independence: preferred", content)
 
     def test_ac17_distribution_manifest_file_count_parity(self) -> None:
+        """AC17: Manifest internal integrity and required T018 package artifacts presence."""
         manifest_data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(manifest_data.get("package_file_count"), 22)
-        self.assertEqual(len(manifest_data.get("package_files", [])), 22)
+        self.assertIsInstance(manifest_data.get("package_files"), list)
+        self.assertIsInstance(manifest_data.get("package_file_count"), int)
+        self.assertEqual(manifest_data.get("package_file_count"), len(manifest_data.get("package_files", [])))
+        # Durable guarantees of T018 artifacts:
         self.assertIn("schemas/batch.schema.json", manifest_data["package_files"])
         self.assertIn("docs/EXECUTION_PROTOCOL.md", manifest_data["package_files"])
         self.assertIn("scripts/tl_job.py", manifest_data["package_files"])

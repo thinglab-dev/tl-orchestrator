@@ -633,18 +633,20 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
         valid, errors = validate_classification_data(fixture, expected_story="T019", expected_phase="implementation", expected_version=3)
         self.assertTrue(valid, f"Expected classifier prompt fixture to be valid, got errors: {errors}")
 
-    def test_r07_patch_counterproof_schema_and_validator_state_matrix(self) -> None:
-        """Finding R7: Strict state matrix enforcement in both Draft 2020-12 schema and Python validator."""
+    def test_r07_and_r12_schema_and_validator_state_matrix_fully_closed(self) -> None:
+        """Findings R7 & R12: State matrix fully closed and falsifiable in Draft 2020-12 schema & validator."""
         # 1. Structural inspection of Draft 2020-12 schema
         schema_path = ROOT / "schemas" / "classification-result-v3.schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         role_selection = schema["$defs"]["role_v3"]
         all_of = role_selection.get("allOf", [])
-        self.assertGreaterEqual(len(all_of), 4, "Expected at least 4 conditional branches in schema allOf")
+        self.assertGreaterEqual(len(all_of), 4, "Expected 4 conditional branches in schema allOf")
 
         # Branch 0: conclusive
         conclusive_branch = all_of[0]
         self.assertEqual(conclusive_branch["if"]["properties"]["selection_status"]["const"], "conclusive")
+        self.assertEqual(conclusive_branch["then"]["properties"]["tie_break_applied"]["type"], "null")
+        self.assertEqual(conclusive_branch["then"]["properties"]["candidates"]["minItems"], 1)
         self.assertEqual(
             conclusive_branch["then"]["properties"]["candidates"]["prefixItems"][0]["properties"]["dispatch_role"]["const"],
             "primary",
@@ -657,6 +659,9 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
         # Branch 1: underdetermined
         underdetermined_branch = all_of[1]
         self.assertEqual(underdetermined_branch["if"]["properties"]["selection_status"]["const"], "underdetermined")
+        self.assertEqual(underdetermined_branch["then"]["properties"]["tie_break_applied"]["type"], "string")
+        self.assertEqual(underdetermined_branch["then"]["properties"]["tie_break_applied"]["minLength"], 1)
+        self.assertEqual(underdetermined_branch["then"]["properties"]["candidates"]["minItems"], 1)
         self.assertEqual(
             underdetermined_branch["then"]["properties"]["candidates"]["prefixItems"][0]["properties"]["dispatch_role"]["const"],
             "primary",
@@ -665,187 +670,263 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
             underdetermined_branch["then"]["properties"]["candidates"]["items"]["properties"]["dispatch_role"]["const"],
             "fallback",
         )
-        self.assertEqual(
-            underdetermined_branch["then"]["properties"]["tie_break_applied"]["minLength"],
-            1,
-        )
 
         # Branch 2: awaiting_operator
         awaiting_branch = all_of[2]
         self.assertEqual(awaiting_branch["if"]["properties"]["selection_status"]["const"], "awaiting_operator")
+        self.assertEqual(awaiting_branch["then"]["properties"]["candidates"]["minItems"], 2)
         self.assertEqual(
             awaiting_branch["then"]["properties"]["candidates"]["items"]["properties"]["dispatch_role"]["const"],
             "unassigned",
         )
-        self.assertEqual(awaiting_branch["then"]["properties"]["candidates"]["minItems"], 2)
 
         # Branch 3: infeasible
         infeasible_branch = all_of[3]
         self.assertEqual(infeasible_branch["if"]["properties"]["selection_status"]["const"], "infeasible")
+        self.assertEqual(infeasible_branch["then"]["properties"]["tie_break_applied"]["type"], "null")
         self.assertEqual(infeasible_branch["then"]["properties"]["candidates"]["maxItems"], 0)
 
-        # 2. Counterproofs via validator:
-        # 2a. Conclusive with candidates[0].dispatch_role == "fallback"
-        bad_conclusive = dict(self.base_v3)
-        bad_conclusive["roles"] = {
-            "maker": {
-                "tier": "heavy",
-                "selection_status": "conclusive",
-                "reason": "Test",
-                "tie_break_applied": None,
-                "evaluations": [
-                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
-                ],
-                "candidates": [
-                    self._make_cand("codex", "gpt-5.6-terra", "high", "fallback"),
-                ],
+        # 2. Counterproofs via canonical validator:
+        # Helper to construct baseline role payload
+        def make_payload(status: str, tie_break: str | None, evals: list, cands: list) -> dict:
+            d = dict(self.base_v3)
+            d["roles"] = {
+                "maker": {
+                    "tier": "heavy",
+                    "selection_status": status,
+                    "reason": f"Testing {status}",
+                    "tie_break_applied": tie_break,
+                    "evaluations": evals,
+                    "candidates": cands,
+                }
             }
-        }
-        valid, errors = validate_classification_data(bad_conclusive)
-        self.assertFalse(valid)
-        self.assertTrue(any('conclusive status requires candidates[0].dispatch_role == "primary"' in e for e in errors))
+            return d
 
-        # 2b. Conclusive with candidates[1].dispatch_role == "primary"
-        bad_conclusive_second = dict(self.base_v3)
-        bad_conclusive_second["roles"] = {
-            "maker": {
-                "tier": "heavy",
-                "selection_status": "conclusive",
-                "reason": "Test",
-                "tie_break_applied": None,
-                "evaluations": [
-                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
-                    self._make_eval("agy", "gemini-3.8-flash-high", "high", True, "sufficient", True),
-                ],
-                "candidates": [
-                    self._make_cand("codex", "gpt-5.6-terra", "high", "primary"),
-                    self._make_cand("agy", "gemini-3.8-flash-high", "high", "primary"),
-                ],
-            }
-        }
-        valid, errors = validate_classification_data(bad_conclusive_second)
-        self.assertFalse(valid)
-        self.assertTrue(any('must have dispatch_role == "fallback" in conclusive status' in e for e in errors))
+        eval_codex = self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True)
+        eval_claude = self._make_eval("claude", "sonnet", "high", True, "sufficient", True)
+        eval_insuf = self._make_eval("codex", "gpt-5.6-terra", "high", True, "insufficient", False)
 
-        # 2c. Awaiting operator with candidates[0].dispatch_role == "primary"
-        bad_awaiting = dict(self.base_v3)
-        bad_awaiting["roles"] = {
-            "maker": {
-                "tier": "heavy",
-                "selection_status": "awaiting_operator",
-                "reason": "Test",
-                "tie_break_applied": None,
-                "evaluations": [
-                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
-                    self._make_eval("agy", "gemini-3.8-flash-high", "high", True, "sufficient", True),
-                ],
-                "candidates": [
-                    self._make_cand("codex", "gpt-5.6-terra", "high", "primary"),
-                    self._make_cand("agy", "gemini-3.8-flash-high", "high", "unassigned"),
-                ],
-            }
-        }
-        valid, errors = validate_classification_data(bad_awaiting)
-        self.assertFalse(valid)
-        self.assertTrue(any('must have dispatch_role == "unassigned" in awaiting_operator status' in e for e in errors))
+        cand_codex_pri = self._make_cand("codex", "gpt-5.6-terra", "high", "primary")
+        cand_codex_fb = self._make_cand("codex", "gpt-5.6-terra", "high", "fallback")
+        cand_codex_un = self._make_cand("codex", "gpt-5.6-terra", "high", "unassigned")
+        cand_claude_fb = self._make_cand("claude", "sonnet", "high", "fallback")
+        cand_claude_pri = self._make_cand("claude", "sonnet", "high", "primary")
+        cand_claude_un = self._make_cand("claude", "sonnet", "high", "unassigned")
 
-        # 2d. Infeasible with candidate
-        bad_infeasible = dict(self.base_v3)
-        bad_infeasible["roles"] = {
-            "maker": {
-                "tier": "heavy",
-                "selection_status": "infeasible",
-                "reason": "Test",
-                "tie_break_applied": None,
-                "evaluations": [
-                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "insufficient", False),
-                ],
-                "candidates": [
-                    self._make_cand("codex", "gpt-5.6-terra", "high", "primary"),
-                ],
-            }
-        }
-        valid, errors = validate_classification_data(bad_infeasible)
-        self.assertFalse(valid)
-        self.assertTrue(any("infeasible status requires candidates[] to be empty" in e for e in errors))
+        # --- A. CONCLUSIVE ---
+        # Valid: 1 candidate (primary), null tie-break
+        self.assertTrue(validate_classification_data(make_payload("conclusive", None, [eval_codex], [cand_codex_pri]))[0])
+        # Valid: 2 candidates (primary + fallback)
+        self.assertTrue(validate_classification_data(make_payload("conclusive", None, [eval_codex, eval_claude], [cand_codex_pri, cand_claude_fb]))[0])
+        # Reject: empty candidates
+        self.assertFalse(validate_classification_data(make_payload("conclusive", None, [eval_codex], []))[0])
+        # Reject: candidate[0] is fallback
+        self.assertFalse(validate_classification_data(make_payload("conclusive", None, [eval_codex], [cand_codex_fb]))[0])
+        # Reject: candidate[0] is unassigned
+        self.assertFalse(validate_classification_data(make_payload("conclusive", None, [eval_codex], [cand_codex_un]))[0])
+        # Reject: candidate[1] is primary
+        self.assertFalse(validate_classification_data(make_payload("conclusive", None, [eval_codex, eval_claude], [cand_codex_pri, cand_claude_pri]))[0])
+        # Reject: candidate[1] is unassigned
+        self.assertFalse(validate_classification_data(make_payload("conclusive", None, [eval_codex, eval_claude], [cand_codex_pri, cand_claude_un]))[0])
+        # Reject: tie_break_applied != None
+        self.assertFalse(validate_classification_data(make_payload("conclusive", "some_tie_break", [eval_codex], [cand_codex_pri]))[0])
 
-    def test_r07_patch_counterproof_ajv_draft2020_12_validation(self) -> None:
-        """Finding R7: Test directly via node / AJV Draft 2020-12 if available."""
+        # --- B. UNDERDETERMINED ---
+        tb_valid = "project_priority: codex/*/*"
+        # Valid: 1 candidate (primary) + non-empty tie_break
+        self.assertTrue(validate_classification_data(make_payload("underdetermined", tb_valid, [eval_codex], [cand_codex_pri]))[0])
+        # Valid: 2 candidates (primary + fallback) + non-empty tie_break
+        self.assertTrue(validate_classification_data(make_payload("underdetermined", tb_valid, [eval_codex, eval_claude], [cand_codex_pri, cand_claude_fb]))[0])
+        # Reject: empty candidates
+        v, errs = validate_classification_data(make_payload("underdetermined", tb_valid, [eval_codex], []))
+        self.assertFalse(v)
+        self.assertTrue(any("at least 1 candidate" in e for e in errs))
+        # Reject: candidate[0] is fallback
+        v, errs = validate_classification_data(make_payload("underdetermined", tb_valid, [eval_codex], [cand_codex_fb]))
+        self.assertFalse(v)
+        self.assertTrue(any('candidates[0].dispatch_role == "primary"' in e for e in errs))
+        # Reject: candidate[0] is unassigned
+        v, errs = validate_classification_data(make_payload("underdetermined", tb_valid, [eval_codex], [cand_codex_un]))
+        self.assertFalse(v)
+        self.assertTrue(any('candidates[0].dispatch_role == "primary"' in e for e in errs))
+        # Reject: candidate[1] is primary
+        v, errs = validate_classification_data(make_payload("underdetermined", tb_valid, [eval_codex, eval_claude], [cand_codex_pri, cand_claude_pri]))
+        self.assertFalse(v)
+        self.assertTrue(any('dispatch_role == "fallback"' in e for e in errs))
+        # Reject: candidate[1] is unassigned
+        v, errs = validate_classification_data(make_payload("underdetermined", tb_valid, [eval_codex, eval_claude], [cand_codex_pri, cand_claude_un]))
+        self.assertFalse(v)
+        self.assertTrue(any('dispatch_role == "fallback"' in e for e in errs))
+        # Reject: tie_break_applied is null
+        v, errs = validate_classification_data(make_payload("underdetermined", None, [eval_codex], [cand_codex_pri]))
+        self.assertFalse(v)
+        self.assertTrue(any("non-empty tie_break_applied" in e for e in errs))
+        # Reject: tie_break_applied is empty string
+        v, errs = validate_classification_data(make_payload("underdetermined", "", [eval_codex], [cand_codex_pri]))
+        self.assertFalse(v)
+        self.assertTrue(any("non-empty tie_break_applied" in e for e in errs))
+
+        # --- C. AWAITING_OPERATOR ---
+        # Valid: 2 candidates, both unassigned
+        self.assertTrue(validate_classification_data(make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_un, cand_claude_un]))[0])
+        # Reject: less than 2 candidates
+        self.assertFalse(validate_classification_data(make_payload("awaiting_operator", None, [eval_codex], [cand_codex_un]))[0])
+        # Reject: candidate[0] is primary
+        self.assertFalse(validate_classification_data(make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_pri, cand_claude_un]))[0])
+        # Reject: candidate[0] is fallback
+        self.assertFalse(validate_classification_data(make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_fb, cand_claude_un]))[0])
+        # Reject: candidate[1] is primary
+        self.assertFalse(validate_classification_data(make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_un, cand_claude_pri]))[0])
+        # Reject: candidate[1] is fallback
+        self.assertFalse(validate_classification_data(make_payload("awaiting_operator", None, [eval_codex, eval_claude], [cand_codex_un, cand_claude_fb]))[0])
+
+        # --- D. INFEASIBLE ---
+        # Valid: empty candidates, null tie_break
+        self.assertTrue(validate_classification_data(make_payload("infeasible", None, [eval_insuf], []))[0])
+        # Reject: 1 candidate (primary)
+        v, errs = validate_classification_data(make_payload("infeasible", None, [eval_insuf], [cand_codex_pri]))
+        self.assertFalse(v)
+        self.assertTrue(any("infeasible status requires candidates[] to be empty" in e for e in errs))
+        # Reject: 1 candidate (fallback)
+        v, errs = validate_classification_data(make_payload("infeasible", None, [eval_insuf], [cand_codex_fb]))
+        self.assertFalse(v)
+        self.assertTrue(any("infeasible status requires candidates[] to be empty" in e for e in errs))
+        # Reject: 1 candidate (unassigned)
+        v, errs = validate_classification_data(make_payload("infeasible", None, [eval_insuf], [cand_codex_un]))
+        self.assertFalse(v)
+        self.assertTrue(any("infeasible status requires candidates[] to be empty" in e for e in errs))
+        # Reject: tie_break_applied != None
+        v, errs = validate_classification_data(make_payload("infeasible", "some_tie_break", [eval_insuf], []))
+        self.assertFalse(v)
+        self.assertTrue(any("infeasible status requires tie_break_applied to be null" in e for e in errs))
+
+    def test_r11_hygiene_guard_no_private_scratch_paths_in_t019_content_paths(self) -> None:
+        """Finding R11: Hygiene guard proving no private scratch or machine paths exist in T019 content paths."""
+        t019_paths = [
+            "distribution-manifest.json",
+            "README.md",
+            "SKILL.md",
+            "docs/PROJECT_CONFIGURATION.md",
+            "docs/WORK_MODEL.md",
+            "prompts/classifier.md",
+            "prompts/orchestrator.md",
+            "prompts/orchestrator-perfis.md",
+            "schemas/classification-result-v3.schema.json",
+            "scripts/validate_classification.py",
+            "scripts/tests/test_dynamic_primary_selection.py",
+            "scripts/tests/test_automatic_mode.py",
+            "CHANGELOG.md",
+        ]
+        forbidden_patterns = [
+            "/Us" + "ers/",
+            ".gem" + "ini/",
+            "antigravity/" + "brain",
+            "/ho" + "me/",
+        ]
+        violations = []
+        for rel_path in t019_paths:
+            full_path = ROOT / rel_path
+            self.assertTrue(full_path.exists(), f"Content path {rel_path} does not exist")
+            content = full_path.read_text(encoding="utf-8")
+            for line_no, line in enumerate(content.splitlines(), start=1):
+                for pat in forbidden_patterns:
+                    if pat in line:
+                        violations.append(f"{rel_path}:{line_no} contains forbidden pattern '{pat}': {line.strip()}")
+
+        self.assertEqual(violations, [], f"Private scratch/machine paths detected in versioned files:\n" + "\n".join(violations))
+
+    def test_r11_and_r12_ajv_draft2020_12_direct_parity(self) -> None:
+        """Findings R11 & R12: Portable direct AJV Draft 2020-12 validation and parity against Python validator."""
         node_bin = shutil.which("node")
         if not node_bin:
-            self.skipTest("Node.js not found in environment")
+            self.skipTest("Node.js not found in environment; direct AJV parity test skipped")
 
         test_script = """
 const fs = require('fs');
 let Ajv2020;
-const paths = [
-  '/Users/albertiano/.gemini/antigravity/brain/c35bdc15-8391-494c-8de0-190630cac49e/scratch/review-classifier-pref/node_modules/ajv/dist/2020',
-  'ajv/dist/2020'
-];
-for (const p of paths) {
-  try { Ajv2020 = require(p); break; } catch (e) {}
-}
-if (!Ajv2020) {
-  console.log('SKIP');
+try {
+  Ajv2020 = require('ajv/dist/2020');
+} catch (e) {
+  console.log('AJV_UNAVAILABLE');
   process.exit(0);
 }
+
 const ajv = new Ajv2020({ allErrors: true });
 const schema = JSON.parse(fs.readFileSync('schemas/classification-result-v3.schema.json', 'utf8'));
 const validate = ajv.compile(schema);
 
-// Counterproof 1: conclusive with candidates[0].dispatch_role == 'fallback'
-const badConclusive = {
-  schema_version: 3,
-  story_id: 'T019',
-  phase: 'implementation',
-  context_revision: 'ctx',
-  catalog_revision: 'cat',
-  confidence: 'high',
-  facts: ['test'],
-  uncertainties: [],
-  reclassify_when: ['test'],
-  roles: {
-    maker: {
-      tier: 'heavy',
-      selection_status: 'conclusive',
-      reason: 'test',
-      tie_break_applied: null,
-      evaluations: [{
-        harness: 'codex', model: 'gpt-5.6-terra', effort: 'high',
-        catalog_eligible: true, technical_adequacy: 'sufficient', dispatchable: true,
-        cost_basis: 'token_price_only', evidence_ids: ['ev-1'], uncertainty: null, reason: 'test'
-      }],
-      candidates: [{
-        harness: 'codex', model: 'gpt-5.6-terra', effort: 'high',
-        dispatch_role: 'fallback', evidence_ids: ['ev-1'], cost_basis: 'token_price_only', reason: 'test'
-      }]
+function makePayload(status, tieBreak, candidates) {
+  return {
+    schema_version: 3,
+    story_id: 'T019',
+    phase: 'implementation',
+    context_revision: 'ctx',
+    catalog_revision: 'cat',
+    confidence: 'high',
+    facts: ['test'],
+    uncertainties: [],
+    reclassify_when: ['test'],
+    roles: {
+      maker: {
+        tier: 'heavy',
+        selection_status: status,
+        reason: 'test',
+        tie_break_applied: tieBreak,
+        evaluations: [{
+          harness: 'codex', model: 'gpt-5.6-terra', effort: 'high',
+          catalog_eligible: true, technical_adequacy: 'sufficient', dispatchable: true,
+          cost_basis: 'token_price_only', evidence_ids: ['ev-1'], uncertainty: null, reason: 'test'
+        }],
+        candidates: candidates
+      }
     }
+  };
+}
+
+const cPri = { harness: 'codex', model: 'gpt-5.6-terra', effort: 'high', dispatch_role: 'primary', evidence_ids: ['ev-1'], cost_basis: 'token_price_only', reason: 'test' };
+const cFb = { harness: 'codex', model: 'gpt-5.6-terra', effort: 'high', dispatch_role: 'fallback', evidence_ids: ['ev-1'], cost_basis: 'token_price_only', reason: 'test' };
+const cUn = { harness: 'codex', model: 'gpt-5.6-terra', effort: 'high', dispatch_role: 'unassigned', evidence_ids: ['ev-1'], cost_basis: 'token_price_only', reason: 'test' };
+
+const suite = [
+  // Conclusive
+  { name: 'conclusive_valid', expected: true, payload: makePayload('conclusive', null, [cPri]) },
+  { name: 'conclusive_fb_at_0', expected: false, payload: makePayload('conclusive', null, [cFb]) },
+  { name: 'conclusive_pri_at_1', expected: false, payload: makePayload('conclusive', null, [cPri, cPri]) },
+  { name: 'conclusive_with_tie_break', expected: false, payload: makePayload('conclusive', 'tb', [cPri]) },
+
+  // Underdetermined
+  { name: 'underdetermined_valid', expected: true, payload: makePayload('underdetermined', 'tb', [cPri]) },
+  { name: 'underdetermined_empty_cands', expected: false, payload: makePayload('underdetermined', 'tb', []) },
+  { name: 'underdetermined_fb_at_0', expected: false, payload: makePayload('underdetermined', 'tb', [cFb]) },
+  { name: 'underdetermined_un_at_0', expected: false, payload: makePayload('underdetermined', 'tb', [cUn]) },
+  { name: 'underdetermined_pri_at_1', expected: false, payload: makePayload('underdetermined', 'tb', [cPri, cPri]) },
+  { name: 'underdetermined_un_at_1', expected: false, payload: makePayload('underdetermined', 'tb', [cPri, cUn]) },
+  { name: 'underdetermined_null_tb', expected: false, payload: makePayload('underdetermined', null, [cPri]) },
+  { name: 'underdetermined_empty_tb', expected: false, payload: makePayload('underdetermined', '', [cPri]) },
+
+  // Awaiting Operator
+  { name: 'awaiting_valid', expected: true, payload: makePayload('awaiting_operator', null, [cUn, cUn]) },
+  { name: 'awaiting_1_cand', expected: false, payload: makePayload('awaiting_operator', null, [cUn]) },
+  { name: 'awaiting_pri_at_0', expected: false, payload: makePayload('awaiting_operator', null, [cPri, cUn]) },
+  { name: 'awaiting_fb_at_0', expected: false, payload: makePayload('awaiting_operator', null, [cFb, cUn]) },
+
+  // Infeasible
+  { name: 'infeasible_valid', expected: true, payload: makePayload('infeasible', null, []) },
+  { name: 'infeasible_pri_cand', expected: false, payload: makePayload('infeasible', null, [cPri]) },
+  { name: 'infeasible_fb_cand', expected: false, payload: makePayload('infeasible', null, [cFb]) },
+  { name: 'infeasible_un_cand', expected: false, payload: makePayload('infeasible', null, [cUn]) },
+  { name: 'infeasible_with_tb', expected: false, payload: makePayload('infeasible', 'tb', []) },
+];
+
+for (const tc of suite) {
+  const actual = validate(tc.payload);
+  if (actual !== tc.expected) {
+    console.error(`PARITY FAIL in AJV for case ${tc.name}: expected ${tc.expected}, got ${actual}`);
+    process.exit(1);
   }
-};
-if (validate(badConclusive)) {
-  console.error('AJV accepted invalid conclusive payload with fallback at index 0');
-  process.exit(1);
 }
 
-// Counterproof 2: awaiting_operator with candidates[0].dispatch_role == 'primary'
-const badAwaiting = JSON.parse(JSON.stringify(badConclusive));
-badAwaiting.roles.maker.selection_status = 'awaiting_operator';
-badAwaiting.roles.maker.candidates[0].dispatch_role = 'primary';
-badAwaiting.roles.maker.candidates.push({
-  harness: 'claude', model: 'sonnet', effort: 'high',
-  dispatch_role: 'unassigned', evidence_ids: ['ev-2'], cost_basis: 'token_price_only', reason: 'test'
-});
-badAwaiting.roles.maker.evaluations.push({
-  harness: 'claude', model: 'sonnet', effort: 'high',
-  catalog_eligible: true, technical_adequacy: 'sufficient', dispatchable: true,
-  cost_basis: 'token_price_only', evidence_ids: ['ev-2'], uncertainty: null, reason: 'test'
-});
-if (validate(badAwaiting)) {
-  console.error('AJV accepted invalid awaiting_operator payload with primary');
-  process.exit(1);
-}
-
-console.log('AJV_OK');
+console.log('AJV_PARITY_OK');
 """
         proc = subprocess.run(
             [node_bin, "-e", test_script],
@@ -853,10 +934,11 @@ console.log('AJV_OK');
             capture_output=True,
             text=True,
         )
-        if "SKIP" in proc.stdout:
-            self.skipTest("Ajv2020 module not available in standard paths")
-        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}\n{proc.stdout}")
-        self.assertIn("AJV_OK", proc.stdout)
+        if "AJV_UNAVAILABLE" in proc.stdout:
+            self.skipTest("ajv/dist/2020 is not available in standard Node resolution paths; direct AJV validation skipped")
+
+        self.assertEqual(proc.returncode, 0, f"AJV parity test failed: {proc.stderr}\n{proc.stdout}")
+        self.assertIn("AJV_PARITY_OK", proc.stdout)
 
 
 if __name__ == "__main__":

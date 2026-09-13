@@ -10,7 +10,7 @@ coordinator:
   last_write_at: 20260908T105215Z
   released: true
 review_followups: []
-next_task_id: 13
+next_task_id: 14
 next_deliverable_id: 1
 next_decision_id: 1
 next_discussion_id: 1
@@ -31,3 +31,4 @@ open_discussions: []
 | T010 | fix | none | done | [T009] | [] | 11 | evidence/T010-r07.md |
 | T011 | analysis | none | draft | [T010] | [] | 0 | - |
 | T012 | feature | package | done | [] | [] | 565 | evidence/T012-verification.md |
+| T013 | feat | package | done | [] | [] | 1 | - |

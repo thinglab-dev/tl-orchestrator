@@ -40,6 +40,13 @@ entrega. O Orquestrador preserva o parecer no registro de revisão junto ao `con
 
 Procure desvios de intenção, regressões, casos de borda e lacunas de evidência materiais. Leia adições e remoções, consumidores e testes pertinentes. Não transforme preferência de estilo em defeito sem requisito ou risco demonstrado.
 
+Aplique rigorosamente as **4 lentes obrigatórias de revisão profunda** (`tl-deep-review`):
+1. **Concorrência e Condições de Corrida:** identifique janelas TOCTOU, leituras/escritas sem lock em estruturas compartilhadas, uso incorreto de variáveis atômicas e corridas assíncronas.
+2. **Vazamento de Recursos e Esgotamento:** detecte goroutines órfãs sem cancelamento de contexto, instâncias de `time.After` em loops ou hot paths, buffers deslimitados e recursos sem encerramento garantido.
+3. **Fail-Closed e Tratamento de Erros:** barre erros ignorados (`_ = err`), fallbacks silenciosos que mascaram falhas e falta de propagação defensiva de erros.
+4. **Falsificabilidade de Testes:** comprove se os testes realmente falham na ausência da alteração, rejeitando asserções cegas e testes vazios.
+Valide violações mecânicas com `audit_diff.py` (`skills/tl-deep-review/scripts/audit_diff.py`).
+
 - `action_items`: ações ainda necessárias para esta entrega. Classifique defeito de implementação como `patch`, problema da spec como `bad_spec` e lacuna de intenção como `intent_gap`, atribuindo ao papel correspondente.
 - `deferred`: problemas reais preexistentes ou fora do escopo, com evidência. Não esconda aqui um critério de aceite ainda pendente.
 - `rejected`: hipóteses investigadas e descartadas, com a evidência que as rejeitou.

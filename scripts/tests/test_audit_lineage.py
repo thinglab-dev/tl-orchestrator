@@ -456,10 +456,18 @@ class AuditLineageSyntheticTests(unittest.TestCase):
 
 
 class BoardCasCompatibilityTest(unittest.TestCase):
-    def test_t34_cas_compatibility_on_all_24_tasks(self):
-        """T34: update_task_status_atomic sobre cópia do board reconciliado real para os 24 ids."""
+    def test_t34_cas_compatibility_on_all_tasks(self):
+        """T34: update_task_status_atomic sobre cópia do board reconciliado real para todos os ids de tasks."""
         repo_root = Path(__file__).resolve().parent.parent.parent
         real_status = repo_root / "_tl-orc" / "project" / "STATUS.md"
+        tasks_dir = repo_root / "_tl-orc" / "project" / "tasks"
+
+        canonical_task_ids = set()
+        for tf in sorted(tasks_dir.glob("T*.md")):
+            fm, _ = parse_yaml_frontmatter(tf)
+            tid = fm.get("id")
+            if tid:
+                canonical_task_ids.add(tid)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             temp_status = Path(tmpdir) / "STATUS.md"
@@ -467,7 +475,9 @@ class BoardCasCompatibilityTest(unittest.TestCase):
 
             header, tasks, errors = parse_status_board(temp_status)
             self.assertEqual(errors, [])
-            self.assertEqual(len(tasks), 24)
+
+            board_task_ids = {t["id"] for t in tasks}
+            self.assertEqual(board_task_ids, canonical_task_ids)
 
             for task in tasks:
                 tid = task["id"]

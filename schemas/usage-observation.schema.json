@@ -1,0 +1,342 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tl-orchestrator Harness Usage Observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "session_ref_digest",
+    "harness",
+    "harness_version",
+    "source_format",
+    "source_format_fingerprint",
+    "parser_status",
+    "completeness",
+    "timing",
+    "raw_usage",
+    "derived_usage",
+    "observed_contexts",
+    "thread_topology",
+    "rate_limits"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_ref_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "harness": {
+      "type": "string",
+      "enum": ["codex"]
+    },
+    "harness_version": {
+      "type": ["string", "null"]
+    },
+    "source_format": {
+      "type": "string",
+      "enum": ["codex_session_jsonl"]
+    },
+    "source_format_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parser_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "parser_version", "reasons"],
+      "properties": {
+        "status": {
+          "enum": ["supported", "partial", "unsupported"]
+        },
+        "parser_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasons"],
+      "properties": {
+        "status": {
+          "enum": ["complete", "incomplete", "not_observable"]
+        },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observed_session_span_seconds",
+        "first_timestamp",
+        "last_timestamp",
+        "source",
+        "job_wall_seconds",
+        "model_latency_seconds"
+      ],
+      "properties": {
+        "observed_session_span_seconds": {
+          "oneOf": [
+            { "type": "number", "minimum": 0 },
+            { "const": "not_observable" }
+          ]
+        },
+        "first_timestamp": {
+          "type": ["string", "null"]
+        },
+        "last_timestamp": {
+          "type": ["string", "null"]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "job_wall_seconds": {
+          "const": "not_observable"
+        },
+        "model_latency_seconds": {
+          "const": "not_observable"
+        }
+      }
+    },
+    "raw_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cumulative",
+        "per_response_sum",
+        "reconciliation",
+        "response_count"
+      ],
+      "properties": {
+        "cumulative": {
+          "$ref": "#/$defs/token_counters"
+        },
+        "per_response_sum": {
+          "$ref": "#/$defs/token_counters"
+        },
+        "reconciliation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "fields"],
+          "properties": {
+            "status": {
+              "enum": ["reconciled", "divergent", "not_observable"]
+            },
+            "fields": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "input_tokens",
+                "cached_input_tokens",
+                "cache_write_input_tokens",
+                "output_tokens",
+                "reasoning_output_tokens",
+                "total_tokens"
+              ],
+              "properties": {
+                "input_tokens": { "$ref": "#/$defs/field_reconciliation" },
+                "cached_input_tokens": { "$ref": "#/$defs/field_reconciliation" },
+                "cache_write_input_tokens": { "$ref": "#/$defs/field_reconciliation" },
+                "output_tokens": { "$ref": "#/$defs/field_reconciliation" },
+                "reasoning_output_tokens": { "$ref": "#/$defs/field_reconciliation" },
+                "total_tokens": { "$ref": "#/$defs/field_reconciliation" }
+              }
+            }
+          }
+        },
+        "response_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "derived_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uncached_input_tokens"],
+      "properties": {
+        "uncached_input_tokens": {
+          "$ref": "#/$defs/derived_metric"
+        }
+      }
+    },
+    "observed_contexts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model", "effort", "turn_count", "raw_usage"],
+        "properties": {
+          "model": {
+            "type": ["string", "null"]
+          },
+          "effort": {
+            "type": ["string", "null"]
+          },
+          "turn_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "raw_usage": {
+            "$ref": "#/$defs/token_counters"
+          }
+        }
+      }
+    },
+    "thread_topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root_thread_id", "session_id", "threads"],
+      "properties": {
+        "root_thread_id": {
+          "type": ["string", "null"]
+        },
+        "session_id": {
+          "type": ["string", "null"]
+        },
+        "threads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["thread_id", "parent_thread_id", "role", "turn_count"],
+            "properties": {
+              "thread_id": {
+                "type": "string"
+              },
+              "parent_thread_id": {
+                "type": ["string", "null"]
+              },
+              "role": {
+                "enum": ["root", "child", "auto_review", "guardian"]
+              },
+              "turn_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "rate_limits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scope", "attribution", "limit_id", "primary", "secondary", "plan_type"],
+        "properties": {
+          "scope": {
+            "const": "account"
+          },
+          "attribution": {
+            "const": "unknown"
+          },
+          "limit_id": {
+            "type": ["string", "null"]
+          },
+          "limit_name": {
+            "type": ["string", "null"]
+          },
+          "primary": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["used_percent", "window_minutes", "resets_at"],
+            "properties": {
+              "used_percent": { "type": ["number", "null"] },
+              "window_minutes": { "type": ["number", "null"] },
+              "resets_at": { "type": ["number", "null"] }
+            }
+          },
+          "secondary": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["used_percent", "window_minutes", "resets_at"],
+            "properties": {
+              "used_percent": { "type": ["number", "null"] },
+              "window_minutes": { "type": ["number", "null"] },
+              "resets_at": { "type": ["number", "null"] }
+            }
+          },
+          "plan_type": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "token_counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_tokens",
+        "cached_input_tokens",
+        "cache_write_input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens",
+        "total_tokens"
+      ],
+      "properties": {
+        "input_tokens": { "$ref": "#/$defs/counter_value" },
+        "cached_input_tokens": { "$ref": "#/$defs/counter_value" },
+        "cache_write_input_tokens": { "$ref": "#/$defs/counter_value" },
+        "output_tokens": { "$ref": "#/$defs/counter_value" },
+        "reasoning_output_tokens": { "$ref": "#/$defs/counter_value" },
+        "total_tokens": { "$ref": "#/$defs/counter_value" }
+      }
+    },
+    "counter_value": {
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "const": "not_observable" }
+      ]
+    },
+    "field_reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "cumulative_value", "per_response_value"],
+      "properties": {
+        "status": {
+          "enum": ["reconciled", "divergent", "not_observable"]
+        },
+        "cumulative_value": { "$ref": "#/$defs/counter_value" },
+        "per_response_value": { "$ref": "#/$defs/counter_value" },
+        "delta": {
+          "type": ["integer", "null"]
+        }
+      }
+    },
+    "derived_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "derivation_id"],
+          "properties": {
+            "value": { "type": "number" },
+            "derivation_id": { "type": "string", "minLength": 1 }
+          }
+        },
+        { "const": "not_observable" }
+      ]
+    }
+  }
+}

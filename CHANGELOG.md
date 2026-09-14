@@ -4,6 +4,41 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-14
+
+### Adicionado
+
+- Contrato de verificação humana adiada: specs podem declarar inspeções humanas `deferred` com
+  responsável, procedimento e resultado esperado; Checker e Orquestrador preservam a pendência sem
+  convertê-la em `intent_gap` ou bloqueio, sem permitir que prova automatizável ou falha conhecida
+  seja ocultada.
+- Regra do dono em destaque e orçamento verificável de contexto: o Orquestrador não edita nem
+  diagnostica o consumidor sem permissão manual explícita e delimitada, não faz polling nem lê saída
+  parcial, admite somente `blocking` e `reason` por parada, separa manutenção do condutor, agrupa
+  comandos e recomenda handoff em sessão nova acima de aproximadamente 120 mil tokens.
+- Versão corrente explícita e validada entre `distribution-manifest.json`, `README.md` e `SKILL.md`.
+
+### Corrigido
+
+- IDs de board com letras Unicode passam pelos mesmos limites estruturais dos IDs ASCII no
+  supervisor, cobrindo chaves acentuadas sem aceitar espaço, `_` inicial, comentário, aspas ou `:`.
+- Planner e Maker agora usam portões na forma literal da allowlist; recusa de comando oficial é
+  registrada no summary sem loop de variantes, pois a execução autoritativa dos portões é do
+  condutor.
+- Documentada a recuperação de `advance` após checkpoint invalidado (`stop` e nova execução da
+  story) e a precedência do git-dir do worktree sobre o common-dir ao localizar `state.json`.
+
+### Migração
+
+- A verificação humana adiada é opt-in na spec e usa o array `deferred` já existente no schema de
+  revisão; não há conversão automática de `intent_gap` legado. Consumidores devem atualizar os
+  contratos carregados para obter a nova semântica.
+
+### Validação
+
+- No Windows com Python 3.13, `test_context_ledger` e `test_resume_generate` preservam as mesmas 3
+  falhas e 7 erros da tag v0.12.0; a matriz autoritativa da CI continua em `ubuntu-latest`.
+
 ## [0.12.0] - 2026-09-14
 
 ### Adicionado
@@ -703,3 +738,4 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 [0.2.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.1.5...v0.2.0
 [0.11.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.10.0...v0.11.0
 [0.12.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.11.0...v0.12.0
+[0.13.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.12.0...v0.13.0

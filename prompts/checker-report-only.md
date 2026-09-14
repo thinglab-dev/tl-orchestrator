@@ -55,10 +55,17 @@ Aplique rigorosamente as **4 lentes obrigatórias de revisão profunda** (`tl-de
 Valide violações mecânicas com `audit_diff.py` (`skills/tl-deep-review/scripts/audit_diff.py`).
 
 - `action_items`: ações ainda necessárias para esta entrega. Classifique defeito de implementação como `patch`, problema da spec como `bad_spec` e lacuna de intenção como `intent_gap`, atribuindo ao papel correspondente.
-- `deferred`: problemas reais preexistentes ou fora do escopo, com evidência. Não esconda aqui um critério de aceite ainda pendente.
+- `deferred`: problemas reais preexistentes ou fora do escopo, com evidência, e verificações humanas
+  que a spec marcou explicitamente como `deferred`. Para estas, preserve responsável, procedimento,
+  resultado esperado e referência da spec. Elas são pendências não bloqueantes e não geram por si só
+  `changes_requested`; não esconda aqui critério automatizável, falha conhecida ou verificação que a
+  spec ou a política exige antes da entrega.
 - `rejected`: hipóteses investigadas e descartadas, com a evidência que as rejeitou.
 
-Para verificação necessária que não pode executar, use um item `intent_gap` dirigido a `human`, inicie o problema com `verificacao_pendente:` e indique a inspeção/comando necessário e o que ele discrimina. O Orquestrador encaminha a decisão; não há roteamento automático.
+Para verificação necessária que não pode executar e que **não** foi legitimamente declarada
+`deferred` na spec, use um item `intent_gap` dirigido a `human`, inicie o problema com
+`verificacao_pendente:` e indique a inspeção/comando necessário e o que ele discrimina. O
+Orquestrador encaminha a decisão; não há roteamento automático.
 
 Quando um comportamento parecer contrariar o pacote `tl-orchestrator` e estiver fora do escopo da
 entrega, registre-o em `deferred` como `possível defeito do método:`. Inclua a cláusula ou caminho

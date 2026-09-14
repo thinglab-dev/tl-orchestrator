@@ -7,3 +7,4 @@
 *.swo
 __pycache__/
 *.pyc
+/.tmp/

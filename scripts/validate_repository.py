@@ -30,6 +30,11 @@ def load_manifest() -> list[str]:
         fail(f"invalid distribution manifest: {exc}")
     if data.get("format_version") != 1:
         fail("distribution manifest format_version must be 1")
+    package_version = data.get("package_version")
+    if not isinstance(package_version, str) or not re.fullmatch(
+        r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", package_version
+    ):
+        fail("distribution manifest package_version must be canonical SemVer")
     files = data.get("package_files")
     if not isinstance(files, list) or not files or not all(isinstance(x, str) for x in files):
         fail("package_files must be a non-empty string array")
@@ -61,6 +66,11 @@ def load_manifest() -> list[str]:
             current /= part
             if current.is_symlink():
                 fail(f"package path traverses a symlink: {item}")
+    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    version_marker = f"Versão atual do pacote: **{package_version}**."
+    if version_marker not in skill or version_marker not in readme:
+        fail("package version differs between manifest, SKILL.md and README.md")
     return files
 
 

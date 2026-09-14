@@ -9,6 +9,23 @@ O protocolo é documental: vale com ou sem automação. O [supervisor opcional](
 apenas transporta uma execução já autorizada; ele não escolhe modelo, não inventa comando e não
 aprova entrega.
 
+## Orçamento de contexto do Orquestrador
+
+O custo dominante pode ser a quantidade de requisições que reenvia um contexto grande, não uma
+leitura isolada. Por isso estas regras são verificáveis:
+
+- dispare o processo em segundo plano uma vez e espere sua notificação de fim, sem polling, leitura
+  parcial de saída ou checagens de progresso;
+- por parada, leia do `result.json` somente `blocking` e `reason`;
+- diagnóstico que exija código do condutor vira unidade de manutenção ou sessão nova, nunca leitura
+  exploratória na conversa do Orquestrador;
+- não envie mensagens de status entre passos triviais e agrupe comandos independentes numa chamada;
+- acima de aproximadamente 120 mil tokens de contexto, grave um handoff curto em arquivo e
+  recomende sessão nova.
+
+Essas regras também delimitam ownership: salvo permissão manual explícita e específica, o
+Orquestrador não edita nem diagnostica o consumidor; despacha trabalho e lê recibos.
+
 ## Unidade de execução
 
 Uma **unidade** (`unit`) é um despacho com começo, critério de aceite e resultado terminal únicos.
@@ -111,6 +128,11 @@ No condutor do consumidor, a cadeia autorizada é:
      risco, e a fonte de uma prova. Para sondagem independente, despache um verificador próprio.
 6. **Entrega** conforme a autoridade existente.
 
+Verificação visual ou outra ação humana marcada pela spec como `deferred`, com responsável,
+procedimento e resultado esperado, é preservada no parecer e na evidência como pendência
+não bloqueante. Ela não vira `intent_gap` nem interrompe o condutor, salvo se a política do consumidor
+a exigir antes da entrega. O rótulo não serve para adiar prova automatizável ou encobrir falha.
+
 Não peça o parecer integral de volta ao contexto do condutor: o Checker entrega veredito, achados e
 caminho do relatório; o corpo do relatório e o diff ficam no disco. Reproduzir o diff inteiro no
 condutor refaz exatamente o trabalho pesado que o despacho por artefatos existe para evitar.
@@ -132,6 +154,17 @@ Sem um callback comprovado no ambiente, não prometa retomada autônoma depois q
 processo local continua até terminar e grava seu resultado no disco, mas quem lê esse resultado é a
 próxima ativação. Uma tarefa agendada do harness pode iniciar essa ativação quando o consumidor a
 configurar; o método não fornece daemon, agendador ou notificação própria.
+
+## Recuperação operacional e estado em worktrees
+
+Se um `advance` falhar depois de invalidar o checkpoint, `--resume` não recupera a execução.
+Registre a causa, execute `stop` e rode a story novamente; não tente reconstruir o checkpoint
+invalidado à mão.
+
+Hooks e guardas de manutenção que procurem `state.json` em repositórios Git resolvem primeiro o
+git-dir do worktree com `git rev-parse --absolute-git-dir`. Somente se não houver estado próprio
+consultam o common-dir. Assim worktrees simultâneos não leem nem alteram a sessão um do outro, e um
+estado legado comum continua disponível como fallback controlado.
 
 ## Supervisor opcional
 

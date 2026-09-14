@@ -4,6 +4,8 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-14
+
 ### Adicionado
 
 - Seleção Dinâmica de Primário — Desacoplamento entre Ranking Semântico e Fallback de Infraestrutura (Task Native T019):
@@ -700,3 +702,4 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 [0.4.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.3.0...v0.4.0
 [0.2.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.1.5...v0.2.0
 [0.11.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.10.0...v0.11.0
+[0.12.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.11.0...v0.12.0

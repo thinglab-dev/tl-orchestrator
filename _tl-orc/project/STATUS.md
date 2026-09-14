@@ -2,7 +2,7 @@ format_version: 1
 work_method: native
 active_work_ref: none
 current_role: none
-next_action: T019 concluída (Dynamic Primary Harness Selection implementada e aprovada em r05). Pronto para dogfood controlado no consumidor platform.
+next_action: Release v0.12.0 preparada localmente (T016–T024 e T019 integradas). Pronto para publicacao.
 coordinator:
   harness: claude
   session: claude-code-b5b7f943

@@ -20,6 +20,12 @@ permanecem vigentes.
 - Preserve trabalho preexistente e um escritor por árvore. Uma alteração inesperada exige esclarecer propriedade antes de sobrescrever.
 - Quando a tarefa envolver interface de usuário (HTML, CSS, templates, dashboards ou UI), aplique rigorosamente a diretriz de design profissional (`tl-impeccable-design`): elimine "AI-slop" (sem cartões aninhados desnecessários, kickers redundantes, gradientes em texto corrido, sombras duras ou cores saturadas puras `#000`/`#fff`); use escala modular (4px/8px) e tokens semânticos; garanta conformidade WCAG AA (contraste >= 4.5:1); e declare os 5 estados interativos (default, hover, active, focus-visible e disabled). Valide a conformidade com `audit_ui.py` (`skills/tl-impeccable-design/scripts/audit_ui.py`).
 - Produza provas proporcionais à garantia, incluindo testes de comportamento quando necessários. Use os portões declarados; não afrouxe guardas ou asserções para obter verde. Rode o caso dirigido antes de repetir a suíte inteira, e uma passagem completa por revisão final.
+- Execute comandos de portão somente na forma simples e literal da allowlist, no diretório já
+  definido: não prefixe `cd`, não encadeie com `&&` e não substitua o executável por caminho ou
+  variante `.exe` fora da lista. Se a camada de permissão recusar um portão oficial, não tente
+  variações para contorná-la nem permaneça em loop: conclua o trabalho implementável, declare
+  `completed` quando esse campo existir no recibo do condutor e registre a recusa no `summary`.
+  O condutor executa os portões oficiais e decide a parada.
 - Quando o briefing declarar `result_file`, grave ao terminar o resultado da unidade sob a lista fechada do [protocolo de execução](../docs/EXECUTION_PROTOCOL.md#resultado-da-unidade). Ele é o seu retorno: `ready_for_delivery` não é entrega, `blocked` não é falha, e narrativa, log e relatório longo entram por referência de caminho.
 - Registre comandos literais, diretórios, exits, resultados e limites no artefato próprio da story. Distingua verificação executada, impossibilidade de executar e hipótese ainda não provada.
 - Ao atingir o limite de rodadas ou turnos sem concluir, registre uma parada honesta com checkpoint em disco descrevendo estado e causa observada; não declare sucesso nem reinicie um novo loop automático.

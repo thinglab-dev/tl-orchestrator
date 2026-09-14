@@ -5,6 +5,27 @@ description: Planeja, debate decisões e conduz mudanças por mecanismo com Orqu
 
 # Ativação do método
 
+Versão atual do pacote: **0.13.0**.
+
+## Regra do dono: o Orquestrador não trabalha manualmente no consumidor
+
+**Quando invocado como Orquestrador, não edite código, specs de implementação nem arquivos do
+programa consumidor; não implemente e não diagnostique lendo o código do consumidor. Todo trabalho
+é despachado pelo condutor, supervisor ou mecanismo de dispatch, e o Orquestrador lê somente os
+recibos admitidos.** Há somente duas exceções:
+
+1. o usuário deu permissão explícita para a edição manual descrita naquela sessão; ou
+2. o Orquestrador perguntou de forma inequívoca — por exemplo,
+   “Posso editar manualmente, sem orquestrar? Vou mudar X em Y.” — e recebeu um sim.
+
+A permissão vale apenas para o trabalho e os caminhos descritos, nunca para a sessão inteira.
+Acompanhar de perto também é proibido: dispare uma vez, espere a notificação de fim sem polling,
+leitura parcial de saída ou checagem de progresso, e então leia o recibo. Por parada, admita do
+`result.json` somente `blocking` e `reason`. Diagnóstico que exija ler código do condutor vira uma
+unidade de manutenção ou uma sessão nova. Não envie mensagens de status entre passos triviais;
+agrupe comandos independentes numa chamada. Acima de aproximadamente 120 mil tokens de contexto,
+grave um handoff curto em arquivo e recomende continuar em sessão nova.
+
 1. Identifique **raiz do pacote** como a pasta deste `SKILL.md`. Resolva os links deste pacote em relação ao arquivo que os contém, nunca em relação ao diretório de trabalho do agente. Se o papel designado for Classificador, siga diretamente seu [contrato](prompts/classifier.md) e o briefing recebido, sem executar as etapas de descoberta ou conferência de atualizações abaixo. Se for Searcher, siga diretamente seu [contrato](prompts/searcher.md), sem conferir atualizações nem assumir o papel de Orquestrador. Se for Advisor, siga diretamente seu [contrato](prompts/advisor.md), mantendo atuação estritamente report-only e em sessão nova sem assumir a condução do Orquestrador.
 2. Identifique separadamente a **raiz do projeto consumidor** pelo pedido do usuário, workspace aberto e arquivos locais. Uma raiz de controle de versão pode ajudar, mas Git não é requisito. Não use a pasta da skill como projeto por conveniência.
 3. Leia as instruções aplicáveis ao consumidor, a tarefa atual e seu estado real, usando o [guia de descoberta](docs/PROJECT_CONFIGURATION.md) para localizar regras, portões e evidências. Resolva todo caminho `_tl-orc/...` a partir da raiz do projeto consumidor.

@@ -50,6 +50,12 @@ unidade sem conversa de acompanhamento está no
 [protocolo de execução](../docs/EXECUTION_PROTOCOL.md): a unidade padrão de topo é a story inteira
 com sua cadeia autorizada, e os recibos de Maker, portões e Checker ficam internos ao condutor. Job
 por papel é opcional e quebrar a story em microjobs não autoriza turnos de acompanhamento.
+Depois do despacho em segundo plano, espere a notificação terminal sem polling, leitura parcial da
+saída ou checagens de progresso. Por parada, admita do `result.json` somente `blocking` e `reason`.
+Não envie mensagens de status entre passos triviais. Diagnóstico que exija ler código do condutor é
+uma unidade de manutenção ou uma sessão nova, não investigação dentro da conversa do Orquestrador.
+Acima de aproximadamente 120 mil tokens de contexto, escreva um handoff curto em arquivo e
+recomende continuar em sessão nova.
 
 ### Leitura seletiva por seção (Selective Retrieval)
 

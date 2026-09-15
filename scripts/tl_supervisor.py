@@ -25,6 +25,14 @@ try:
 except ImportError:  # Imported as scripts.tl_supervisor from the repository root.
     from scripts.tl_job import lock_exclusive, unlock_exclusive
 
+try:
+    from tl_merge_guard import AuthorityReceipt
+except ImportError:
+    try:
+        from scripts.tl_merge_guard import AuthorityReceipt
+    except ImportError:
+        AuthorityReceipt = None
+
 
 LOCK_TIMEOUT_SECONDS = 10.0
 LOCK_RETRY_SECONDS = 0.01
@@ -356,17 +364,41 @@ def enqueue_merge(story_id, pr_number, queue_file):
 
 
 def _merge_succeeded(result: object) -> tuple[bool, str]:
-    if isinstance(result, bool):
-        return result, ""
-    if isinstance(result, int):
-        return result == 0, f"exit code {result}"
-    returncode = getattr(result, "returncode", None)
-    if isinstance(returncode, int):
-        detail = getattr(result, "stderr", "") or getattr(result, "stdout", "") or ""
-        return returncode == 0, str(detail).strip()
-    if isinstance(result, str) and result in {"merged", "failed"}:
-        return result == "merged", ""
-    raise ValueError("merge runner returned an unsupported result")
+    """Inspect merge runner outcome and enforce valid AuthorityReceipt presentation (Rule B)."""
+    if AuthorityReceipt is not None and isinstance(result, AuthorityReceipt):
+        return result.is_confirmed, result.reason
+    if isinstance(result, tuple) and len(result) == 2:
+        receipt, outcome = (
+            (result[0], result[1])
+            if AuthorityReceipt is not None and isinstance(result[0], AuthorityReceipt)
+            else (result[1], result[0])
+            if AuthorityReceipt is not None and isinstance(result[1], AuthorityReceipt)
+            else (None, None)
+        )
+        if receipt is not None:
+            if not receipt.is_confirmed:
+                return False, f"authority_not_confirmed: {receipt.reason}"
+            if isinstance(outcome, bool):
+                return outcome, receipt.reason if outcome else f"merge_failed: {receipt.reason}"
+            if isinstance(outcome, int):
+                return outcome == 0, f"exit code {outcome}"
+            returncode = getattr(outcome, "returncode", None)
+            if isinstance(returncode, int):
+                detail = getattr(outcome, "stderr", "") or getattr(outcome, "stdout", "") or ""
+                return returncode == 0, str(detail).strip()
+            if isinstance(outcome, str) and outcome in {"merged", "failed"}:
+                return outcome == "merged", ""
+            raise ValueError(f"unsupported outcome type in merge result tuple: {type(outcome)}")
+    if isinstance(result, dict) and "receipt" in result:
+        receipt = result["receipt"]
+        if AuthorityReceipt is not None and isinstance(receipt, AuthorityReceipt):
+            if not receipt.is_confirmed:
+                return False, f"authority_not_confirmed: {receipt.reason}"
+            if "merged" in result:
+                return bool(result["merged"]), str(result.get("detail", receipt.reason))
+            return True, receipt.reason
+    raise ValueError("merge runner must present a valid AuthorityReceipt; uninspected merge callbacks are rejected (Rule B)")
+
 
 
 def advance_merge_queue(

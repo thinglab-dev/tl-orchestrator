@@ -978,6 +978,40 @@ O lote transita para `CLOSE` quando:
 - **Invariante terminal:** O fechamento de um lote **nunca** cria ou dispara outro lote automaticamente.
 - **Runtime durável (opcional, v0.17.0):** os estados `EXECUTE` → `CLOSE` de um lote já congelado podem ser conduzidos por [`scripts/tl_runtime.py`](RUNTIME.md) sem sessão de Orquestrador aberta. Ele preserva estes invariantes (lote finito, efeitos permitidos, reserva de verificação, condições de parada, fechamento sem novo lote) e acrescenta journal de steps com retomada após crash. `DISCOVER`, `PROPOSE` e `AUTHORIZE` continuam humanos/Orquestrador.
 
+### 9. Autoridade de Merge Out-of-Band, Vinculação de Commits e Modos Operacionais (T028)
+
+A fronteira entre preparação técnica e autorização executiva de merge obedece a regras formais invioláveis:
+
+- **Distinção fundamental de autoridade:** `technical_merge_validity != operator_authority` e `permitted_effects.pull_request_merge == capability != authorization`.
+  * Aprovação formal por Checker independente e portões de CI verdes conferem exclusivamente **validade técnica de preparação**.
+  * A flag `permitted_effects.pull_request_merge: true` declara unicamente a **capacidade técnica** do runtime/agente de interagir com o mecanismo de merge do GitHub quando formalmente autorizado. Ela **nunca** concede autorização de execução por si só.
+  * O merge para a base protegida (`main`) exige estritamente um envelope out-of-band confirmado (`AuthorityReceipt`) avaliado pelo `MergeAuthorityGate` (`scripts/tl_merge_guard.py`).
+
+- **Vinculação estrita de commits em duas etapas:**
+  1. `checker_approved_commit`: o commit exato aprovado pelo Checker independente.
+  2. `integration_candidate_commit`: o commit final preparado para integração e merge.
+  * O `integration_candidate_commit` só pode diferir do `checker_approved_commit` pelos caminhos expressamente catalogados na allowlist normalizada `post_review_governance_delta_only`:
+    - `_tl-orc/project/tasks/*.md`
+    - `_tl-orc/project/evidence/*.md`
+    - `_tl-orc/project/STATUS.md`
+  * Qualquer alteração fora dessa allowlist (código-fonte, testes, automações, schemas, scripts) invalida o vínculo e exige obrigatoriamente uma nova rodada completa de revisão por Checker independente.
+
+- **Modos operacionais de merge:**
+  1. `delegated_single_merge`: O operador humano delega a execução de um único merge para um par estrito `(target_pr, expected_head_sha, expected_base_sha)`. A autorização é consumida atomicamente contra replay via CAS (`unused -> reserved -> consumed/indeterminate`) em store externo.
+  2. `human_merge_only`:
+     - Modo `enforced`: Qualquer tentativa de merge automatizado é terminantemente bloqueada e rejeitada; o merge na plataforma depende exclusivamente de ação manual do operador humano.
+     - Modo `policy_only`: O runtime/orquestrador prepara o PR, aguarda CI, mas para e estaciona a unidade em `awaiting_operator`, aguardando que o operador humano realize o merge diretamente.
+  - **Degradação segura:** Qualquer falha de infraestrutura, erro no store de autoridade, ambiguidade ou expiração de token degrada imediatamente e com segurança para `human_merge_only.enforced` (`FAIL_CLOSED`), nunca para merge desprotegido.
+
+- **Arquitetura de enforcement em duas camadas:**
+  * **Camada 1 (Interna/Runtime):** O primitive canônico `MergeAuthorityGate` em Python é avaliado por todos os effect producers (`tl_runtime.py`, `tl_run_story.py`, `tl_supervisor.py`). Nenhum comando `gh pr merge` ou `git merge` para a base protegida é executado sem a apresentação de um `AuthorityReceipt` válido e confirmado.
+  * **Camada 2 (Plataforma GitHub):** Ruleset configurado na branch `main` exigindo Pull Request com linear history, branch estritamente atualizada contra a base e status check obrigatório `Merge Authority` emitido exclusivamente pela Dedicated GitHub App confiável (restringido pelo seu `integration_id`). A credencial de trabalho do agente não possui permissão para emitir esse status check nem contornar o ruleset.
+
+- **Transporte out-of-band e invalidação por drift:**
+  * O envelope de autorização trafega fora da árvore da branch candidata (via PR Comment metadata formatado estritamente como bloco markdown de código `json:tl-merge-authorization`).
+  * O parser do transporte é determinístico e estrito: 0 envelopes → ausência de autorização; 1 envelope válido → verificação prossegue; >1 envelopes válidos distintos → parada imediata por ambiguidade (`FAIL_CLOSED: ambiguous_merge_authorization`).
+  * **Invalidação imediata por drift:** Qualquer avanço na ponta da base (`base drift`) ou novo commit na branch do PR (`head drift`) invalida instantaneamente a autorização.
+
 ## Autorizações de escrita
 
 | Escrita | Autorização |
@@ -1247,6 +1281,8 @@ authorization:
     local_commit: true
     local_merge: false
     pull_request: false
+    pull_request_merge: false  # capacidade técnica (T028); execução estritamente requer autorização out-of-band
+    ci_rerun: false
     push: false
     tag: false
     release: false
@@ -1265,6 +1301,11 @@ frozen_scope:
       spec_revision: <hash>
       integration_group: <group-id>
       dependencies: []
+      checker_approved_commit: <40-hex-sha>      # T028: commit aprovado pelo Checker
+      integration_candidate_commit: <40-hex-sha> # T028: commit preparado para integração
+      authority_mode: delegated_single_merge     # T028: delegated_single_merge | human_merge_only
+      authorization_id: <auth-32hex>             # T028: identificador acíclico da autorização
+
   integration_groups:
     <group-id>: [<Tnnn>]
   major_boundaries:

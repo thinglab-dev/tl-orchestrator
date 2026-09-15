@@ -97,7 +97,7 @@
             },
             "pull_request_merge": {
               "type": "boolean",
-              "description": "Optional since v0.17.0: the durable runtime may merge the unit pull request after green CI. Absent means false."
+              "description": "Optional since v0.17.0, amended in T028: technical capability flag only. Actual merge execution strictly requires an out-of-band merge execution authority envelope. Absent means false."
             },
             "ci_rerun": {
               "type": "boolean",
@@ -197,6 +197,29 @@
                   "type": "string",
                   "minLength": 1
                 }
+              },
+              "checker_approved_commit": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "T028: exact Git commit SHA audited and approved by the independent Checker."
+              },
+              "integration_candidate_commit": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "T028: exact Git commit SHA prepared for merge after post-review governance delta."
+              },
+              "authority_mode": {
+                "type": "string",
+                "enum": [
+                  "delegated_single_merge",
+                  "human_merge_only"
+                ],
+                "description": "T028: operational authority mode for merge execution."
+              },
+              "authorization_id": {
+                "type": "string",
+                "pattern": "^auth-[0-9a-f]{32}$",
+                "description": "T028: unique identifier of the out-of-band merge authorization envelope."
               }
             }
           }
@@ -312,7 +335,10 @@
           "minimum": 0
         },
         "pending_call": {
-          "type": ["null", "object"],
+          "type": [
+            "null",
+            "object"
+          ],
           "additionalProperties": false,
           "required": [
             "call_id",
@@ -368,10 +394,16 @@
       ],
       "properties": {
         "current_unit": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "current_phase": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "current_round": {
           "type": "integer",
@@ -389,26 +421,44 @@
           }
         },
         "stop_reason": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "runtime_refs": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "supervisor_state_dir": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "worktree_slot": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "scope_claim": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "merge_queue_entry": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "lease_heartbeat_ts": {
-              "type": ["number", "null"]
+              "type": [
+                "number",
+                "null"
+              ]
             }
           }
         }
@@ -419,17 +469,25 @@
     {
       "if": {
         "type": "object",
-        "required": ["frozen_scope"],
+        "required": [
+          "frozen_scope"
+        ],
         "properties": {
           "frozen_scope": {
             "type": "object",
-            "required": ["advisor_policy"],
+            "required": [
+              "advisor_policy"
+            ],
             "properties": {
               "advisor_policy": {
                 "type": "object",
-                "required": ["enabled"],
+                "required": [
+                  "enabled"
+                ],
                 "properties": {
-                  "enabled": { "const": false }
+                  "enabled": {
+                    "const": false
+                  }
                 }
               }
             }
@@ -438,13 +496,19 @@
       },
       "then": {
         "type": "object",
-        "required": ["budget"],
+        "required": [
+          "budget"
+        ],
         "properties": {
           "budget": {
             "type": "object",
-            "required": ["consumed_advisor_calls"],
+            "required": [
+              "consumed_advisor_calls"
+            ],
             "properties": {
-              "consumed_advisor_calls": { "const": 0 }
+              "consumed_advisor_calls": {
+                "const": 0
+              }
             }
           }
         }

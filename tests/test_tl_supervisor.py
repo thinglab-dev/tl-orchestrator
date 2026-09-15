@@ -13,10 +13,24 @@ from unittest import mock
 
 from scripts import tl_supervisor
 from scripts import tl_run_story
+from scripts.tl_merge_guard import AuthorityReceipt
 
 
 def completed(returncode=0):
     return subprocess.CompletedProcess(["git"], returncode, "", "")
+
+
+def mock_receipt(confirmed=True, reason="AUTHORITY_CONFIRMED", story_id="T001", pr_number=11):
+    return AuthorityReceipt(
+        status="CONFIRMED" if confirmed else "REJECTED",
+        authorization_id=f"auth-test-{story_id.lower()}",
+        target_pr=pr_number,
+        head_sha="a" * 40,
+        base_sha="b" * 40,
+        checker_commit="a" * 40,
+        candidate_commit="a" * 40,
+        reason=reason,
+    )
 
 
 class SupervisorCase(unittest.TestCase):
@@ -153,13 +167,17 @@ class MergeQueueTest(SupervisorCase):
         self.assertEqual(tl_supervisor.enqueue_merge("T001", 11, queue)["position"], 0)
         self.assertEqual(tl_supervisor.enqueue_merge("T002", 12, queue)["position"], 1)
         called = []
-        first = tl_supervisor.advance_merge_queue(queue, lambda item: called.append(item["story_id"]) or False)
-        blocked = tl_supervisor.advance_merge_queue(queue, lambda item: called.append(item["story_id"]) or True)
+        first = tl_supervisor.advance_merge_queue(
+            queue, lambda item: called.append(item["story_id"]) or mock_receipt(False, "operator_rejected", item["story_id"], item["pr_number"])
+        )
+        blocked = tl_supervisor.advance_merge_queue(
+            queue, lambda item: called.append(item["story_id"]) or mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"])
+        )
         self.assertEqual(first["state"], "failed")
         self.assertEqual(blocked["state"], "queue_blocked")
         self.assertEqual(called, ["T001"])
         retried = tl_supervisor.advance_merge_queue(
-            queue, lambda item: called.append(item["story_id"]) or True, retry_failed=True
+            queue, lambda item: called.append(item["story_id"]) or mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"]), retry_failed=True
         )
         self.assertEqual(retried["state"], "merged")
         self.assertEqual(called, ["T001", "T001"])
@@ -197,7 +215,7 @@ class MergeQueueTest(SupervisorCase):
             time.sleep(0.03)
             with guard:
                 active -= 1
-            return True
+            return mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"])
 
         advances = [threading.Thread(target=tl_supervisor.advance_merge_queue, args=(queue, merge)) for _ in range(2)]
         for thread in advances:
@@ -217,10 +235,10 @@ class MergeQueueTest(SupervisorCase):
         advance_result = {}
         enqueue_result = {}
 
-        def slow_merge(_item):
+        def slow_merge(item):
             runner_started.set()
             allow_runner_to_finish.wait(timeout=2)
-            return True
+            return mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"])
 
         def advance():
             advance_result.update(tl_supervisor.advance_merge_queue(queue, slow_merge))
@@ -271,10 +289,10 @@ class MergeQueueTest(SupervisorCase):
         called = []
 
         first = tl_supervisor.advance_merge_queue(
-            queue, lambda item: called.append(item["story_id"]) or True
+            queue, lambda item: called.append(item["story_id"]) or mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"])
         )
         second = tl_supervisor.advance_merge_queue(
-            queue, lambda item: called.append(item["story_id"]) or True
+            queue, lambda item: called.append(item["story_id"]) or mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"])
         )
 
         self.assertEqual(first["state"], "merged")
@@ -304,7 +322,7 @@ class MergeQueueTest(SupervisorCase):
             ),
             encoding="utf-8",
         )
-        runner = mock.Mock(return_value=True)
+        runner = mock.Mock(side_effect=lambda item: mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"]))
 
         in_progress = tl_supervisor.advance_merge_queue(queue, runner)
         recovered = tl_supervisor.advance_merge_queue(queue, runner, retry_failed=True)
@@ -339,7 +357,9 @@ class MergeQueueTest(SupervisorCase):
                     return self.lock.__exit__(exc_type, exc, traceback)
 
         with mock.patch.object(tl_supervisor, "_FileLock", OneTransientTimeout):
-            result = tl_supervisor.advance_merge_queue(queue, lambda _item: True)
+            result = tl_supervisor.advance_merge_queue(
+                queue, lambda item: mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"])
+            )
 
         self.assertEqual(result["state"], "merged")
         self.assertEqual(queue_lock_attempts, 3)
@@ -351,10 +371,38 @@ class MergeQueueTest(SupervisorCase):
         queue = self.root / "merge-queue.json"
         tl_supervisor.enqueue_merge("T001", 11, queue)
         tl_supervisor.enqueue_merge("T002", 12, queue)
-        result = tl_run_story.merge_queue_head(queue)
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_validator=lambda item: mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"]),
+        )
         self.assertEqual(result["state"], "merged")
         self.assertEqual(run.call_count, 1)
         self.assertEqual(run.call_args.args[0][0:5], ["gh", "pr", "merge", "11", "--auto"])
+
+    def test_uninspected_callback_without_authority_receipt_is_rejected(self):
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        result = tl_supervisor.advance_merge_queue(queue, lambda _item: True)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("AuthorityReceipt", result["item"]["detail"])
+
+    def test_unconfirmed_authority_receipt_blocks_merge_and_marks_failed(self):
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        result = tl_supervisor.advance_merge_queue(
+            queue, lambda item: mock_receipt(False, "missing_merge_authorization", item["story_id"], item["pr_number"])
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("missing_merge_authorization", result["item"]["detail"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run", return_value=completed())
+    def test_story_runner_rejects_missing_authority_without_invoking_gh(self, run):
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        result = tl_run_story.merge_queue_head(queue)
+        self.assertEqual(result["state"], "failed")
+        run.assert_not_called()
+        self.assertIn("missing_authority_receipt", result["item"]["detail"])
 
     def test_corrupt_queue_never_dispatches_merge(self):
         queue = self.root / "merge-queue.json"
@@ -363,6 +411,7 @@ class MergeQueueTest(SupervisorCase):
         result = tl_supervisor.advance_merge_queue(queue, runner)
         self.assertEqual(result["state"], "unavailable")
         runner.assert_not_called()
+
 
 
 class OrphanSweepTest(SupervisorCase):

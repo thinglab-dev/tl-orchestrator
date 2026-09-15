@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+
 
 
 def main(argv: list[str]) -> int:
@@ -44,7 +46,57 @@ def main(argv: list[str]) -> int:
         if pr and pr["state"] == "OPEN":
             head = next(h for h, p in state["prs"].items() if p is pr)
             pr["head_oid"] = subprocess.run(["git", "rev-parse", head], capture_output=True, text=True).stdout.strip() or pr.get("head_oid")
-        out = json.dumps({"state": pr["state"], "mergedAt": pr["mergedAt"], "headRefOid": pr.get("head_oid"), "baseRefName": pr.get("base")} if pr else {})
+        base_name = pr.get("base", "main") if pr else "main"
+        base_oid = subprocess.run(["git", "rev-parse", base_name], capture_output=True, text=True).stdout.strip() if pr else ""
+        comments = []
+        if "comments" in state:
+            comments = state["comments"]
+        elif pr and "comments" in pr:
+            comments = pr["comments"]
+        elif state.get("auto_authorize_merge", True) and pr:
+            head_sha = pr.get("head_oid") or ""
+            target_repo = state.get("target_repository")
+            if not target_repo:
+                try:
+                    origin_url = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True).stdout.strip()
+                    m = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$", origin_url)
+                    target_repo = m.group(1) if m else "thinglab-dev/tl-orchestrator"
+                except Exception:
+                    target_repo = "thinglab-dev/tl-orchestrator"
+            claim = {
+                "schema_version": 1,
+                "target_repository": target_repo,
+                "target_pr": pr["number"],
+                "expected_head_sha": head_sha,
+                "expected_base_sha": base_oid,
+                "checker_approved_commit": head_sha,
+                "integration_candidate_commit": head_sha,
+                "authority_mode": "delegated_single_merge",
+                "authorized_by": "operator@thinglab.dev",
+                "authorized_at": "2026-09-15T00:00:00Z",
+                "expires_at": "2029-09-15T00:00:00Z",
+                "justification": "Automated test simulated merge authorization",
+            }
+            try:
+                from scripts.tl_merge_guard import derive_authorization_id
+                auth_id = derive_authorization_id(claim)
+            except Exception:
+                import hashlib
+                auth_id = "auth-" + hashlib.sha256(json.dumps(claim, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
+            env = dict(claim)
+            env["authorization_id"] = auth_id
+            env["provenance"] = {"mechanism": "dedicated_github_app", "app_id": 12345}
+            comment_body = f"<!-- TL_MERGE_AUTHORIZATION_V1_START -->\n{json.dumps(env)}\n<!-- TL_MERGE_AUTHORIZATION_V1_END -->"
+            comments = [{"id": 1, "body": comment_body, "author": {"login": "thinglab-merge-authority[bot]"}}]
+
+        out = json.dumps({
+            "state": pr["state"],
+            "mergedAt": pr["mergedAt"],
+            "headRefOid": pr.get("head_oid"),
+            "baseRefName": pr.get("base"),
+            "baseRefOid": base_oid,
+            "comments": comments,
+        } if pr else {})
         code = 0 if pr else 1
     elif argv[:2] == ["pr", "merge"]:
         number = int(argv[2])

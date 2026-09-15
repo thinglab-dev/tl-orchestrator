@@ -27,6 +27,15 @@ except ImportError:
         release_worktree_slot,
     )
 
+try:
+    from tl_merge_guard import AuthorityReceipt
+except ImportError:
+    try:
+        from scripts.tl_merge_guard import AuthorityReceipt
+    except ImportError:
+        AuthorityReceipt = None
+
+
 
 def dispatch_story(pool_dir, story_id, paths, claims_file, max_slots):
     """Claim scope before opening a worktree; roll back if no slot is granted."""
@@ -52,11 +61,42 @@ def release_story(pool_dir, story_id, claims_file):
     return {"state": "released", "story_id": story_id}
 
 
-def merge_queue_head(queue_file, gh_executable="gh", retry_failed=False):
-    """Ask GitHub CLI to merge only the current pending FIFO head."""
+def merge_queue_head(
+    queue_file,
+    gh_executable="gh",
+    retry_failed: bool = False,
+    authority_receipt: AuthorityReceipt | None = None,
+    authority_validator=None,
+):
+    """Ask GitHub CLI to merge only the current pending FIFO head if MergeAuthorityGate confirms authority."""
 
     def run(item):
-        return subprocess.run(
+        receipt = None
+        if authority_validator is not None:
+            receipt = authority_validator(item)
+        elif authority_receipt is not None:
+            receipt = authority_receipt
+        elif "receipt" in item and isinstance(item["receipt"], AuthorityReceipt):
+            receipt = item["receipt"]
+
+        if receipt is None or not isinstance(receipt, AuthorityReceipt) or not receipt.is_confirmed:
+            reason = getattr(receipt, "reason", "missing_authority_receipt")
+            fallback_receipt = receipt if isinstance(receipt, AuthorityReceipt) else AuthorityReceipt(
+                status="REJECTED",
+                authorization_id="",
+                target_pr=int(item.get("pr_number", 0)),
+                head_sha="",
+                base_sha="",
+                checker_commit="",
+                candidate_commit="",
+                reason=reason,
+            )
+            return (
+                fallback_receipt,
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        proc = subprocess.run(
             [
                 gh_executable,
                 "pr",
@@ -70,6 +110,7 @@ def merge_queue_head(queue_file, gh_executable="gh", retry_failed=False):
             text=True,
             check=False,
         )
+        return (receipt, proc)
 
     return advance_merge_queue(queue_file, run, retry_failed=retry_failed)
 

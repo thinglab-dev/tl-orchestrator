@@ -29,12 +29,26 @@ except ImportError:
     )
 
 try:
-    from tl_merge_guard import AuthorityReceipt, MergeAuthorityGate, TrustRoot
+    from tl_merge_guard import (
+        AuthorityReceipt,
+        AuthorityStore,
+        DurableExternalAuthorityStore,
+        MergeAuthorityGate,
+        TrustRoot,
+    )
 except ImportError:
     try:
-        from scripts.tl_merge_guard import AuthorityReceipt, MergeAuthorityGate, TrustRoot
+        from scripts.tl_merge_guard import (
+            AuthorityReceipt,
+            AuthorityStore,
+            DurableExternalAuthorityStore,
+            MergeAuthorityGate,
+            TrustRoot,
+        )
     except ImportError:
         AuthorityReceipt = None
+        AuthorityStore = None
+        DurableExternalAuthorityStore = None
         MergeAuthorityGate = None
         TrustRoot = None
 
@@ -73,6 +87,7 @@ def merge_queue_head(
     live_pr_getter=None,
     repo_root: Path | str | None = None,
     trust_root: TrustRoot | None = None,
+    authority_store: AuthorityStore | None = None,
 ):
     """Ask GitHub CLI to merge only the current pending FIFO head if MergeAuthorityGate confirms authority."""
 
@@ -89,6 +104,25 @@ def merge_queue_head(
                 if len(sig.parameters) >= 2:
                     if callable(live_pr_getter):
                         live_pr = live_pr_getter(pr_number)
+                    else:
+                        try:
+                            proc_init = subprocess.run(
+                                [
+                                    gh_executable,
+                                    "pr",
+                                    "view",
+                                    str(pr_number),
+                                    "--json",
+                                    "state,headRefOid,baseRefOid,baseRefName,comments",
+                                ],
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                            )
+                            if proc_init.returncode == 0 and proc_init.stdout.strip():
+                                live_pr = json.loads(proc_init.stdout)
+                        except Exception:
+                            live_pr = None
                     receipt = authority_validator(item, live_pr)
                 else:
                     receipt = authority_validator(item)
@@ -131,7 +165,7 @@ def merge_queue_head(
                         live_pr_info=live_pr,
                         checker_commit=item.get("checker_commit", head_commit),
                         candidate_commit=item.get("candidate_commit", head_commit),
-                        authority_store=None,
+                        authority_store=authority_store,
                         expected_repo=expected_repo,
                         comments=comments,
                         enforce_mode="delegated_single_merge",
@@ -159,7 +193,25 @@ def merge_queue_head(
                 subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
             )
 
-        # 3. Strict Scope & Target PR Binding (Prevents Cross-PR Reuse)
+        # 3. Fabricated Receipt Defense: verify authentic cryptographic envelope and receipt token
+        if not receipt.is_authentic(trust_root):
+            reason = "fabricated_authority_receipt_rejected: receipt lacks authentic cryptographic envelope, valid platform signature, or matching verification token"
+            rejected_receipt = AuthorityReceipt(
+                status="REJECTED",
+                authorization_id=receipt.authorization_id,
+                target_pr=pr_number,
+                head_sha=receipt.head_sha,
+                base_sha=receipt.base_sha,
+                checker_commit=receipt.checker_commit,
+                candidate_commit=receipt.candidate_commit,
+                reason=reason,
+            )
+            return (
+                rejected_receipt,
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        # 4. Strict Scope & Target PR Binding (Prevents Cross-PR Reuse)
         if int(receipt.target_pr) != pr_number:
             reason = f"cross_pr_authority_reuse_rejected: receipt target_pr={receipt.target_pr} does not match queued item pr_number={pr_number}"
             rejected_receipt = AuthorityReceipt(
@@ -177,58 +229,34 @@ def merge_queue_head(
                 subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
             )
 
-        # 4. Fabricated Receipt Defense (Requires valid non-empty commit and authorization identifiers)
-        if (
-            not receipt.authorization_id
-            or not receipt.candidate_commit
-            or not receipt.checker_commit
-            or not receipt.head_sha
-            or not receipt.base_sha
-        ):
-            reason = "fabricated_authority_receipt_rejected: receipt missing required commit or authorization identifiers"
-            rejected_receipt = AuthorityReceipt(
-                status="REJECTED",
-                authorization_id=receipt.authorization_id,
-                target_pr=pr_number,
-                head_sha=receipt.head_sha,
-                base_sha=receipt.base_sha,
-                checker_commit=receipt.checker_commit,
-                candidate_commit=receipt.candidate_commit,
-                reason=reason,
-            )
-            return (
-                rejected_receipt,
-                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
-            )
+        # 5. External CAS Anti-Replay Reservation on Queue Path
+        store = authority_store
+        if store is None and DurableExternalAuthorityStore is not None:
+            try:
+                store = DurableExternalAuthorityStore()
+            except Exception:
+                store = None
 
-        # 5. Live PR TOCTOU Revalidation & Drift Defense
-        if live_pr is None:
-            if callable(live_pr_getter):
-                live_pr = live_pr_getter(pr_number)
-            else:
-                try:
-                    proc_view = subprocess.run(
-                        [
-                            gh_executable,
-                            "pr",
-                            "view",
-                            str(pr_number),
-                            "--json",
-                            "state,headRefOid,baseRefOid,baseRefName,comments",
-                        ],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                    )
-                    if proc_view.returncode == 0 and proc_view.stdout.strip():
-                        live_pr = json.loads(proc_view.stdout)
-                except Exception:
-                    live_pr = None
-
-        if live_pr is not None:
-            live_state = str(live_pr.get("state", "")).upper()
-            if live_state != "OPEN":
-                reason = f"pr_not_open: live PR #{pr_number} state is {live_state}"
+        if store is not None:
+            curr_state = store.get_state(receipt.authorization_id)
+            if curr_state in {"consumed", "indeterminate"}:
+                reason = f"authorization_already_consumed: authority {receipt.authorization_id} has state '{curr_state}'"
+                rejected_receipt = AuthorityReceipt(
+                    status="REJECTED",
+                    authorization_id=receipt.authorization_id,
+                    target_pr=pr_number,
+                    head_sha=receipt.head_sha,
+                    base_sha=receipt.base_sha,
+                    checker_commit=receipt.checker_commit,
+                    candidate_commit=receipt.candidate_commit,
+                    reason=reason,
+                )
+                return (
+                    rejected_receipt,
+                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+                )
+            if not store.reserve(receipt.authorization_id):
+                reason = f"authorization_reservation_failed_concurrent_or_consumed: could not reserve {receipt.authorization_id}"
                 rejected_receipt = AuthorityReceipt(
                     status="REJECTED",
                     authorization_id=receipt.authorization_id,
@@ -244,45 +272,81 @@ def merge_queue_head(
                     subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
                 )
 
-            live_head = live_pr.get("headRefOid", "")
-            live_base = live_pr.get("baseRefOid", "")
+        # 6. Mandatory Fresh Pre-Merge TOCTOU Revalidation (Fails closed on any error)
+        cmd_view = [
+            gh_executable,
+            "pr",
+            "view",
+            str(pr_number),
+            "--json",
+            "state,headRefOid,baseRefOid,baseRefName,comments",
+        ]
+        try:
+            proc_view = subprocess.run(
+                cmd_view,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:
+            reason = f"toctou_live_view_failed: gh pr view execution failed: {exc}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
 
-            if live_head and (receipt.candidate_commit != live_head or receipt.head_sha != live_head):
-                reason = f"merge_queue_toctou_head_drift: receipt candidate_commit={receipt.candidate_commit} does not match live PR headRefOid={live_head}"
-                rejected_receipt = AuthorityReceipt(
-                    status="REJECTED",
-                    authorization_id=receipt.authorization_id,
-                    target_pr=pr_number,
-                    head_sha=live_head,
-                    base_sha=live_base,
-                    checker_commit=receipt.checker_commit,
-                    candidate_commit=live_head,
-                    reason=reason,
-                )
-                return (
-                    rejected_receipt,
-                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
-                )
+        if proc_view.returncode != 0:
+            reason = f"toctou_live_view_failed: gh pr view exited with code {proc_view.returncode}: {proc_view.stderr.strip()}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
 
-            if live_base and receipt.base_sha != live_base:
-                reason = f"merge_queue_toctou_base_drift: receipt base_sha={receipt.base_sha} does not match live PR baseRefOid={live_base}"
-                rejected_receipt = AuthorityReceipt(
-                    status="REJECTED",
-                    authorization_id=receipt.authorization_id,
-                    target_pr=pr_number,
-                    head_sha=live_head,
-                    base_sha=live_base,
-                    checker_commit=receipt.checker_commit,
-                    candidate_commit=live_head,
-                    reason=reason,
-                )
-                return (
-                    rejected_receipt,
-                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
-                )
+        try:
+            fresh_live_pr = json.loads(proc_view.stdout)
+            if not isinstance(fresh_live_pr, dict):
+                raise ValueError("Parsed JSON is not an object")
+        except Exception as exc:
+            reason = f"toctou_invalid_live_pr_json: failed to parse JSON from gh pr view: {exc}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
 
-        # 6. Atomic CAS Reservation with --match-head-commit
-        cmd = [
+        live_state = str(fresh_live_pr.get("state", "")).upper()
+        if live_state != "OPEN":
+            reason = f"toctou_pr_not_open: live PR #{pr_number} state is {live_state}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        live_head = str(fresh_live_pr.get("headRefOid") or "").strip()
+        live_base = str(fresh_live_pr.get("baseRefOid") or "").strip()
+
+        if not live_head or not live_base:
+            reason = f"toctou_missing_live_shas: live PR #{pr_number} missing headRefOid ('{live_head}') or baseRefOid ('{live_base}')"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        if receipt.candidate_commit != live_head or receipt.head_sha != live_head:
+            reason = f"merge_queue_toctou_head_drift: receipt candidate_commit={receipt.candidate_commit} does not match fresh live PR headRefOid={live_head}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, head_sha=live_head, base_sha=live_base, candidate_commit=live_head, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        if receipt.base_sha != live_base:
+            reason = f"merge_queue_toctou_base_drift: receipt base_sha={receipt.base_sha} does not match fresh live PR baseRefOid={live_base}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, head_sha=live_head, base_sha=live_base, candidate_commit=live_head, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        # 7. Atomic CAS Reservation on Platform with --match-head-commit
+        cmd_merge = [
             gh_executable,
             "pr",
             "merge",
@@ -294,11 +358,13 @@ def merge_queue_head(
             receipt.candidate_commit,
         ]
         proc = subprocess.run(
-            cmd,
+            cmd_merge,
             capture_output=True,
             text=True,
             check=False,
         )
+        if proc.returncode == 0 and store is not None:
+            store.commit_consumed(receipt.authorization_id)
         return (receipt, proc)
 
     return advance_merge_queue(queue_file, run, retry_failed=retry_failed)

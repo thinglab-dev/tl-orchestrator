@@ -23,6 +23,7 @@ Implements exhaustive counterfactual probes for all T028 acceptance criteria:
 """
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -1215,6 +1216,145 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
         )
         self.assertTrue(status_fake_trans.startswith("FAIL_CLOSED: unauthenticated_trust_root"))
         self.assertEqual(envs_fake_trans, [])
+
+    def test_probe_23f_self_issued_capability_rejected_fails_closed(self):
+        """
+        Probe 23f: Attacker attempts to self-issue a PlatformCapability with their own private key
+        and pass their own public key to TrustRoot.
+        Must fail closed: is_valid returns False, from_platform_capability raises ValueError,
+        and MergeAuthorityGate fails closed with FAIL_CLOSED: unauthenticated_trust_root.
+        """
+        attacker_seed = hashlib.sha256(b"attacker-rogue-capability-seed").digest()
+        attacker_pub, _ = ed25519_sign(attacker_seed, b"")
+        attacker_keys = {"key-attacker-rogue": attacker_pub.hex()}
+
+        # Attacker attempts to issue a capability signed by attacker's secret key
+        rogue_cap = issue_platform_capability(
+            app_id=TEST_FIXTURE_APP_ID,
+            app_slug=TEST_FIXTURE_APP_SLUG,
+            public_keys=attacker_keys,
+            signing_secret_key=attacker_seed,
+        )
+
+        # 1. is_valid must reject rogue capability against immutable platform trust anchor
+        self.assertFalse(rogue_cap.is_valid(TEST_FIXTURE_APP_ID, TEST_FIXTURE_APP_SLUG, attacker_keys))
+
+        # 2. from_platform_capability must fail closed and raise ValueError
+        with self.assertRaises(ValueError):
+            TrustRoot.from_platform_capability(
+                capability=rogue_cap,
+                trusted_app_id=TEST_FIXTURE_APP_ID,
+                trusted_app_slug=TEST_FIXTURE_APP_SLUG,
+                trusted_public_keys=attacker_keys,
+            )
+
+        # 3. If attacker manually attaches rogue capability to a TrustRoot, is_out_of_process must be False
+        rogue_root = TrustRoot(
+            trusted_app_id=TEST_FIXTURE_APP_ID,
+            trusted_app_slug=TEST_FIXTURE_APP_SLUG,
+            trusted_public_keys=attacker_keys,
+            trust_source="dedicated_github_app",
+            _platform_capability=rogue_cap,
+        )
+        self.assertFalse(rogue_root.is_out_of_process)
+
+        # 4. MergeAuthorityGate must fail closed
+        claim = make_valid_claim(
+            head_sha=self.base_sha,
+            base_sha=self.base_sha,
+            checker_commit=self.base_sha,
+            candidate_commit=self.base_sha,
+        )
+        env = make_envelope(claim, secret_key=attacker_seed, key_id="key-attacker-rogue")
+        comment = format_comment(env)
+        receipt = MergeAuthorityGate.evaluate(
+            repo_root=self.root,
+            pr_number=claim["target_pr"],
+            live_pr_info={"state": "OPEN", "headRefOid": self.base_sha, "baseRefOid": self.base_sha},
+            checker_commit=self.base_sha,
+            candidate_commit=self.base_sha,
+            authority_store=InMemoryAuthorityStore(),
+            expected_repo=claim["target_repository"],
+            comments=[comment],
+            enforce_mode="delegated_single_merge",
+            trust_root=rogue_root,
+        )
+        self.assertFalse(receipt.is_confirmed)
+        self.assertEqual(receipt.status, "REJECTED")
+        self.assertIn("FAIL_CLOSED: unauthenticated_trust_root", receipt.reason)
+
+    def test_probe_23g_forged_gh_cli_response_fails_closed(self):
+        """
+        Probe 23g: Attacker provides a forged gh executable or impostor CLI that returns
+        arbitrary untrusted JSON with rogue public keys or mismatched app ID.
+        Must fail closed: authenticate_against_platform returns (False, forged_or_unanchored_platform_response),
+        TrustRoot.from_platform raises ValueError, and MergeAuthorityGate fails closed.
+        """
+        attacker_seed = hashlib.sha256(b"attacker-forged-gh-seed").digest()
+        attacker_pub, _ = ed25519_sign(attacker_seed, b"")
+
+        # Fake CLI returning rogue keys not anchored in immutable platform trust anchor
+        forged_script = self.root / "forged_gh.py"
+        forged_script.write_text(
+            f"""#!/usr/bin/env python3
+import json, sys
+data = {{
+    "id": {TEST_FIXTURE_APP_ID},
+    "slug": "{TEST_FIXTURE_APP_SLUG}",
+    "public_keys": {{"key-untrusted-rogue": "{attacker_pub.hex()}"}}
+}}
+print(json.dumps(data))
+sys.exit(0)
+""",
+            encoding="utf-8",
+        )
+        forged_script.chmod(0o755)
+
+        forged_cli = ["python3", str(forged_script)]
+
+        # 1. authenticate_against_platform must reject forged CLI
+        root = TrustRoot(
+            trusted_app_id=TEST_FIXTURE_APP_ID,
+            trusted_app_slug=TEST_FIXTURE_APP_SLUG,
+            trusted_public_keys={"key-untrusted-rogue": attacker_pub.hex()},
+            trust_source="dedicated_github_app",
+        )
+        is_auth, reason = root.authenticate_against_platform(gh_executable=forged_cli)
+        self.assertFalse(is_auth)
+        self.assertIn("forged_or_unanchored_platform_response", reason)
+
+        # 2. from_platform must fail closed with ValueError
+        with self.assertRaises(ValueError):
+            TrustRoot.from_platform(
+                app_slug=TEST_FIXTURE_APP_SLUG,
+                gh_executable=forged_cli,
+            )
+
+        # 3. MergeAuthorityGate must fail closed
+        claim = make_valid_claim(
+            head_sha=self.base_sha,
+            base_sha=self.base_sha,
+            checker_commit=self.base_sha,
+            candidate_commit=self.base_sha,
+        )
+        env = make_envelope(claim, secret_key=attacker_seed, key_id="key-untrusted-rogue")
+        comment = format_comment(env)
+        receipt = MergeAuthorityGate.evaluate(
+            repo_root=self.root,
+            pr_number=claim["target_pr"],
+            live_pr_info={"state": "OPEN", "headRefOid": self.base_sha, "baseRefOid": self.base_sha},
+            checker_commit=self.base_sha,
+            candidate_commit=self.base_sha,
+            authority_store=InMemoryAuthorityStore(),
+            expected_repo=claim["target_repository"],
+            comments=[comment],
+            enforce_mode="delegated_single_merge",
+            trust_root=root,
+            gh_executable=str(forged_script),
+        )
+        self.assertFalse(receipt.is_confirmed)
+        self.assertEqual(receipt.status, "REJECTED")
+        self.assertIn("FAIL_CLOSED: unauthenticated_trust_root", receipt.reason)
 
 
 if __name__ == "__main__":

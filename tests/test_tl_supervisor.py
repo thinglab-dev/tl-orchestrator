@@ -13,23 +13,80 @@ from unittest import mock
 
 from scripts import tl_supervisor
 from scripts import tl_run_story
-from scripts.tl_merge_guard import AuthorityReceipt
+from scripts.tl_merge_guard import (
+    AuthorityReceipt,
+    compute_receipt_token,
+    sign_authorization_envelope,
+)
+from scripts.fixtures.runtime.fake_gh import (
+    TEST_FIXTURE_APP_ID,
+    TEST_FIXTURE_APP_SLUG,
+    TEST_FIXTURE_KEY_ID,
+    TEST_FIXTURE_SECRET_KEY,
+)
 
 
 def completed(returncode=0):
     return subprocess.CompletedProcess(["git"], returncode, "", "")
 
 
-def mock_receipt(confirmed=True, reason="AUTHORITY_CONFIRMED", story_id="T001", pr_number=11):
+def mock_receipt(
+    confirmed=True,
+    reason="AUTHORITY_CONFIRMED",
+    story_id="T001",
+    pr_number=11,
+    head_sha="a" * 40,
+    base_sha="b" * 40,
+    checker_commit="a" * 40,
+    candidate_commit="a" * 40,
+    nonce: str | None = None,
+):
+    if nonce is None:
+        import uuid
+        nonce = uuid.uuid4().hex
+    claim = {
+        "schema_version": 1,
+        "target_repository": "thinglab-dev/tl-orchestrator",
+        "target_pr": pr_number,
+        "expected_head_sha": head_sha,
+        "expected_base_sha": base_sha,
+        "checker_approved_commit": checker_commit,
+        "integration_candidate_commit": candidate_commit,
+        "authority_mode": "delegated_single_merge",
+        "issued_at": "2026-09-15T00:00:00Z",
+        "expires_at": "2029-01-01T00:00:00Z",
+        "nonce": nonce,
+    }
+    envelope = sign_authorization_envelope(
+        claim,
+        secret_key=TEST_FIXTURE_SECRET_KEY,
+        key_id=TEST_FIXTURE_KEY_ID,
+        mechanism="dedicated_github_app",
+        integration_id=TEST_FIXTURE_APP_ID,
+        issuer=f"{TEST_FIXTURE_APP_SLUG}[bot]",
+    )
+    auth_id = envelope["authorization_id"]
+    env_sig = envelope.get("provenance", {}).get("signature", "")
+    token = compute_receipt_token(
+        authorization_id=auth_id,
+        target_pr=pr_number,
+        candidate_commit=candidate_commit,
+        checker_commit=checker_commit,
+        head_sha=head_sha,
+        base_sha=base_sha,
+        envelope_signature=env_sig,
+    )
     return AuthorityReceipt(
         status="CONFIRMED" if confirmed else "REJECTED",
-        authorization_id=f"auth-test-{story_id.lower()}",
+        authorization_id=auth_id,
         target_pr=pr_number,
-        head_sha="a" * 40,
-        base_sha="b" * 40,
-        checker_commit="a" * 40,
-        candidate_commit="a" * 40,
+        head_sha=head_sha,
+        base_sha=base_sha,
+        checker_commit=checker_commit,
+        candidate_commit=candidate_commit,
         reason=reason,
+        envelope=envelope,
+        receipt_token=token,
     )
 
 
@@ -475,6 +532,129 @@ class MergeQueueTest(SupervisorCase):
         )
         self.assertEqual(result["state"], "failed")
         self.assertIn("merge_queue_toctou_base_drift", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_fully_populated_fabricated_receipt_without_merging(self, run):
+        """A fully populated but auto-fabricated receipt without authentic cryptographic envelope must be blocked."""
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        # Fully populated receipt but without valid platform envelope or authentic token
+        fabricated_receipt = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id="auth-bogus-manual",
+            target_pr=11,
+            head_sha="a" * 40,
+            base_sha="b" * 40,
+            checker_commit="a" * 40,
+            candidate_commit="a" * 40,
+            reason="fabricated",
+            envelope=None,
+            receipt_token="",
+        )
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=fabricated_receipt,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("fabricated_authority_receipt_rejected", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_toctou_view_command_failure_blocks_merge(self, run):
+        """When gh pr view fails with a non-zero exit code, merge must fail closed without calling gh pr merge."""
+        def fake_run(args, *a, **kw):
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                return subprocess.CompletedProcess(args, 1, "", "API rate limit exceeded")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("toctou_live_view_failed", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_toctou_invalid_json_blocks_merge(self, run):
+        """When gh pr view returns malformed JSON, merge must fail closed without calling gh pr merge."""
+        def fake_run(args, *a, **kw):
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                return subprocess.CompletedProcess(args, 0, "<html>Bad Gateway</html>", "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("toctou_invalid_live_pr_json", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_toctou_missing_live_shas_blocks_merge(self, run):
+        """When gh pr view returns missing or empty headRefOid/baseRefOid, merge must fail closed."""
+        def fake_run(args, *a, **kw):
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "", "baseRefOid": "b" * 40}), "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("toctou_missing_live_shas", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_toctou_drift_after_validator_blocks_merge(self, run):
+        """When live PR drifts between authority_validator run and final pre-merge view, merge must fail closed."""
+        view_calls = []
+
+        def fake_run(args, *a, **kw):
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                view_calls.append(len(view_calls) + 1)
+                if len(view_calls) == 1:
+                    # Initial view seen by validator
+                    return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "a" * 40, "baseRefOid": "b" * 40}), "")
+                else:
+                    # Fresh view immediately pre-merge reveals head drift
+                    return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "e" * 40, "baseRefOid": "b" * 40}), "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_validator=lambda item, live: mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"]),
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("merge_queue_toctou_head_drift", result["item"]["detail"])
         for call_args in run.call_args_list:
             cmd = call_args[0][0]
             self.assertNotEqual(cmd[1:3], ["pr", "merge"])

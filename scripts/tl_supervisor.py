@@ -388,6 +388,9 @@ def _merge_succeeded(result: object, dispatch_item: dict | None = None) -> tuple
     if not receipt.is_confirmed:
         return False, f"authority_not_confirmed: {receipt.reason}"
 
+    if not receipt.is_authentic():
+        return False, f"unverified_or_fabricated_receipt: {receipt.reason}"
+
     # Scope binding validation against dispatch_item
     if dispatch_item is not None:
         expected_pr = int(dispatch_item.get("pr_number", 0))

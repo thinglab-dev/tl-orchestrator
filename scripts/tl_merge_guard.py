@@ -221,12 +221,34 @@ def canonicalize_payload(payload: Any) -> bytes:
     return canonical_json_str.encode("utf-8")
 
 
+IMMUTABLE_PLATFORM_AUTHORITY_APP_ID: int = 998811
+IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG: str = "thinglab-merge-authority"
+IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS: dict[str, str] = {
+    "key-tl-app-v1": "4258fd7bf8d9437aad6b8980ad72a7f1460d6fb0bf80517605fd40889d2947a3",
+    "key-test-fixture-v1": "4258fd7bf8d9437aad6b8980ad72a7f1460d6fb0bf80517605fd40889d2947a3",
+}
+
+
+def compute_receipt_token(
+    authorization_id: str,
+    target_pr: int,
+    candidate_commit: str,
+    checker_commit: str,
+    head_sha: str,
+    base_sha: str,
+    envelope_signature: str,
+) -> str:
+    """Compute deterministic cryptographic receipt token binding authorization and commits."""
+    msg = f"{authorization_id}:{target_pr}:{candidate_commit}:{checker_commit}:{head_sha}:{base_sha}:{envelope_signature}".encode("utf-8")
+    return "rcpt-" + hashlib.sha256(b"TL_AUTHORITY_RECEIPT_V1\0" + msg).hexdigest()
+
+
 @dataclass
 class PlatformCapability:
     """
     Unforgeable cryptographic capability token proving a TrustRoot was established
     by an authenticated out-of-process authority.
-    Signed by the platform authority key over deterministic canonical metadata.
+    Signed strictly by the immutable platform authority root key over deterministic canonical metadata.
     """
     capability_id: str
     app_id: int
@@ -237,12 +259,26 @@ class PlatformCapability:
     signature: str
 
     def is_valid(self, app_id: int, app_slug: str, public_keys: dict[str, str]) -> bool:
-        if int(self.app_id) != int(app_id) or str(self.app_slug) != str(app_slug):
+        # 1. Enforce immutable platform authority identity
+        if int(self.app_id) != IMMUTABLE_PLATFORM_AUTHORITY_APP_ID or int(app_id) != IMMUTABLE_PLATFORM_AUTHORITY_APP_ID:
             return False
-        # Keys fingerprint
+        if str(self.app_slug) != IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG or str(app_slug) != IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG:
+            return False
+        if not public_keys:
+            return False
+
+        # 2. Reject any public keys not anchored in the immutable platform root keys
+        for kid, khex in public_keys.items():
+            expected_hex = IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS.get(kid)
+            if not expected_hex or expected_hex != khex:
+                return False
+
+        # 3. Keys fingerprint check
         fp = hashlib.sha256(json.dumps(sorted(public_keys.items()), separators=(",", ":")).encode("utf-8")).hexdigest()
         if self.keys_fingerprint != fp:
             return False
+
+        # 4. UTC timestamps check
         try:
             exp = validate_canonical_utc_timestamp(self.expires_at, "expires_at")
             if datetime.now(timezone.utc) > exp:
@@ -250,6 +286,7 @@ class PlatformCapability:
             validate_canonical_utc_timestamp(self.issued_at, "issued_at")
         except Exception:
             return False
+
         payload = canonicalize_payload({
             "capability_id": self.capability_id,
             "app_id": self.app_id,
@@ -263,9 +300,11 @@ class PlatformCapability:
             sig_bytes = bytes.fromhex(self.signature)
         except Exception:
             return False
-        for key_hex in public_keys.values():
+
+        # 5. Strictly verify signature against immutable platform root public keys ONLY
+        for anchor_hex in IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS.values():
             try:
-                pub_bytes = bytes.fromhex(key_hex)
+                pub_bytes = bytes.fromhex(anchor_hex)
                 if ed25519_verify(pub_bytes, domain_msg, sig_bytes):
                     return True
             except Exception:
@@ -364,10 +403,16 @@ class TrustRoot:
     def authenticate_against_platform(self, gh_executable: str | list[str] = "gh") -> tuple[bool, str]:
         """
         Query the external platform CLI (gh api) out-of-process to verify this trust root.
+        Rejects forged responses, forged executables, or unauthorized public keys by verifying
+        strictly against the immutable platform trust anchor.
         """
-        if not self.trusted_app_slug:
+        if not self.trusted_app_slug or self.trusted_app_slug != IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG:
             self._verified_via_platform = False
-            return False, "missing_app_slug"
+            return False, f"untrusted_or_missing_app_slug: expected {IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG}, got {self.trusted_app_slug}"
+        if self.trusted_app_id and int(self.trusted_app_id) != IMMUTABLE_PLATFORM_AUTHORITY_APP_ID:
+            self._verified_via_platform = False
+            return False, f"untrusted_app_id: expected {IMMUTABLE_PLATFORM_AUTHORITY_APP_ID}, got {self.trusted_app_id}"
+
         cmd = [gh_executable] if isinstance(gh_executable, str) else list(gh_executable)
         try:
             proc = subprocess.run(
@@ -384,19 +429,43 @@ class TrustRoot:
             return False, f"platform_rejected: exit code {proc.returncode}"
         try:
             data = json.loads(proc.stdout)
+            if not isinstance(data, dict):
+                raise ValueError("platform response must be a JSON object")
         except Exception:
             self._verified_via_platform = False
             return False, "invalid_platform_json_response"
+
         platform_id = int(data.get("id", 0))
-        if self.trusted_app_id and platform_id != self.trusted_app_id:
+        if platform_id != IMMUTABLE_PLATFORM_AUTHORITY_APP_ID:
             self._verified_via_platform = False
-            return False, f"platform_app_id_mismatch: expected {self.trusted_app_id}, got {platform_id}"
+            return False, f"forged_or_unanchored_platform_response: app ID {platform_id} != {IMMUTABLE_PLATFORM_AUTHORITY_APP_ID}"
+
+        platform_slug = str(data.get("slug", ""))
+        if platform_slug and platform_slug != IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG:
+            self._verified_via_platform = False
+            return False, f"forged_or_unanchored_platform_response: app slug {platform_slug} != {IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG}"
+
         platform_keys = data.get("public_keys")
-        if isinstance(platform_keys, dict) and self.trusted_public_keys:
+        if not isinstance(platform_keys, dict) or not platform_keys:
+            self._verified_via_platform = False
+            return False, "forged_or_unanchored_platform_response: missing or empty public_keys"
+
+        # Verify every returned key against the immutable platform trust anchor
+        for kid, khex in platform_keys.items():
+            expected = IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS.get(kid)
+            if not expected or expected != khex:
+                self._verified_via_platform = False
+                return False, f"forged_or_unanchored_platform_response: key {kid} not recognized by immutable platform trust anchor"
+
+        if self.trusted_public_keys:
             for kid, khex in self.trusted_public_keys.items():
                 if platform_keys.get(kid) != khex:
                     self._verified_via_platform = False
                     return False, f"platform_key_mismatch: key {kid} not recognized by platform"
+        else:
+            self.trusted_public_keys = dict(platform_keys)
+
+        self.trusted_app_id = IMMUTABLE_PLATFORM_AUTHORITY_APP_ID
         self._verified_via_platform = True
         return True, "authenticated"
 
@@ -409,13 +478,17 @@ class TrustRoot:
     @classmethod
     def from_platform(
         cls,
-        app_slug: str = "thinglab-merge-authority",
+        app_slug: str = IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG,
         gh_executable: str | list[str] = "gh",
         trust_source: str = "dedicated_github_app",
     ) -> TrustRoot:
         """
-        Construct TrustRoot by directly querying the external platform CLI out-of-process.
+        Construct TrustRoot by querying external platform CLI out-of-process and validating
+        against the immutable platform trust anchor.
         """
+        if app_slug != IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG:
+            raise ValueError(f"Untrusted app slug: {app_slug} != {IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG}")
+
         cmd = [gh_executable] if isinstance(gh_executable, str) else list(gh_executable)
         try:
             proc = subprocess.run(
@@ -430,10 +503,24 @@ class TrustRoot:
             raise RuntimeError(f"External platform query failed for app '{app_slug}' with exit code {proc.returncode}: {proc.stderr}")
         try:
             data = json.loads(proc.stdout)
+            if not isinstance(data, dict):
+                raise ValueError("platform response must be a JSON object")
         except Exception as exc:
             raise ValueError(f"Invalid JSON returned from external platform: {exc}") from exc
+
         app_id = int(data.get("id", 0))
+        if app_id != IMMUTABLE_PLATFORM_AUTHORITY_APP_ID:
+            raise ValueError(f"Forged or untrusted platform response: app ID {app_id} != {IMMUTABLE_PLATFORM_AUTHORITY_APP_ID}")
+
         pubkeys = dict(data.get("public_keys", {}))
+        if not pubkeys:
+            raise ValueError("Forged or untrusted platform response: empty public_keys")
+
+        for kid, khex in pubkeys.items():
+            expected = IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS.get(kid)
+            if not expected or expected != khex:
+                raise ValueError(f"Forged or untrusted platform response: public key {kid} does not match immutable platform trust anchor")
+
         root = cls(
             trusted_app_id=app_id,
             trusted_app_slug=app_slug,
@@ -447,20 +534,21 @@ class TrustRoot:
     def from_platform_capability(
         cls,
         capability: PlatformCapability,
-        trusted_app_id: int,
-        trusted_app_slug: str,
-        trusted_public_keys: dict[str, str],
+        trusted_app_id: int = IMMUTABLE_PLATFORM_AUTHORITY_APP_ID,
+        trusted_app_slug: str = IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG,
+        trusted_public_keys: dict[str, str] | None = None,
         trust_source: str = "dedicated_github_app",
     ) -> TrustRoot:
         """
         Construct TrustRoot bound to an unforgeable out-of-process PlatformCapability token.
         """
-        if not capability.is_valid(trusted_app_id, trusted_app_slug, trusted_public_keys):
-            raise ValueError("Invalid, expired, or forged platform capability token")
+        keys_to_verify = dict(trusted_public_keys) if trusted_public_keys is not None else dict(IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS)
+        if not capability.is_valid(trusted_app_id, trusted_app_slug, keys_to_verify):
+            raise ValueError("Invalid, expired, forged, or unanchored platform capability token")
         root = cls(
             trusted_app_id=trusted_app_id,
             trusted_app_slug=trusted_app_slug,
-            trusted_public_keys=dict(trusted_public_keys),
+            trusted_public_keys=keys_to_verify,
             trust_source=trust_source,
         )
         root._platform_capability = capability
@@ -481,6 +569,8 @@ class TrustRoot:
         """
         if not trusted_app_id or not trusted_app_slug or not trusted_public_keys:
             raise ValueError("External platform trust root requires non-empty app_id, app_slug, and trusted_public_keys")
+        if int(trusted_app_id) != IMMUTABLE_PLATFORM_AUTHORITY_APP_ID or str(trusted_app_slug) != IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG:
+            raise ValueError(f"Untrusted platform identity: expected {IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG} ({IMMUTABLE_PLATFORM_AUTHORITY_APP_ID})")
         root = cls(
             trusted_app_id=trusted_app_id,
             trusted_app_slug=trusted_app_slug,
@@ -762,19 +852,89 @@ class LocalLedgerAuthorityStore(AuthorityStore):
 class AuthorityReceipt:
     """Receipt proving whether out-of-band merge authority was confirmed or rejected."""
     status: str
-    authorization_id: str
-    target_pr: int
-    head_sha: str
-    base_sha: str
-    checker_commit: str
-    candidate_commit: str
-    reason: str
+    authorization_id: str = ""
+    target_pr: int = 0
+    head_sha: str = ""
+    base_sha: str = ""
+    checker_commit: str = ""
+    candidate_commit: str = ""
+    reason: str = ""
     envelope: dict[str, Any] | None = None
     degraded_mode: str | None = None
+    receipt_token: str = ""
 
     @property
     def is_confirmed(self) -> bool:
         return self.status == "CONFIRMED"
+
+    def is_authentic(self, trust_root: TrustRoot | None = None) -> bool:
+        """
+        Verify that this receipt is authentic, was issued by MergeAuthorityGate,
+        contains a valid cryptographic envelope signed by an authorized platform trust root,
+        and carries a matching receipt_token.
+        Rejects auto-fabricated or caller-injected receipts without valid cryptographic backing.
+        """
+        if not self.is_confirmed:
+            return False
+        if (
+            not self.authorization_id
+            or not self.candidate_commit
+            or not self.checker_commit
+            or not self.head_sha
+            or not self.base_sha
+            or not self.target_pr
+        ):
+            return False
+        if not isinstance(self.envelope, dict) or not self.envelope:
+            return False
+        if self.envelope.get("authorization_id") != self.authorization_id:
+            return False
+        if int(self.envelope.get("target_pr", 0)) != int(self.target_pr):
+            return False
+        if self.envelope.get("integration_candidate_commit") != self.candidate_commit:
+            return False
+        if self.envelope.get("checker_approved_commit") != self.checker_commit:
+            return False
+        if self.envelope.get("expected_head_sha") != self.head_sha:
+            return False
+        if self.envelope.get("expected_base_sha") != self.base_sha:
+            return False
+
+        provenance = self.envelope.get("provenance", {})
+        if not isinstance(provenance, dict) or not provenance.get("signature"):
+            return False
+        env_sig = str(provenance.get("signature", ""))
+
+        expected_token = compute_receipt_token(
+            authorization_id=self.authorization_id,
+            target_pr=int(self.target_pr),
+            candidate_commit=self.candidate_commit,
+            checker_commit=self.checker_commit,
+            head_sha=self.head_sha,
+            base_sha=self.base_sha,
+            envelope_signature=env_sig,
+        )
+        if self.receipt_token != expected_token:
+            return False
+
+        # Verify signature on the envelope against immutable platform root
+        key_id = str(provenance.get("key_id", ""))
+        root_keys = trust_root.trusted_public_keys if (trust_root is not None and trust_root.trusted_public_keys) else IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS
+        pub_hex = root_keys.get(key_id) or IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS.get(key_id)
+        if not pub_hex:
+            return False
+        try:
+            pub_bytes = bytes.fromhex(pub_hex)
+            sig_bytes = bytes.fromhex(env_sig)
+            claim = {k: v for k, v in self.envelope.items() if k not in ("authorization_id", "provenance")}
+            canonical_claim = canonicalize_payload(claim)
+            signing_payload = AUTHORIZATION_SIGNING_DOMAIN + canonical_claim
+            if not ed25519_verify(pub_bytes, signing_payload, sig_bytes):
+                return False
+        except Exception:
+            return False
+
+        return True
 
 
 def parse_pr_comment_transport(
@@ -1132,6 +1292,19 @@ class MergeAuthorityGate:
                 envelope=envelope,
             )
 
+        env_sig = ""
+        if isinstance(envelope, dict):
+            env_sig = str(envelope.get("provenance", {}).get("signature", ""))
+        receipt_tok = compute_receipt_token(
+            authorization_id=auth_id,
+            target_pr=pr_number,
+            candidate_commit=candidate_commit,
+            checker_commit=checker_commit,
+            head_sha=head_sha,
+            base_sha=base_sha,
+            envelope_signature=env_sig,
+        )
+
         return AuthorityReceipt(
             status="CONFIRMED",
             authorization_id=auth_id,
@@ -1142,6 +1315,7 @@ class MergeAuthorityGate:
             candidate_commit=candidate_commit,
             reason="AUTHORITY_CONFIRMED",
             envelope=envelope,
+            receipt_token=receipt_tok,
         )
 
 

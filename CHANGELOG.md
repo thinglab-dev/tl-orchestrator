@@ -4,6 +4,21 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-14
+
+### Adicionado
+
+- Ferramentas de economia de tokens em escopo de usuário, ativas em todo projeto sem lembrete:
+  `scripts/tl_tools.py` instala, verifica (`status`, `doctor --fix`), liga, desliga e mantém rtk
+  (hook de reescrita de Bash no Claude Code; instrução global no Codex), headroom (proxy local em
+  modo `cache` para as sessões CLI do Claude), ponytail (plugin, `full`) e caveman (plugin,
+  `lite`), com um hook `SessionStart` que garante o proxy e reporta `tl-tools: ...`.
+- Política, limites conhecidos e medições dessas ferramentas em `docs/TOKEN_TOOLS.md`; SKILL.md,
+  Maker, Checker e playbook passam a tratar saída condensada, marcadores `<<ccr:...>>` e solução
+  mínima como comportamento esperado, sem afrouxar a prova.
+- Pacote canônico da distribuição passa de 24 para 26 arquivos (`docs/TOKEN_TOOLS.md` e
+  `scripts/tl_tools.py`).
+
 ## [0.13.0] - 2026-09-14
 
 ### Adicionado

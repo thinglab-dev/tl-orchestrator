@@ -30,6 +30,13 @@ permanecem vigentes.
 - Registre comandos literais, diretórios, exits, resultados e limites no artefato próprio da story. Distingua verificação executada, impossibilidade de executar e hipótese ainda não provada.
 - Ao atingir o limite de rodadas ou turnos sem concluir, registre uma parada honesta com checkpoint em disco descrevendo estado e causa observada; não declare sucesso nem reinicie um novo loop automático.
 - Recorte a saída que entra no contexto, conforme a [admissão de saída de ferramenta](orchestrator-playbook.md#admissão-de-saída-de-ferramenta): leia faixa de linhas em vez de arquivo inteiro, busque localizador antes de conteúdo, filtre saída de portão e preserve o bruto em artefato. Conferir o diff inteiro da sua alteração e ler a fonte de uma prova crítica continuam obrigatórios; recorte é sobre o que fica no contexto, não sobre o que você verifica.
+- Saídas de comando podem chegar condensadas pelo rtk e o histórico pode trazer marcadores
+  `<<ccr:...>>` do headroom; trate isso como o resultado normal. Repita um comando como
+  `rtk proxy <comando>` somente quando o resultado vier vazio, contraditório com o exit ou
+  truncado onde a prova exige o bruto, e registre no artefato quando fizer isso. Com ponytail
+  ativo, a solução mínima que cumpre a spec é a esperada; com caveman ativo, o relatório fica
+  curto sem omitir comando, caminho, exit ou erro exato. Ver
+  [ferramentas de economia](../docs/TOKEN_TOOLS.md).
 - Confira o diff inteiro da sua própria alteração antes de encerrar e entregue alterações, evidências e pendências para revisão. A leitura integral do diff pela revisão é do Checker, não do condutor: para ele vá o recibo compacto e as referências de prova, não o texto integral do seu relatório nem o parecer de revisão.
 - No perfil Native do [modelo de trabalho](../docs/WORK_MODEL.md), escreva somente nos caminhos
   de escrita da spec, que definem os `content_paths`, e na seção de evidência da sua rodada. Não altere `status`, `state_revision`,

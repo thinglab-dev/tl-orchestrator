@@ -4,7 +4,7 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
-## [0.15.0] - 2026-09-15
+## [0.16.0] - 2026-09-15
 
 ### Adicionado
 
@@ -58,7 +58,33 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   `query`, `status` e `disable` executados com sucesso, inclusive em caminho com espaços;
   telemetria confirmada suprimida com `DO_NOT_TRACK=1` (evento `build_completed` deixa de ser
   enfileirado). Detalhes e comandos em `.tmp/graft-verification.md`.
-- Pacote canônico da distribuição passa de 26 para 28 arquivos (Graft).
+- Pacote canônico da distribuição passa de 42 para 44 arquivos (Graft).
+
+## [0.15.0] - 2026-09-15
+
+### Adicionado
+
+- Contratos opt-in e CLIs stdlib para prova de comportamento recuperável, avaliação pareada de
+  perfis, registro de ambiguidades ligado ao digest da spec, preflight somente leitura e reuso
+  fail-closed de gates. Browser/Reticle/Playwright continuam adaptadores externos e explícitos.
+- Perfil limitado de conhecimento com proveniência, hash, autoria e licença; referências a UI,
+  acessibilidade, erros, Chisle, Anti-Slop, FWC e 3D são selecionadas pelo consumidor, não
+  carregadas globalmente.
+
+### Corrigido
+
+- A camada opt-in de qualidade distribui `extract_tool_result.py`, `context_ledger.py`,
+  `context_lib.py` e a fixture de tarefas (42 arquivos), integra seus portões ao protocolo e exige
+  identidades, recibos recuperáveis, métricas brutas e limites de perfil/cache fail-closed.
+
+### Migração
+
+- Atualize a cópia verificada para os 42 arquivos. A camada nova fica inativa até a seleção de um
+  perfil; para rollback, desative o perfil e restaure a cópia anterior. Não há alegação de economia
+  local, e evidência sem identidade compatível ou expirada não é reutilizável.
+- `extract_tool_result.py`, `context_ledger.py` e `context_lib.py` são validados em Linux/CI.
+  No Windows, a baseline mantém 3 falhas e 7 erros em `test_context_ledger` e
+  `test_resume_generate`; suporte desses helpers não está validado nessa plataforma.
 
 ## [0.14.0] - 2026-09-14
 
@@ -811,3 +837,5 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 [0.12.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.11.0...v0.12.0
 [0.13.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.12.0...v0.13.0
 [0.14.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.13.0...v0.14.0
+[0.15.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.14.0...v0.15.0
+[0.16.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.15.0...v0.16.0

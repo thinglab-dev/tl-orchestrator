@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Spec-linked Ambiguity Register",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "spec_sha256", "items"],
+  "properties": {"schema_version": {"const": 1}, "spec_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "items": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "kind", "status", "summary"], "properties": {"id": {"type": "string"}, "kind": {"enum": ["decision_required", "reversible_technical", "verifiable_fact", "already_decided"]}, "status": {"enum": ["open", "resolved", "investigating"]}, "summary": {"type": "string"}, "decision": {}, "dependent_acceptance": {"type": "array", "items": {"type": "string"}}}}}}}
+

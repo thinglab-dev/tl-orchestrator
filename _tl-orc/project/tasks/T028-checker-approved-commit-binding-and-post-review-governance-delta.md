@@ -12,11 +12,11 @@ origin: instrução normativa do mantenedor em 2026-09-14 (ratificação B004) e
 decisions: []
 spec_author: orchestrator
 spec_revision: 765a1c3333c85d00
-rework_round: 0
+rework_round: 1
 affects_context: []
 effective_authors: [google]
 checker_independence: required
-content_id: 13ee49e4593022713ab7dc38292344a41a3b5f71:7935d98ad75bc9f2
+content_id: 13ee49e4593022713ab7dc38292344a41a3b5f71:9f1f6b0afaf8face
 content_paths:
   - docs/WORK_MODEL.md
   - docs/RUNTIME.md
@@ -31,6 +31,8 @@ content_paths:
   - tests/test_tl_supervisor.py
   - scripts/fixtures/runtime/fake_gh.py
   - _tl-orc/project/STATUS.md
+  - _tl-orc/project/tasks/T028-checker-approved-commit-binding-and-post-review-governance-delta.md
+  - _tl-orc/project/evidence/T028-r01.md
 
 ## Finding
 source: auditoria pós-encerramento do lote Canary B004 na Story connector:2-8 em 2026-09-14 combinada com a auditoria de autoridade do incidente de merge do PR #55 em 2026-09-15.

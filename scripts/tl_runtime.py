@@ -663,7 +663,7 @@ class Unit:
     spec_digest: str
     checker_approved_commit: str = ""
     integration_candidate_commit: str = ""
-    authority_mode: str = "delegated_single_merge"
+    authority_mode: str = ""
     authorization_id: str = ""
 
 
@@ -696,7 +696,7 @@ def load_unit(batch_unit: dict, repo: Path, tasks_dir: str) -> Unit:
         spec_digest=digest,
         checker_approved_commit=str(batch_unit.get("checker_approved_commit") or ""),
         integration_candidate_commit=str(batch_unit.get("integration_candidate_commit") or ""),
-        authority_mode=str(batch_unit.get("authority_mode") or "delegated_single_merge"),
+        authority_mode=str(batch_unit.get("authority_mode") or ""),
         authorization_id=str(batch_unit.get("authorization_id") or ""),
     )
 
@@ -1974,9 +1974,24 @@ class Runtime:
                         self.unit_state(uid, "running", "", phase="complete", merged=True)
                         return
 
-                    checker_commit = getattr(unit, "checker_approved_commit", "") or getattr(record, "checker_commit", "") or record.commit
-                    candidate_commit = record.commit
                     authority_mode = getattr(unit, "authority_mode", "") or "delegated_single_merge"
+                    checker_commit = getattr(unit, "checker_approved_commit", "")
+                    candidate_commit = getattr(unit, "integration_candidate_commit", "")
+
+                    if getattr(unit, "authority_mode", None) == "delegated_single_merge":
+                        if not checker_commit or not candidate_commit:
+                            raise UnitPark("awaiting_operator", f"missing_commit_bindings: unit {uid} in delegated_single_merge must declare checker_approved_commit and integration_candidate_commit", decision={"options": ["retry", "skip"]})
+
+                    checker_commit = checker_commit or getattr(record, "checker_commit", "") or record.commit
+                    candidate_commit = candidate_commit or record.commit
+
+                    if getattr(unit, "integration_candidate_commit", "") and unit.integration_candidate_commit != record.commit:
+                        raise UnitPark("awaiting_operator", f"candidate_commit_mismatch: unit {uid} candidate {unit.integration_candidate_commit} != record.commit {record.commit}", decision={"options": ["retry", "skip"]})
+
+                    if getattr(unit, "checker_approved_commit", "") and getattr(unit, "integration_candidate_commit", ""):
+                        delta_ok, delta_reason = validate_post_review_delta(self.repo, unit.checker_approved_commit, unit.integration_candidate_commit)
+                        if not delta_ok:
+                            raise UnitPark("awaiting_operator", f"unapproved_post_review_delta: {delta_reason}", decision={"options": ["skip"]})
                     expected_repo = self._resolve_target_repository()
                     comments = view.get("comments") or []
 
@@ -2008,6 +2023,14 @@ class Runtime:
                             return {"_status": "failed", "detail": "gh pr view failed before merge"}
                         if str(curr_view.get("state", "")).upper() == "MERGED" and curr_view.get("baseRefName") == intent["base"] and curr_view.get("headRefOid") == record.commit:
                             return {"merged": True, "detail": "already merged with the reviewed base and head (merge queue or operator)"}
+
+                        # Revalidate base and head SHA immediately before invoking gh pr merge (TOCTOU protection)
+                        if receipt is not None and receipt.is_confirmed:
+                            if curr_view.get("baseRefOid") and curr_view.get("baseRefOid") != receipt.base_sha:
+                                return {"_status": "failed", "detail": f"base_drift_toctou: base moved from {receipt.base_sha} to {curr_view.get('baseRefOid')}"}
+                            if curr_view.get("headRefOid") and curr_view.get("headRefOid") != receipt.head_sha:
+                                return {"_status": "failed", "detail": f"head_drift_toctou: head moved from {receipt.head_sha} to {curr_view.get('headRefOid')}"}
+
                         if curr_view.get("baseRefName") != intent["base"] or curr_view.get("headRefOid") != record.commit or str(curr_view.get("state", "")).upper() != "OPEN":
                             return {"_status": "failed", "detail": f"pull request {record.pr['number']} is {curr_view.get('state')} against {curr_view.get('baseRefName')} at {str(curr_view.get('headRefOid'))[:12]}; reviewed: {intent['base']} at {record.commit[:12]}"}
                         out = run_argv([*self.config["gh_argv"], "pr", "merge", str(record.pr["number"]), "--merge", "--delete-branch=false", "--match-head-commit", record.commit], self.repo, 300)

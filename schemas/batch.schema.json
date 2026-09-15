@@ -221,7 +221,24 @@
                 "pattern": "^auth-[0-9a-f]{32}$",
                 "description": "T028: unique identifier of the out-of-band merge authorization envelope."
               }
-            }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "authority_mode": {
+                      "const": "delegated_single_merge"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "checker_approved_commit",
+                    "integration_candidate_commit"
+                  ]
+                }
+              }
+            ]
           }
         },
         "integration_groups": {

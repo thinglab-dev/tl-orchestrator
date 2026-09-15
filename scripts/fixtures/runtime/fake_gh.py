@@ -15,6 +15,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_SCRIPTS_DIR = Path(__file__).resolve().parents[2]
+for _p in (_REPO_ROOT, _SCRIPTS_DIR):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
 
 
 def main(argv: list[str]) -> int:
@@ -72,21 +78,26 @@ def main(argv: list[str]) -> int:
                 "checker_approved_commit": head_sha,
                 "integration_candidate_commit": head_sha,
                 "authority_mode": "delegated_single_merge",
-                "authorized_by": "operator@thinglab.dev",
-                "authorized_at": "2026-09-15T00:00:00Z",
+                "issued_at": "2026-09-15T00:00:00Z",
                 "expires_at": "2029-09-15T00:00:00Z",
-                "justification": "Automated test simulated merge authorization",
+                "nonce": "0123456789abcdef0123456789abcdef",
             }
             try:
-                from scripts.tl_merge_guard import derive_authorization_id
-                auth_id = derive_authorization_id(claim)
+                from scripts.tl_merge_guard import sign_authorization_envelope
+                env = sign_authorization_envelope(claim)
             except Exception:
                 import hashlib
                 auth_id = "auth-" + hashlib.sha256(json.dumps(claim, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
-            env = dict(claim)
-            env["authorization_id"] = auth_id
-            env["provenance"] = {"mechanism": "dedicated_github_app", "app_id": 12345}
-            comment_body = f"<!-- TL_MERGE_AUTHORIZATION_V1_START -->\n{json.dumps(env)}\n<!-- TL_MERGE_AUTHORIZATION_V1_END -->"
+                env = dict(claim)
+                env["authorization_id"] = auth_id
+                env["provenance"] = {
+                    "issuer": "thinglab-merge-authority[bot]",
+                    "mechanism": "dedicated_github_app",
+                    "integration_id": 998811,
+                    "key_id": "key-tl-app-v1",
+                    "signature": "0" * 128,
+                }
+            comment_body = f"```json:tl-merge-authorization\n{json.dumps(env, indent=2)}\n```"
             comments = [{"id": 1, "body": comment_body, "author": {"login": "thinglab-merge-authority[bot]"}}]
 
         out = json.dumps({

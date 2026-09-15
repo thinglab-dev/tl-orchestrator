@@ -111,12 +111,17 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   (`awaiting_operator`) uma branch local que já não aponte para o commit revisado.
 - Revisão independente r11: commit já gravado no journal é adotado na retomada (branch que
   não aponta mais para ele → operador); "nada a commitar" nunca adota `HEAD`.
+- Revisão independente r12: hooks do repositório não rodam em comandos git do runtime
+  (`core.hooksPath` vazio via `GIT_CONFIG_*`, git ≥ 2.31); resultado de modelo já gravado é
+  reutilizado pelo step id mesmo com pack recompilado diferente, e há checagem de orçamento
+  imediatamente antes de cada despacho; PR `MERGED` com base e head exatos completa a
+  unidade como mesclada, PR `CLOSED` espera o operador.
 - Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
   `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
 
 ### Validação
 
-- `scripts/tests/test_tl_runtime.py` (88 testes, Git real, harness e `gh` scriptados):
+- `scripts/tests/test_tl_runtime.py` (91 testes, Git real, harness e `gh` scriptados):
   DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
   oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
   segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec

@@ -864,6 +864,55 @@ class RuntimeTest(unittest.TestCase):
         self.assertTrue(fold.units["T001"].merged)
         self.assertEqual(fold.model_calls_done, 2)
 
+    def test_repository_hooks_do_not_run_inside_runtime_git_commands(self) -> None:
+        fx = Fixture(self.root, units=1)
+        marker = self.root / "hook_ran"
+        hooks = fx.repo / ".git" / "hooks"
+        hooks.mkdir(exist_ok=True)
+        for name in ("post-checkout", "pre-commit", "post-commit", "post-merge"):
+            hook = hooks / name
+            hook.write_text("#!/bin/sh" + chr(10) + "echo " + name + " >> " + repr(marker.as_posix()) + chr(10), encoding="utf-8")
+            hook.chmod(0o755)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "done")
+        self.assertFalse(marker.exists(), "no repository hook ran inside a runtime-owned git command")
+
+    def test_crash_after_journaled_checker_result_never_redispatches(self) -> None:
+        fx = Fixture(self.root, units=1, max_calls=2)
+        fx.script("maker", [{"files": {"pkg/greet.py": "def greet():" + chr(10) + "    return 'hi'" + chr(10), "tests/test_greet.py": "import pkg.greet" + chr(10)}}])
+        fx.script("checker", CHECKER_OK)
+        widened = SPEC_A.replace("scope_paths: [pkg/]", "scope_paths: [pkg/, tests/]")
+        (fx.repo / "_tl-orc" / "project" / "tasks" / "T001-greet.md").write_text(widened, encoding="utf-8")
+        git(fx.repo, "commit", "-q", "-am", "widen scope to tests")
+        fx.batch["frozen_scope"]["units"][0]["spec_revision"] = hashlib.sha256(widened.encode()).hexdigest()[:16]
+        fx.batch["frozen_scope"]["immutable_digest"] = tl_runtime.frozen_scope_digest(fx.batch["frozen_scope"])
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        self.assertEqual(fx.run_cli("run", fault="after_result:checker").returncode, 70)
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        fold = fx.fold()
+        self.assertEqual(fold.batch_state, "done")
+        self.assertEqual(fold.model_calls_done, 2, "no third model call after the crash")
+
+    def test_pr_merged_by_operator_during_interrupted_create_completes_the_unit(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True})
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_effect:pull_request").returncode, 70)
+        state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
+        pr = next(iter(state["prs"].values()))
+        pr["state"], pr["mergedAt"], pr["head_oid"] = "MERGED", "2026-01-01T00:00:00Z", git(fx.repo, "rev-parse", "tl/B001/T001")
+        fx.gh_state.write_text(json.dumps(state), encoding="utf-8")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "completed")
+        self.assertTrue(record.merged)
+        report = fx.run_cli("report").stdout
+        self.assertNotIn("open, not merged", report)
+        self.assertIn("(merged)", report)
+
     # ---- policy -----------------------------------------------------------------------------
 
     def test_scope_expansion_restores_tree_then_parks_on_repeat(self) -> None:

@@ -917,6 +917,66 @@ class MergeQueueTest(SupervisorCase):
         self.assertIn("terminal_base_drift", result["item"]["detail"])
         mock_store.mark_indeterminate.assert_called_with(receipt.authorization_id)
 
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_terminal_missing_head_and_marks_indeterminate(self, run):
+        """When terminal gh pr view returns empty headRefOid, fail closed with terminal_missing_commit_bindings."""
+        view_count = 0
+        def fake_run(args, *a, **kw):
+            nonlocal view_count
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                view_count += 1
+                if view_count == 1:
+                    return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "a" * 40, "baseRefOid": "b" * 40}), "")
+                else:
+                    return subprocess.CompletedProcess(args, 0, json.dumps({"state": "MERGED", "headRefOid": "", "baseRefOid": "b" * 40}), "")
+            if len(args) >= 3 and args[1:3] == ["pr", "merge"]:
+                return subprocess.CompletedProcess(args, 0, "merged", "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        mock_store = mock.Mock()
+        mock_store.get_state.return_value = "unused"
+        mock_store.reserve.return_value = True
+
+        result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt, authority_store=mock_store)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("terminal_missing_commit_bindings", result["item"]["detail"])
+        mock_store.mark_indeterminate.assert_called_with(receipt.authorization_id)
+        mock_store.commit_consumed.assert_not_called()
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_terminal_missing_base_and_marks_indeterminate(self, run):
+        """When terminal gh pr view returns empty baseRefOid, fail closed with terminal_missing_commit_bindings."""
+        view_count = 0
+        def fake_run(args, *a, **kw):
+            nonlocal view_count
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                view_count += 1
+                if view_count == 1:
+                    return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "a" * 40, "baseRefOid": "b" * 40}), "")
+                else:
+                    return subprocess.CompletedProcess(args, 0, json.dumps({"state": "MERGED", "headRefOid": "a" * 40, "baseRefOid": ""}), "")
+            if len(args) >= 3 and args[1:3] == ["pr", "merge"]:
+                return subprocess.CompletedProcess(args, 0, "merged", "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        mock_store = mock.Mock()
+        mock_store.get_state.return_value = "unused"
+        mock_store.reserve.return_value = True
+
+        result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt, authority_store=mock_store)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("terminal_missing_commit_bindings", result["item"]["detail"])
+        mock_store.mark_indeterminate.assert_called_with(receipt.authorization_id)
+        mock_store.commit_consumed.assert_not_called()
+
     def test_corrupt_queue_never_dispatches_merge(self):
         queue = self.root / "merge-queue.json"
         queue.write_text("{}", encoding="utf-8")

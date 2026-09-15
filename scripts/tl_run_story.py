@@ -444,7 +444,18 @@ def merge_queue_head(
         term_head = str(term_pr.get("headRefOid") or "").strip()
         term_base = str(term_pr.get("baseRefOid") or "").strip()
 
-        if term_head and term_head != receipt.candidate_commit:
+        if not term_head or not term_base:
+            try:
+                store.mark_indeterminate(receipt.authorization_id)
+            except Exception:
+                pass
+            reason = f"terminal_missing_commit_bindings: missing terminal headRefOid ({term_head or 'empty'}) or baseRefOid ({term_base or 'empty'}) in PR #{pr_number}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        if term_head != receipt.candidate_commit:
             try:
                 store.mark_indeterminate(receipt.authorization_id)
             except Exception:
@@ -455,7 +466,7 @@ def merge_queue_head(
                 subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
             )
 
-        if term_base and term_base != receipt.base_sha:
+        if term_base != receipt.base_sha:
             try:
                 store.mark_indeterminate(receipt.authorization_id)
             except Exception:

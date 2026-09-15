@@ -135,12 +135,22 @@ def main(argv: list[str]) -> int:
             comment_body = f"```json:tl-merge-authorization\n{json.dumps(env, indent=2)}\n```"
             comments = [{"id": 1, "body": comment_body, "author": {"login": f"{TEST_FIXTURE_APP_SLUG}[bot]"}}]
 
+        effective_base_oid = base_oid
+        term_head = pr.get("head_oid") if pr else ""
+        if pr and pr.get("state") == "MERGED":
+            if state.get("terminal_base_drift"):
+                effective_base_oid = state["terminal_base_drift"]
+            if state.get("terminal_missing_head"):
+                term_head = ""
+            if state.get("terminal_missing_base"):
+                effective_base_oid = ""
+
         out = json.dumps({
             "state": pr.get("state", "OPEN"),
             "mergedAt": pr.get("mergedAt"),
-            "headRefOid": pr.get("head_oid"),
+            "headRefOid": term_head,
             "baseRefName": pr.get("base"),
-            "baseRefOid": base_oid,
+            "baseRefOid": effective_base_oid,
             "comments": comments,
         } if pr else {})
         code = 0 if pr else 1

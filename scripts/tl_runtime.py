@@ -39,29 +39,29 @@ except ImportError:  # executed from the repository root
 
 try:
     from tl_merge_guard import (
+        IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG,
         AuthorityReceipt,
         LocalLedgerAuthorityStore,
         MergeAuthorityGate,
         TrustRoot,
-        temporary_platform_anchor_for_testing,
         validate_post_review_delta,
     )
 except ImportError:
     try:
         from scripts.tl_merge_guard import (
+            IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG,
             AuthorityReceipt,
             LocalLedgerAuthorityStore,
             MergeAuthorityGate,
             TrustRoot,
-            temporary_platform_anchor_for_testing,
             validate_post_review_delta,
         )
     except ImportError:
+        IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG = "thinglab-merge-authority"
         AuthorityReceipt = None
         LocalLedgerAuthorityStore = None
         MergeAuthorityGate = None
         TrustRoot = None
-        temporary_platform_anchor_for_testing = None
         def validate_post_review_delta(*_a, **_kw):
             return False, "merge_guard_unavailable"
 
@@ -2028,32 +2028,12 @@ class Runtime:
                     trust_root = getattr(self, "trust_root", None)
                     gh_cmd = list(self.config.get("gh_argv", ["gh"]))
                     if trust_root is None and TrustRoot is not None:
-                        if "TL_FAKE_GH_STATE" in os.environ and self.batch.get("authorization", {}).get("authority_source") == "test":
-                            try:
-                                try:
-                                    from scripts.fixtures.runtime.fake_gh import (
-                                        TEST_FIXTURE_APP_SLUG,
-                                        TEST_FIXTURE_KEY_ID,
-                                        TEST_FIXTURE_PUBLIC_KEY,
-                                    )
-                                except ImportError:
-                                    from fixtures.runtime.fake_gh import (  # type: ignore[no-redef]
-                                        TEST_FIXTURE_APP_SLUG,
-                                        TEST_FIXTURE_KEY_ID,
-                                        TEST_FIXTURE_PUBLIC_KEY,
-                                    )
-                                if temporary_platform_anchor_for_testing is not None:
-                                    self._test_anchor = temporary_platform_anchor_for_testing({
-                                        TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()
-                                    })
-                                    self._test_anchor.__enter__()
-                                trust_root = TrustRoot.from_platform(
-                                    app_slug=TEST_FIXTURE_APP_SLUG,
-                                    gh_executable=gh_cmd,
-                                )
-                            except Exception:
-                                pass
-                        if trust_root is None:
+                        try:
+                            trust_root = TrustRoot.from_platform(
+                                app_slug=IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG,
+                                gh_executable=gh_cmd,
+                            )
+                        except Exception:
                             trust_root = TrustRoot.from_env()
                         self.trust_root = trust_root
 
@@ -2083,6 +2063,8 @@ class Runtime:
                         if curr_view is None:
                             return {"_status": "failed", "detail": "gh pr view failed before merge"}
                         if str(curr_view.get("state", "")).upper() == "MERGED" and curr_view.get("baseRefName") == intent["base"] and curr_view.get("headRefOid") == record.commit:
+                            if receipt and receipt.base_sha and curr_view.get("baseRefOid") != receipt.base_sha:
+                                return {"_status": "failed", "base_sha_mismatch": curr_view.get("baseRefOid"), "detail": f"already merged into unexpected base SHA {curr_view.get('baseRefOid')} != {receipt.base_sha}"}
                             return {"merged": True, "detail": "already merged with the reviewed base and head (merge queue or operator)"}
 
                         # Strict TOCTOU revalidation immediately before invoking gh pr merge
@@ -2105,10 +2087,23 @@ class Runtime:
                             return {"_status": "ambiguous", "merged": False, "queued": True, "detail": "gh pr merge returned success but gh pr view failed afterwards; verify and retry"}
                         if str(after.get("state", "")).upper() != "MERGED":
                             return {"_status": "ambiguous", "merged": False, "queued": True, "detail": f"gh pr merge returned success but the pull request is still {after.get('state')} (merge queue or delayed merge); verify and retry"}
+                        
+                        term_head = after.get("headRefOid")
+                        term_base = after.get("baseRefOid")
+                        if not term_head or not term_base:
+                            return {
+                                "_status": "failed",
+                                "terminal_missing_commit_bindings": True,
+                                "detail": f"terminal_missing_commit_bindings: headRefOid={term_head}, baseRefOid={term_base}",
+                            }
+
                         if after.get("baseRefName") != intent["base"]:
                             return {"merged": True, "base_mismatch": after.get("baseRefName")}
-                        if after.get("headRefOid") != record.commit:
-                            return {"merged": True, "base_mismatch": None, "head_mismatch": after.get("headRefOid")}
+                        expected_head = receipt.candidate_commit if (receipt and receipt.candidate_commit) else record.commit
+                        if term_head != expected_head:
+                            return {"merged": True, "head_mismatch": term_head}
+                        if receipt and receipt.base_sha and term_base != receipt.base_sha:
+                            return {"merged": True, "base_sha_mismatch": term_base}
                         return {"merged": True}
 
                     result = self.step(f"{uid}:merge:{record.commit}", "pull_request_merge", uid, "merge", {"type": "pull_request_merge", "pr": record.pr["number"], "commit": record.commit, "base": self.base_branch}, merge)
@@ -2116,6 +2111,11 @@ class Runtime:
                         if receipt and receipt.authorization_id:
                             store.mark_indeterminate(receipt.authorization_id)
                         raise UnitPark("awaiting_operator", "merge_queued: " + str(result.get("detail", ""))[:200], decision={"options": ["retry", "skip"]})
+                    if result.get("terminal_missing_commit_bindings"):
+                        if receipt and receipt.authorization_id:
+                            store.mark_indeterminate(receipt.authorization_id)
+                        raise UnitPark("awaiting_operator", f"terminal_missing_commit_bindings: pull request {record.pr['number']} terminal view missing headRefOid or baseRefOid",
+                                       decision={"options": ["retry", "skip"]})
                     if result.get("merged") and result.get("head_mismatch"):
                         if receipt and receipt.authorization_id:
                             store.mark_indeterminate(receipt.authorization_id)
@@ -2127,6 +2127,12 @@ class Runtime:
                             store.mark_indeterminate(receipt.authorization_id)
                         self.unit_state(uid, "running", "", phase="complete", merged=True)
                         raise UnitPark("awaiting_operator", f"merged_into_unexpected_base: pull request {record.pr['number']} was retargeted to {result['base_mismatch']} between the check and the merge",
+                                       decision={"options": ["skip"]})
+                    if result.get("merged") and result.get("base_sha_mismatch"):
+                        if receipt and receipt.authorization_id:
+                            store.mark_indeterminate(receipt.authorization_id)
+                        self.unit_state(uid, "running", "", phase="complete", merged=True)
+                        raise UnitPark("awaiting_operator", f"merged_into_unexpected_base_sha: pull request {record.pr['number']} merged into base SHA {str(result['base_sha_mismatch'])[:12]}, not the authorized {str(receipt.base_sha)[:12]}",
                                        decision={"options": ["skip"]})
                     if result.get("merged"):
                         if receipt and receipt.authorization_id:

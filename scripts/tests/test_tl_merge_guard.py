@@ -31,9 +31,11 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 from scripts.tl_merge_guard import (
     AUTHORIZATION_SIGNING_DOMAIN,
+    IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS,
     DurableExternalAuthorityStore,
     InMemoryAuthorityStore,
     LocalLedgerAuthorityStore,
@@ -45,6 +47,7 @@ from scripts.tl_merge_guard import (
     derive_authorization_id,
     ed25519_sign,
     ed25519_verify,
+    get_platform_root_public_keys,
     issue_platform_capability,
     parse_pr_comment_transport,
     sign_authorization_envelope,
@@ -1431,6 +1434,171 @@ sys.exit(0)
                 TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()
             })
             self._anchor_ctx.__enter__()
+
+    def test_probe_23i_runtime_cannot_activate_fixture_anchor_and_rejects_fixture_envelopes(self):
+        """
+        Probe 23i (R1): Runtime production anchor immutability and test harness isolation.
+        - temporary_platform_anchor_for_testing raises PermissionError if runtime modules
+          (tl_runtime.py, tl_run_story.py, tl_supervisor.py) are in the call stack.
+        - temporary_platform_anchor_for_testing raises PermissionError if called outside a test harness.
+        - Production anchor strictly rejects fixture keys when TL_FAKE_GH_STATE is not set.
+        - In production environment (without TL_FAKE_GH_STATE), TrustRoot.from_platform strictly
+          fails closed if external platform returns fixture keys.
+        """
+        # 1. Calling temporary_platform_anchor_for_testing with mock stack frame from tl_runtime.py raises PermissionError
+        with mock.patch("inspect.stack") as mock_stack:
+            mock_frame = mock.Mock()
+            mock_frame.filename = "/path/to/tl_runtime.py"
+            mock_stack.return_value = [mock_frame]
+            with self.assertRaises(PermissionError) as ctx:
+                with temporary_platform_anchor_for_testing({TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()}):
+                    pass
+            self.assertIn("strictly forbidden from runtime execution", str(ctx.exception))
+
+        # 2. Calling from outside a test harness raises PermissionError
+        with mock.patch("inspect.stack") as mock_stack:
+            mock_frame = mock.Mock()
+            mock_frame.filename = "/opt/thinglab/production_service.py"
+            mock_stack.return_value = [mock_frame]
+            with self.assertRaises(PermissionError) as ctx:
+                with temporary_platform_anchor_for_testing({TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()}):
+                    pass
+            self.assertIn("strictly forbidden outside an authorized test harness", str(ctx.exception))
+
+        # 3. Production anchor strictly rejects fixture keys when TL_FAKE_GH_STATE is absent
+        self._anchor_ctx.__exit__(None, None, None)
+        try:
+            old_fake = os.environ.pop("TL_FAKE_GH_STATE", None)
+            try:
+                prod_roots = get_platform_root_public_keys()
+                self.assertNotIn(TEST_FIXTURE_KEY_ID, prod_roots)
+                self.assertEqual(prod_roots, IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS)
+
+                fixture_script = self.root / "fixture_gh_probe23i.py"
+                fixture_script.write_text(
+                    f"""#!/usr/bin/env python3
+import json, sys
+data = {{
+    "id": {TEST_FIXTURE_APP_ID},
+    "slug": "{TEST_FIXTURE_APP_SLUG}",
+    "public_keys": {{"{TEST_FIXTURE_KEY_ID}": "{TEST_FIXTURE_PUBLIC_KEY.hex()}"}}
+}}
+print(json.dumps(data))
+sys.exit(0)
+""",
+                    encoding="utf-8",
+                )
+                fixture_script.chmod(0o755)
+                fixture_cli = ["python3", str(fixture_script)]
+
+                with self.assertRaises(ValueError) as err_ctx:
+                    TrustRoot.from_platform(
+                        app_slug=TEST_FIXTURE_APP_SLUG,
+                        gh_executable=fixture_cli,
+                    )
+                self.assertIn("does not match immutable platform trust anchor", str(err_ctx.exception))
+            finally:
+                if old_fake is not None:
+                    os.environ["TL_FAKE_GH_STATE"] = old_fake
+        finally:
+            self._anchor_ctx = temporary_platform_anchor_for_testing({
+                TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()
+            })
+            self._anchor_ctx.__enter__()
+
+    def test_probe_24_runtime_terminal_base_sha_drift_marks_indeterminate_and_parks(self):
+        """
+        Probe 24 (R2): Runtime post-merge terminal base SHA drift.
+        When gh pr merge succeeds but terminal view reveals baseRefOid drifted from receipt.base_sha:
+        - Must NOT call commit_consumed.
+        - Must mark authority indeterminate in CAS store.
+        - Must park unit closed with merged_into_unexpected_base_sha.
+        """
+        from scripts.tests.test_tl_runtime import Fixture, MAKER_OK, CHECKER_OK
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fx = Fixture(root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+            os.environ["TL_FAKE_GH_STATE"] = str(fx.gh_state)
+            try:
+                fx.gh_state.write_text(json.dumps({
+                    "checks_sequence": ["success"],
+                    "terminal_base_drift": "d" * 40,
+                }), encoding="utf-8")
+                fx.script("maker", MAKER_OK)
+                fx.script("checker", CHECKER_OK)
+                rt = fx.runtime()
+                self.assertEqual(rt.run(), "blocked")
+                record = fx.fold().units["T001"]
+                self.assertEqual(record.state, "awaiting_operator")
+                self.assertTrue(record.merged)
+                self.assertIn("merged_into_unexpected_base_sha", record.reason)
+
+                # External CAS store must record state == indeterminate, NEVER consumed
+                cas_files = sorted(rt.authority_store.external.store_dir.glob("*.cas"), key=os.path.getmtime)
+                self.assertTrue(len(cas_files) > 0)
+                latest_cas = json.loads(cas_files[-1].read_text(encoding="utf-8"))
+                self.assertEqual(latest_cas.get("state"), "indeterminate")
+            finally:
+                os.environ.pop("TL_FAKE_GH_STATE", None)
+
+    def test_probe_25_runtime_terminal_missing_bindings_marks_indeterminate_and_parks(self):
+        """
+        Probe 25 (R2): Runtime post-merge terminal missing commit bindings.
+        When gh pr merge succeeds but terminal view is missing headRefOid or baseRefOid:
+        - Must NOT call commit_consumed.
+        - Must mark authority indeterminate in CAS store.
+        - Must park unit closed with terminal_missing_commit_bindings.
+        """
+        from scripts.tests.test_tl_runtime import Fixture, MAKER_OK, CHECKER_OK
+        # 1. Missing headRefOid
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fx = Fixture(root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+            os.environ["TL_FAKE_GH_STATE"] = str(fx.gh_state)
+            try:
+                fx.gh_state.write_text(json.dumps({
+                    "checks_sequence": ["success"],
+                    "terminal_missing_head": True,
+                }), encoding="utf-8")
+                fx.script("maker", MAKER_OK)
+                fx.script("checker", CHECKER_OK)
+                rt = fx.runtime()
+                self.assertEqual(rt.run(), "blocked")
+                record = fx.fold().units["T001"]
+                self.assertEqual(record.state, "awaiting_operator")
+                self.assertIn("terminal_missing_commit_bindings", record.reason)
+
+                cas_files = sorted(rt.authority_store.external.store_dir.glob("*.cas"), key=os.path.getmtime)
+                self.assertTrue(len(cas_files) > 0)
+                latest_cas = json.loads(cas_files[-1].read_text(encoding="utf-8"))
+                self.assertEqual(latest_cas.get("state"), "indeterminate")
+            finally:
+                os.environ.pop("TL_FAKE_GH_STATE", None)
+
+        # 2. Missing baseRefOid
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fx = Fixture(root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+            os.environ["TL_FAKE_GH_STATE"] = str(fx.gh_state)
+            try:
+                fx.gh_state.write_text(json.dumps({
+                    "checks_sequence": ["success"],
+                    "terminal_missing_base": True,
+                }), encoding="utf-8")
+                fx.script("maker", MAKER_OK)
+                fx.script("checker", CHECKER_OK)
+                rt = fx.runtime()
+                self.assertEqual(rt.run(), "blocked")
+                record = fx.fold().units["T001"]
+                self.assertEqual(record.state, "awaiting_operator")
+                self.assertIn("terminal_missing_commit_bindings", record.reason)
+
+                cas_files = sorted(rt.authority_store.external.store_dir.glob("*.cas"), key=os.path.getmtime)
+                self.assertTrue(len(cas_files) > 0)
+                latest_cas = json.loads(cas_files[-1].read_text(encoding="utf-8"))
+                self.assertEqual(latest_cas.get("state"), "indeterminate")
+            finally:
+                os.environ.pop("TL_FAKE_GH_STATE", None)
 
 
 if __name__ == "__main__":

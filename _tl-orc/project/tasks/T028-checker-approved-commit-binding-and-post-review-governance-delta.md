@@ -5,18 +5,18 @@ deliverable: none
 standalone: true
 method: native
 status: in_progress
-state_revision: 6
+state_revision: 7
 depends_on: [T027]
 blocked_by: []
 origin: instrução normativa do mantenedor em 2026-09-14 (ratificação B004) e extensão formal ratificada em 2026-09-15 após auditoria do incidente de merge do PR #55
 decisions: []
 spec_author: orchestrator
 spec_revision: 765a1c3333c85d00
-rework_round: 6
+rework_round: 7
 affects_context: []
 effective_authors: [google]
 checker_independence: required
-content_id: 13ee49e4593022713ab7dc38292344a41a3b5f71:cf5ad17d740e0126
+content_id: 13ee49e4593022713ab7dc38292344a41a3b5f71:0fad835421b6aab1
 content_paths:
   - docs/WORK_MODEL.md
   - docs/RUNTIME.md

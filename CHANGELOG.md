@@ -95,12 +95,19 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   `merge_queued` e espera o operador, e o retry adota o merge da fila sem nova chamada.
   `decide` sobre um lote `blocked` o reabre para o próximo `run` (lote `stopped` continua
   exigindo nova autorização).
+- Revisão independente r8: intenção de merge remoto interrompida com o PR ainda aberto é
+  `ambiguous` (enfileiramento não muda o estado do PR), nunca `released`; push interrompido
+  continua liberado só quando o remoto está exatamente como antes da intenção (rejeitado
+  como bloqueante: o resultado é idêntico ao autorizado). Correção de CI: a árvore de
+  trabalho é calculada comparando conteúdo (índice temporário com mtime de 1 s, o que força a checagem racy do git), porque um
+  arquivo reescrito com o mesmo tamanho no mesmo segundo era lido pelo stat obsoleto no
+  Linux.
 - Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
   `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
 
 ### Validação
 
-- `scripts/tests/test_tl_runtime.py` (80 testes, Git real, harness e `gh` scriptados):
+- `scripts/tests/test_tl_runtime.py` (82 testes, Git real, harness e `gh` scriptados):
   DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
   oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
   segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec

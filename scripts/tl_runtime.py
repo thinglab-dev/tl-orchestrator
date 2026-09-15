@@ -456,6 +456,11 @@ class Git:
         try:
             if index.is_file():
                 shutil.copyfile(index, temp_index)
+                # git trusts an index entry whose size and second-granularity mtime match the file, unless
+                # the entry is "racy" (mtime >= index mtime). A file rewritten with the same size within
+                # the same second would then keep its stale hash. An index mtime of 1 s (0 disables the
+                # check in git) makes every entry racy, so git compares content instead of stat.
+                os.utime(temp_index, (1, 1))
             record = run_argv([self.exe, "add", "-A", "--", "."], self.repo, 300, env)
             if record["exit_code"] != 0:
                 raise Refusal(f"git add for tree checkpoint failed: {record['stderr'][:300]}")
@@ -1897,6 +1902,7 @@ class Runtime:
                         if view.get("baseRefName") != intent["base"] or view.get("headRefOid") != record.commit or str(view.get("state", "")).upper() != "OPEN":
                             return {"_status": "failed", "detail": f"pull request {record.pr['number']} is {view.get('state')} against {view.get('baseRefName')} at {str(view.get('headRefOid'))[:12]}; reviewed: {intent['base']} at {record.commit[:12]}"}
                         out = run_argv([*self.config["gh_argv"], "pr", "merge", str(record.pr["number"]), "--merge", "--delete-branch=false", "--match-head-commit", record.commit], self.repo, 300)
+                        self._fault_point("after_call:pull_request_merge")
                         if out["exit_code"] != 0:
                             return {"_status": "failed", "detail": out["stderr"][-400:]}
                         # gh has no base precondition and returns success on enqueue: only a terminal MERGED
@@ -2114,7 +2120,9 @@ class Runtime:
                 if payload.get("commit") and view.get("headRefOid") != payload.get("commit"):
                     return "ambiguous", {"detail": f"pull request merged at head {str(view.get('headRefOid'))[:12]}, not the reviewed commit {str(payload.get('commit'))[:12]}"}
                 return "ok", {"merged": True, "detail": "pull request already merged"}
-            return "released", {"detail": "pull request open; merge will run"}
+            # An enqueued merge leaves the PR OPEN, exactly like a merge that never ran: the state cannot
+            # prove the call did not happen, so the operator decides (retry adopts a queue merge without a new call).
+            return "ambiguous", {"detail": "pull request still open after an interrupted merge intent; a merge queue may hold it"}
         if effect == "ci_rerun":
             return "ambiguous", {"rerun": True, "detail": "rerun may have been requested; counted, not repeated"}
         if effect == "local_merge":

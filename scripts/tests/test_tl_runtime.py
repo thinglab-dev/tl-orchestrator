@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -748,6 +749,33 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(fold.batch_state, "done")
         calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
         self.assertEqual(sum(1 for c in calls if c[:2] == ["pr", "merge"]), 1)
+
+    def test_crash_between_merge_call_and_verification_waits_for_operator(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"], "merge_queues": True}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_call:pull_request_merge").returncode, 70)
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        fold = fx.fold()
+        self.assertEqual(fold.units["T001"].state, "awaiting_operator")
+        self.assertEqual(fold.recoveries[-1]["verdict"], "ambiguous")
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertEqual(sum(1 for c in calls if c[:2] == ["pr", "merge"]), 1, "the merge call is never repeated blindly")
+
+    def test_worktree_tree_sees_a_same_size_rewrite_within_one_second(self) -> None:
+        fx = Fixture(self.root, units=1)
+        repo_git = tl_runtime.Git(fx.repo, "git")
+        target = fx.repo / "pkg" / "racy.py"
+        target.write_text("A" + chr(10), encoding="utf-8")
+        git(fx.repo, "add", "-A")
+        git(fx.repo, "commit", "-q", "-m", "racy fixture")
+        target.write_text("B" + chr(10), encoding="utf-8")  # same size, same second as the index entry
+        time.sleep(1.2)  # the index copy now has a newer second than the entry: stat alone would trust the stale hash
+        head_tree = git(fx.repo, "rev-parse", "HEAD^{tree}")
+        self.assertNotEqual(repo_git.worktree_tree(), head_tree)
+        self.assertEqual(git(fx.repo, "rev-parse", "HEAD^{tree}"), head_tree, "the real index and HEAD are untouched")
 
     # ---- policy -----------------------------------------------------------------------------
 

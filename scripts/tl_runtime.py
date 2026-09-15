@@ -1892,17 +1892,32 @@ class Runtime:
                         view = self._pr_view(record.pr["number"])
                         if view is None:
                             return {"_status": "failed", "detail": "gh pr view failed before merge"}
+                        if str(view.get("state", "")).upper() == "MERGED" and view.get("baseRefName") == intent["base"] and view.get("headRefOid") == record.commit:
+                            return {"merged": True, "detail": "already merged with the reviewed base and head (merge queue or operator)"}
                         if view.get("baseRefName") != intent["base"] or view.get("headRefOid") != record.commit or str(view.get("state", "")).upper() != "OPEN":
                             return {"_status": "failed", "detail": f"pull request {record.pr['number']} is {view.get('state')} against {view.get('baseRefName')} at {str(view.get('headRefOid'))[:12]}; reviewed: {intent['base']} at {record.commit[:12]}"}
                         out = run_argv([*self.config["gh_argv"], "pr", "merge", str(record.pr["number"]), "--merge", "--delete-branch=false", "--match-head-commit", record.commit], self.repo, 300)
                         if out["exit_code"] != 0:
                             return {"_status": "failed", "detail": out["stderr"][-400:]}
-                        # gh has no base precondition: the base is checked right before and verified right after.
-                        after = self._pr_view(record.pr["number"]) or {}
-                        if after.get("baseRefName") not in (None, intent["base"]):
+                        # gh has no base precondition and returns success on enqueue: only a terminal MERGED
+                        # state with the reviewed base and head counts as merged.
+                        after = self._pr_view(record.pr["number"])
+                        if after is None:
+                            return {"_status": "ambiguous", "merged": False, "queued": True, "detail": "gh pr merge returned success but gh pr view failed afterwards; verify and retry"}
+                        if str(after.get("state", "")).upper() != "MERGED":
+                            return {"_status": "ambiguous", "merged": False, "queued": True, "detail": f"gh pr merge returned success but the pull request is still {after.get('state')} (merge queue or delayed merge); verify and retry"}
+                        if after.get("baseRefName") != intent["base"]:
                             return {"merged": True, "base_mismatch": after.get("baseRefName")}
+                        if after.get("headRefOid") != record.commit:
+                            return {"merged": True, "base_mismatch": None, "head_mismatch": after.get("headRefOid")}
                         return {"merged": True}
                     result = self.step(f"{uid}:merge:{record.commit}", "pull_request_merge", uid, "merge", {"type": "pull_request_merge", "pr": record.pr["number"], "commit": record.commit, "base": self.base_branch}, merge)
+                    if result.get("queued"):
+                        raise UnitPark("awaiting_operator", "merge_queued: " + str(result.get("detail", ""))[:200], decision={"options": ["retry", "skip"]})
+                    if result.get("merged") and result.get("head_mismatch"):
+                        self.unit_state(uid, "running", "", phase="complete", merged=True)
+                        raise UnitPark("awaiting_operator", f"merged_unexpected_head: pull request {record.pr['number']} merged at {str(result['head_mismatch'])[:12]}, not the reviewed {record.commit[:12]}",
+                                       decision={"options": ["skip"]})
                     if result.get("merged") and result.get("base_mismatch"):
                         self.unit_state(uid, "running", "", phase="complete", merged=True)
                         raise UnitPark("awaiting_operator", f"merged_into_unexpected_base: pull request {record.pr['number']} was retargeted to {result['base_mismatch']} between the check and the merge",
@@ -2253,6 +2268,8 @@ def render_report(runtime: "Runtime") -> str:
         nxt.append(f"- next unit: {next_unit}" if next_unit else "- nothing eligible; resolve DECISION REQUIRED / BLOCKED then rerun `tl_runtime.py run`")
     elif fold.batch_state == "done":
         nxt.append("- batch closed; the runtime never opens another batch")
+    elif fold.batch_state == "blocked":
+        nxt.append(f"- batch blocked: {fold.stop_reason}; `tl_runtime.py decide` on the units above reopens it for the next `run`")
     else:
         nxt.append(f"- batch {fold.batch_state}: {fold.stop_reason}; a new authorization is needed to continue")
     journaled = (fold.meta or {}).get("capabilities")
@@ -2364,6 +2381,9 @@ def main(argv: list[str] | None = None) -> int:
                 runtime.unit_state(args.unit, "retryable", "operator: retry", phase=record.phase if record.phase in PHASES else "implement")
             else:
                 runtime.unit_state(args.unit, "failed", "operator: skipped")
+            if runtime.fold.batch_state == "blocked":
+                # A batch blocked only on decisions reopens for the next `run`; a stopped batch never does.
+                runtime.journal.append("batch_state", state="in_progress", reason="operator decision")
             runtime.fold = runtime.journal.fold()
             runtime.project()
             runtime.release()

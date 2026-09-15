@@ -263,7 +263,9 @@ ponteiro. `code_failure` vira rodada de rework; infraestrutura sem teste falho g
   do lote e `permitted_effects` não o governa.
 
 `decide --option retry` devolve a unidade a `retryable` (o trabalho parado está no
-checkpoint); `skip` marca `failed`. Um lote já fechado não reabre: nova autorização.
+checkpoint); `skip` marca `failed`. Um lote `blocked` (só por decisões) reabre no próximo
+`run`; um lote `stopped` (segurança, orçamento, autorização, integridade) nunca reabre:
+nova autorização.
 
 ## Testes e prova
 
@@ -279,10 +281,13 @@ rerun de infraestrutura e reconciliação de merge.
 
 ## Limites conhecidos
 
-- `gh pr merge` só aceita precondição de head (`--match-head-commit`), não de base. O runtime
-  revalida base, head e estado `OPEN` imediatamente antes e verifica a base logo depois; um
-  humano que retargete o PR nesse intervalo produz `merged_into_unexpected_base` e
-  `awaiting_operator`, não um merge silencioso. Fechar essa janela é governança do
+- `gh pr merge` só aceita precondição de head (`--match-head-commit`), não de base, e devolve
+  sucesso ao enfileirar num merge queue. O runtime revalida base, head e estado `OPEN`
+  imediatamente antes e só conta como mesclado o estado terminal `MERGED` com a mesma base e
+  o mesmo head logo depois: PR ainda aberto vira `merge_queued` (step `ambiguous`,
+  `awaiting_operator`; o retry adota o merge feito pela fila sem nova chamada) e base ou
+  head diferentes viram `merged_into_unexpected_base` / `merged_unexpected_head`, não um
+  merge silencioso. Fechar essa janela é governança do
   repositório (proteção de branch), não do runtime.
 
 - Concorrência 1. Worktrees em paralelo dependem do pool/árbitro do `tl_supervisor.py` e de

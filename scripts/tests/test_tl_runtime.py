@@ -280,10 +280,11 @@ class RuntimeTest(unittest.TestCase):
         decided = fx.run_cli("decide", "--unit", "T001", "--option", "retry")
         self.assertEqual(decided.returncode, 0, decided.stderr)
         self.assertEqual(fx.fold().units["T001"].state, "retryable")
-        self.assertEqual(fx.fold().batch_state, "blocked", "closing already happened; decide alone does not reopen")
-        # A parked-then-retried unit resumes in a fresh runtime only when the batch is still open;
-        # here the batch closed, so a new authorization is the documented path. Prove the fold says so.
-        self.assertIn("a new authorization is needed", fx.run_cli("report").stdout)
+        self.assertEqual(fx.fold().batch_state, "in_progress", "a batch blocked only on a decision reopens")
+        self.assertEqual(fx.run_cli("run").returncode, 0)
+        fold = fx.fold()
+        self.assertEqual(fold.units["T001"].state, "completed")
+        self.assertEqual(fold.batch_state, "done")
 
     def test_pending_verification_matching_a_green_gate_is_resolved_by_runtime(self) -> None:
         fx = Fixture(self.root, units=1)
@@ -722,6 +723,31 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(record.state, "awaiting_operator")
         self.assertTrue(record.merged)
         self.assertIn("merged_into_unexpected_base", record.reason)
+
+    def test_merge_queue_success_reply_is_not_a_merge(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"], "merge_queues": True}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run").returncode, 3)
+        fold = fx.fold()
+        record = fold.units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("merge_queued", record.reason)
+        self.assertFalse(record.merged)
+        self.assertEqual(fold.steps["T001:merge:" + record.commit]["status"], "ambiguous")
+        # The queue merges it later; the operator retries and the runtime adopts the terminal state without a second merge call.
+        state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
+        pr = next(iter(state["prs"].values()))
+        pr["state"], pr["mergedAt"] = "MERGED", "2026-01-01T00:00:00Z"
+        fx.gh_state.write_text(json.dumps(state), encoding="utf-8")
+        self.assertEqual(fx.run_cli("decide", "--unit", "T001", "--option", "retry").returncode, 0)
+        self.assertEqual(fx.run_cli("run").returncode, 0)
+        fold = fx.fold()
+        self.assertTrue(fold.units["T001"].merged)
+        self.assertEqual(fold.batch_state, "done")
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertEqual(sum(1 for c in calls if c[:2] == ["pr", "merge"]), 1)
 
     # ---- policy -----------------------------------------------------------------------------
 

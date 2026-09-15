@@ -1,6 +1,6 @@
 # tl-orchestrator
 
-Versão atual do pacote: **0.17.0**.
+Versão atual do pacote: **0.18.0**.
 
 Um método documental para planejar, debater decisões, implementar e revisar mudanças com Orquestrador, Planner, Maker e Checker. Usa agentes e portões já disponíveis no projeto consumidor. A distribuição contém documentos Markdown, schemas JSON, licença e um supervisor opcional de biblioteca padrão; o método não precisa de runtime próprio nem de instalação do projeto de origem. O [protocolo de execução](docs/EXECUTION_PROTOCOL.md) descreve o despacho de uma unidade sem conversa de acompanhamento; usá-lo pelo supervisor `scripts/tl_job.py` requer Python 3 já presente no ambiente, e o método permanece utilizável sem ele.
 

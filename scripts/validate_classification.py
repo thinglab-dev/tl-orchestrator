@@ -19,6 +19,28 @@ VALID_COST_BASES = {"local_observed", "official_task_proxy", "token_price_only",
 VALID_SELECTION_STATUSES = {"conclusive", "underdetermined", "awaiting_operator", "infeasible"}
 VALID_TECHNICAL_ADEQUACIES = {"sufficient", "insufficient", "uncertain"}
 VALID_DISPATCH_ROLES = {"primary", "fallback", "unassigned"}
+VALID_SELECTION_BASES = {"minimum_sufficient", "escalation", "pinned", "only_available"}
+VALID_ESCALATION_REASONS = {
+    "efficient_candidate_insufficient",
+    "efficient_candidate_uncertain",
+    "checker_family_independence",
+    "operator_pinned",
+    "pre_dispatch_unavailable",
+    "proven_empirical_failure",
+    "concrete_technical_necessity",
+    "catalog_ineligible",
+}
+FORBIDDEN_OVERSELECTION_PATTERNS = [
+    "frontier model",
+    "modelo mais forte",
+    "mais forte",
+    "maior capacidade de raciocinio",
+    "maior capacidade de raciocínio",
+    "maior densidade arquitetural",
+    "tier heavy exige modelo maximo",
+    "tier heavy exige modelo máximo",
+    "modelo de fronteira",
+]
 
 ROOT_ALLOWED_KEYS = {
     "schema_version",
@@ -50,6 +72,8 @@ V3_ROLE_ALLOWED_KEYS = {
     "tie_break_applied",
     "evaluations",
     "candidates",
+    "selection_basis",
+    "escalation_reason",
 }
 V3_EVALUATION_ALLOWED_KEYS = {
     "harness",
@@ -156,6 +180,39 @@ def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str
     reason = role_data.get("reason")
     if not isinstance(reason, str) or not reason:
         errors.append(f"roles.{role_name}.reason must be non-empty string")
+    else:
+        lower_reason = reason.lower()
+        for pat in FORBIDDEN_OVERSELECTION_PATTERNS:
+            if pat in lower_reason:
+                errors.append(f"roles.{role_name}.reason contains forbidden over-selection phrase: '{pat}'")
+
+    sel_basis = role_data.get("selection_basis")
+    esc_reason = role_data.get("escalation_reason")
+
+    if status in ("conclusive", "underdetermined"):
+        if not sel_basis:
+            errors.append(f"roles.{role_name}: selection_status '{status}' requires selection_basis")
+        elif sel_basis not in VALID_SELECTION_BASES:
+            errors.append(f"roles.{role_name}.selection_basis invalid: {sel_basis}")
+    elif sel_basis is not None and sel_basis not in VALID_SELECTION_BASES:
+        errors.append(f"roles.{role_name}.selection_basis invalid: {sel_basis}")
+
+    if sel_basis == "escalation":
+        if not esc_reason or not isinstance(esc_reason, str):
+            errors.append(f"roles.{role_name}: selection_basis 'escalation' requires non-empty escalation_reason")
+        elif esc_reason not in VALID_ESCALATION_REASONS:
+            errors.append(f"roles.{role_name}.escalation_reason invalid enum value: '{esc_reason}'")
+        else:
+            lower_esc = esc_reason.lower()
+            for pat in FORBIDDEN_OVERSELECTION_PATTERNS:
+                if pat in lower_esc:
+                    errors.append(f"roles.{role_name}.escalation_reason contains forbidden over-selection phrase: '{pat}'")
+    else:
+        if esc_reason is not None and not isinstance(esc_reason, str):
+            errors.append(f"roles.{role_name}.escalation_reason must be string or null")
+        elif esc_reason is not None and esc_reason != "":
+            errors.append(f"roles.{role_name}: escalation_reason must be null when selection_basis is not 'escalation'")
+
     tie_break = role_data.get("tie_break_applied")
     if tie_break is not None and not isinstance(tie_break, str):
         errors.append(f"roles.{role_name}.tie_break_applied must be string or null")
@@ -220,8 +277,16 @@ def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str
             ev_reason = ev.get("reason")
             if not isinstance(ev_reason, str) or not ev_reason:
                 errors.append(f"roles.{role_name}.evaluations[{idx}].reason must be non-empty string")
+            else:
+                lower_ev_reason = ev_reason.lower()
+                for pat in FORBIDDEN_OVERSELECTION_PATTERNS:
+                    if pat in lower_ev_reason:
+                        errors.append(f"roles.{role_name}.evaluations[{idx}].reason contains forbidden over-selection phrase: '{pat}'")
             if model and effort:
-                eval_by_pair[(harness, model, effort)] = ev
+                pair = (harness, model, effort)
+                if pair in eval_by_pair:
+                    errors.append(f"roles.{role_name}.evaluations contains duplicate evaluation for pair {pair}")
+                eval_by_pair[pair] = ev
 
     candidates = role_data.get("candidates")
     if not isinstance(candidates, list):
@@ -271,6 +336,11 @@ def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str
         c_reason = c.get("reason")
         if not isinstance(c_reason, str) or not c_reason:
             errors.append(f"roles.{role_name}.candidates[{idx}].reason must be non-empty string")
+        else:
+            lower_c_reason = c_reason.lower()
+            for pat in FORBIDDEN_OVERSELECTION_PATTERNS:
+                if pat in lower_c_reason:
+                    errors.append(f"roles.{role_name}.candidates[{idx}].reason contains forbidden over-selection phrase: '{pat}'")
         # Check against evaluations
         if model and effort:
             matching_ev = eval_by_pair.get((harness, model, effort))
@@ -279,6 +349,85 @@ def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str
             else:
                 if matching_ev.get("technical_adequacy") != "sufficient" or matching_ev.get("dispatchable") is not True:
                     errors.append(f"roles.{role_name}.candidates[{idx}] ({harness}/{model}/{effort}) evaluated as insufficient/uncertain or not dispatchable")
+
+    # Reasoning effort minimum-sufficient check
+    if candidates and len(candidates) > 0 and candidates[0].get("dispatch_role") == "primary":
+        pri = candidates[0]
+        p_harness = pri.get("harness")
+        p_model = pri.get("model")
+        p_effort = pri.get("effort")
+        if p_effort == "xhigh" and p_harness and p_model:
+            high_ev = eval_by_pair.get((p_harness, p_model, "high"))
+            if high_ev and high_ev.get("technical_adequacy") == "sufficient" and high_ev.get("dispatchable") is True:
+                ev_ids = pri.get("evidence_ids")
+                if sel_basis == "pinned":
+                    pass
+                elif sel_basis == "escalation" and esc_reason == "concrete_technical_necessity" and isinstance(ev_ids, list) and len(ev_ids) > 0:
+                    pass
+                else:
+                    errors.append(
+                        f"roles.{role_name}: primary candidate uses effort 'xhigh' when 'high' for the same model is evaluated as sufficient. "
+                        f"Requires selection_basis 'escalation' with escalation_reason 'concrete_technical_necessity' and supporting evidence_ids, or 'pinned'."
+                    )
+
+        # Minimum Sufficient Capability & Escalation Consistency Check for Maker
+        if role_name == "maker" and sel_basis != "pinned":
+            pri_cand = (p_harness, p_model, p_effort)
+            if pri_cand in DEFAULT_EFFICIENCY_ORDER:
+                pri_idx = DEFAULT_EFFICIENCY_ORDER.index(pri_cand)
+                higher_cands = DEFAULT_EFFICIENCY_ORDER[:pri_idx]
+            else:
+                higher_cands = DEFAULT_EFFICIENCY_ORDER
+
+            for hc in higher_cands:
+                ev_hc = eval_by_pair.get(hc)
+                if not ev_hc:
+                    continue
+                hc_sufficient = (
+                    ev_hc.get("technical_adequacy") == "sufficient"
+                    and ev_hc.get("dispatchable") is True
+                    and ev_hc.get("catalog_eligible", True) is True
+                )
+                if hc_sufficient:
+                    if sel_basis == "minimum_sufficient":
+                        errors.append(
+                            f"roles.maker: selection_basis 'minimum_sufficient' selected {pri_cand}, "
+                            f"but more efficient candidate {hc} is evaluated as sufficient and dispatchable"
+                        )
+                    elif sel_basis == "escalation":
+                        if esc_reason in ("efficient_candidate_insufficient", "efficient_candidate_uncertain", "catalog_ineligible"):
+                            errors.append(
+                                f"roles.maker: escalation_reason '{esc_reason}' is contradicted by evaluation for {hc}: "
+                                f"candidate is evaluated as sufficient, catalog_eligible, and dispatchable"
+                            )
+
+            if sel_basis == "escalation" and esc_reason == "efficient_candidate_insufficient":
+                any_insufficient = any(
+                    eval_by_pair.get(hc) and eval_by_pair[hc].get("technical_adequacy") == "insufficient"
+                    for hc in higher_cands
+                )
+                if not any_insufficient:
+                    errors.append(
+                        f"roles.maker: escalation_reason 'efficient_candidate_insufficient' requires at least one more efficient candidate to be evaluated as insufficient"
+                    )
+            elif sel_basis == "escalation" and esc_reason == "efficient_candidate_uncertain":
+                any_uncertain = any(
+                    eval_by_pair.get(hc) and eval_by_pair[hc].get("technical_adequacy") == "uncertain"
+                    for hc in higher_cands
+                )
+                if not any_uncertain:
+                    errors.append(
+                        f"roles.maker: escalation_reason 'efficient_candidate_uncertain' requires at least one more efficient candidate to be evaluated as uncertain"
+                    )
+            elif sel_basis == "escalation" and esc_reason == "catalog_ineligible":
+                any_ineligible = any(
+                    eval_by_pair.get(hc) and eval_by_pair[hc].get("catalog_eligible") is False
+                    for hc in higher_cands
+                )
+                if not any_ineligible:
+                    errors.append(
+                        f"roles.maker: escalation_reason 'catalog_ineligible' requires at least one more efficient candidate to be catalog ineligible"
+                    )
 
     # Invariant R18: State matrix
     if status == "conclusive":
@@ -455,6 +604,180 @@ def match_project_priority(
         if len(matches) == 1:
             return matches[0], f"project_priority: {sel}", "underdetermined"
     return None, None, "awaiting_operator"
+
+
+DEFAULT_EFFICIENCY_ORDER: list[tuple[str, str, str]] = [
+    ("agy", "gemini-3.8-flash-high", "high"),
+    ("codex", "gpt-5.6-terra", "high"),
+    ("claude", "sonnet", "high"),
+    ("claude", "claude-sonnet-4-6", "high"),
+    ("codex", "gpt-5.6-terra", "xhigh"),
+]
+
+
+def resolve_minimum_sufficient(
+    evaluations: list[dict[str, Any]],
+    efficiency_order: list[tuple[str, str, str]] | None = None,
+    pins: dict[str, Any] | None = None,
+    forbidden_families: set[str] | None = None,
+    pre_dispatch_unavailable: set[tuple[str, str, str]] | None = None,
+    require_xhigh: bool = False,
+) -> tuple[tuple[str, str, str] | None, str, str | None]:
+    """Deterministically resolve the primary model candidate using Minimum Sufficient Capability.
+
+    Args:
+        evaluations: List of evaluation dicts for the role.
+        efficiency_order: Preferred order of (harness, model, effort) from highest efficiency to lowest.
+        pins: Optional pins dict specifying pinned harness/model/effort for the role.
+        forbidden_families: Optional set of forbidden families (e.g. {"openai", "google"}).
+        pre_dispatch_unavailable: Optional set of candidate tuples unavailable at pre-dispatch.
+        require_xhigh: If True, indicates concrete documented necessity for xhigh effort.
+
+    Returns:
+        (primary_candidate, selection_basis, escalation_reason)
+        where primary_candidate is (harness, model, effort) or None if infeasible.
+    """
+    if not evaluations:
+        return None, "infeasible", None
+
+    family_map = {
+        "agy": "google",
+        "codex": "openai",
+        "claude": "anthropic",
+    }
+    forbidden_fams = {f.lower() for f in forbidden_families} if forbidden_families else set()
+    pre_unavailable = pre_dispatch_unavailable or set()
+
+    eff_order = list(efficiency_order) if efficiency_order is not None else list(DEFAULT_EFFICIENCY_ORDER)
+
+    # Check pin first
+    if pins and isinstance(pins, dict):
+        p_harness = pins.get("harness")
+        p_model = pins.get("model")
+        p_effort = pins.get("effort")
+        if p_harness or p_model or p_effort:
+            pinned_matching = []
+            for ev in evaluations:
+                h = ev.get("harness")
+                m = ev.get("model")
+                e = ev.get("effort")
+                if p_harness and h != p_harness:
+                    continue
+                if p_model and m != p_model:
+                    continue
+                if p_effort and e != p_effort:
+                    continue
+                if ev.get("technical_adequacy") == "sufficient" and ev.get("catalog_eligible", True) and ev.get("dispatchable", True):
+                    cand = (h, m, e)
+                    fam = family_map.get(h)
+                    if fam and fam in forbidden_fams:
+                        continue
+                    if cand not in pre_unavailable:
+                        pinned_matching.append(cand)
+            if pinned_matching:
+                def pin_sort_key(c: tuple[str, str, str]) -> tuple[int, str, str, str]:
+                    try:
+                        idx = eff_order.index(c)
+                    except ValueError:
+                        idx = 9999
+                    return (idx, c[0], c[1], c[2])
+
+                pinned_matching.sort(key=pin_sort_key)
+                return pinned_matching[0], "pinned", None
+
+    # Build evaluation lookup and collect extra pairs
+    eval_by_pair: dict[tuple[str, str, str], dict[str, Any]] = {}
+    extra_pairs: list[tuple[str, str, str]] = []
+    for ev in evaluations:
+        h = ev.get("harness")
+        m = ev.get("model")
+        e = ev.get("effort")
+        if h and m and e:
+            pair = (h, m, e)
+            eval_by_pair[pair] = ev
+            if pair not in eff_order and pair not in extra_pairs:
+                extra_pairs.append(pair)
+
+    # Impose a stable, deterministic total order for pairs outside eff_order
+    extra_pairs.sort()
+    eff_order.extend(extra_pairs)
+
+    # Identify eligible sufficient candidates
+    eligible_sufficient: list[tuple[str, str, str]] = []
+    for cand in eff_order:
+        ev = eval_by_pair.get(cand)
+        if not ev:
+            continue
+        if ev.get("technical_adequacy") != "sufficient":
+            continue
+        if not ev.get("catalog_eligible", True):
+            continue
+        if not ev.get("dispatchable", True):
+            continue
+        fam = family_map.get(cand[0])
+        if fam and fam in forbidden_fams:
+            continue
+        if cand in pre_unavailable:
+            continue
+        eligible_sufficient.append(cand)
+
+    if not eligible_sufficient:
+        return None, "infeasible", None
+
+    if len(eligible_sufficient) == 1 and len(evaluations) == 1:
+        return eligible_sufficient[0], "only_available", None
+
+    # If require_xhigh is True, lower effort variants do not meet the concrete technical necessity
+    if require_xhigh:
+        xhigh_eligible = [c for c in eligible_sufficient if c[2] in ("xhigh", "max", "ultra")]
+        if not xhigh_eligible:
+            return None, "infeasible", None
+        return xhigh_eligible[0], "escalation", "concrete_technical_necessity"
+
+    # Find the most efficient candidate defined in the profile
+    most_efficient_cand = None
+    for cand in eff_order:
+        if cand in eval_by_pair:
+            most_efficient_cand = cand
+            break
+
+    # If the most efficient evaluated candidate is eligible and sufficient:
+    if most_efficient_cand and most_efficient_cand in eligible_sufficient:
+        # Reasoning effort minimum-sufficient check:
+        # If candidate has effort xhigh and require_xhigh is False, prefer high variant if available
+        h, m, e = most_efficient_cand
+        if e == "xhigh" and not require_xhigh:
+            if (h, m, "high") in eligible_sufficient:
+                return (h, m, "high"), "minimum_sufficient", None
+        return most_efficient_cand, "minimum_sufficient", None
+
+    # Escalation needed: explain why the most efficient candidate was skipped
+    escalation_reason = "efficient_candidate_insufficient"
+    if most_efficient_cand:
+        ev_most = eval_by_pair.get(most_efficient_cand)
+        fam = family_map.get(most_efficient_cand[0])
+        if fam and fam in forbidden_fams:
+            escalation_reason = "checker_family_independence"
+        elif most_efficient_cand in pre_unavailable:
+            escalation_reason = "pre_dispatch_unavailable"
+        elif ev_most:
+            if ev_most.get("technical_adequacy") == "uncertain":
+                escalation_reason = "efficient_candidate_uncertain"
+            elif ev_most.get("technical_adequacy") == "insufficient":
+                escalation_reason = "efficient_candidate_insufficient"
+            elif not ev_most.get("catalog_eligible", True):
+                escalation_reason = "catalog_ineligible"
+
+    # Select best candidate from eligible_sufficient according to efficiency_order
+    filtered_eligible = []
+    for cand in eligible_sufficient:
+        h, m, e = cand
+        if e == "xhigh" and not require_xhigh and (h, m, "high") in eligible_sufficient:
+            continue
+        filtered_eligible.append(cand)
+
+    winner = filtered_eligible[0] if filtered_eligible else eligible_sufficient[0]
+    return winner, "escalation", escalation_reason
 
 
 def main() -> None:

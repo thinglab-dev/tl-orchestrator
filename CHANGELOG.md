@@ -4,8 +4,17 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-15
+
 ### Adicionado
 
+- Roteamento por Capacidade Mínima Suficiente e Preferência Determinística de Eficiência (Task Native T031):
+  - **Minimum Sufficient Capability (MSC)**: o Classificador dimensiona o trabalho pelo menor esforço e custo operacional que satisfaça o piso de qualidade (*quality floor*) da fase. A avaliação técnica em `evaluations[]` julga unicamente adequação (`sufficient`, `uncertain`, `insufficient`).
+  - **Deterministic Efficiency Preference Policy**: entre candidatos `sufficient` e `dispatchable`, a seleção primária (`candidates[0]`) segue a ordem de preferência de eficiência configurada no perfil (no perfil padrão, o candidato de alta eficiência `gemini-3.8-flash-high` tem precedência sobre modelos padrão/pesados como `gpt-5.6-terra` e `sonnet`/`opus`), registrando `selection_basis: "minimum_sufficient"`.
+  - **Escalada Factual Obrigatória**: a eleição de candidatos mais pesados ou de maior custo exige registro de `selection_basis: "escalation"` e causa factual comprovada em `escalation_reason` (`efficient_candidate_insufficient`, `efficient_candidate_uncertain`, `checker_family_independence`, `operator_pinned`, `pre_dispatch_unavailable`, `proven_empirical_failure`, `concrete_technical_necessity`).
+  - **Proteção Contra Over-Selection e Banimento de Jargões**: proibição terminante e validação mecânica rejeitando justificativas subjetivas sem causa factual de insuficiência ("frontier model", "modelo mais forte", "maior capacidade de raciocínio", "maior densidade arquitetural", "tier heavy exige modelo máximo").
+  - **Reasoning Effort Mínimo Suficiente**: dentro do mesmo modelo (ex.: Codex), effort `high` é preferido por padrão sobre `xhigh` a menos que haja necessidade técnica concreta comprovada exigindo `xhigh`.
+  - **Resolver e Validador Mecânico**: disponibilização de `resolve_minimum_sufficient(...)` em `scripts/validate_classification.py`, suporte no schema v3 aos campos `selection_basis` e `escalation_reason` e suíte com 8 casos de teste contratuais determinísticos em `scripts/tests/test_dynamic_primary_selection.py`.
 - Journaling de Chamadas de Modelo Obrigatório e Despachador Orçado no Modo Automático (Task Native T027):
   - Primitive unificado `budgeted_model_dispatch` em `scripts/tl_job.py` (e subcommand CLI `tl_job.py budgeted-dispatch`) garantindo o ciclo estrito de write-ahead (`reserve -> pending_call persistido -> dispatch -> resultado observado -> consumed += 1 -> reserved -= 1 -> pending_call = null -> persistência em disco`) para todo despacho a modelos.
   - Abrangência universal cobrindo todos os papéis: `classifier`, `planner`, `maker`, `checker`, `advisor` e `searcher`, vedando bypass de journal para qualquer papel.
@@ -997,3 +1006,5 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 [0.14.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.13.0...v0.14.0
 [0.15.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.14.0...v0.15.0
 [0.16.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.15.0...v0.16.0
+[0.17.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.16.0...v0.17.0
+[0.18.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.17.0...v0.18.0

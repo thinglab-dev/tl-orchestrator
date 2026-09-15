@@ -12,7 +12,7 @@ coordinator:
 active_batch: none
 batch_status: none
 review_followups: []
-next_task_id: 31
+next_task_id: 32
 next_deliverable_id: 1
 next_decision_id: 1
 next_discussion_id: 1
@@ -52,3 +52,4 @@ open_discussions: []
 | T028 | gov | none | draft | [T027] | [] | 1 | - |
 | T029 | feat | none | done | [T026] | [] | 12 | evidence/T029-r11.md |
 | T030 | gov | none | done | [T029] | [] | 2 | evidence/T030-r01.md |
+| T031 | feat | package | done | [T019, T027] | [] | 2 | evidence/T031-r01.md |

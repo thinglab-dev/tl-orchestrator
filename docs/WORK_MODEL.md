@@ -976,6 +976,7 @@ O lote transita para `CLOSE` quando:
 5. É gerado o relatório terminal ao usuário contendo sumário de unidades, chamadas consumidas e evidências;
 6. O sistema retorna ao estado `IDLE`.
 - **Invariante terminal:** O fechamento de um lote **nunca** cria ou dispara outro lote automaticamente.
+- **Runtime durável (opcional, v0.17.0):** os estados `EXECUTE` → `CLOSE` de um lote já congelado podem ser conduzidos por [`scripts/tl_runtime.py`](RUNTIME.md) sem sessão de Orquestrador aberta. Ele preserva estes invariantes (lote finito, efeitos permitidos, reserva de verificação, condições de parada, fechamento sem novo lote) e acrescenta journal de steps com retomada após crash. `DISCOVER`, `PROPOSE` e `AUTHORIZE` continuam humanos/Orquestrador.
 
 ## Autorizações de escrita
 

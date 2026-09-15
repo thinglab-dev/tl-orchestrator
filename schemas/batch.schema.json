@@ -94,6 +94,14 @@
             },
             "release": {
               "type": "boolean"
+            },
+            "pull_request_merge": {
+              "type": "boolean",
+              "description": "Optional since v0.17.0: the durable runtime may merge the unit pull request after green CI. Absent means false."
+            },
+            "ci_rerun": {
+              "type": "boolean",
+              "description": "Optional since v0.17.0: the durable runtime may re-run failed CI jobs once per unit when the failure looks like infrastructure. Absent means false."
             }
           }
         },

@@ -209,6 +209,19 @@ class TestSubprocessEnvironment(unittest.TestCase):
         "NODE_OPTIONS": "--require /tmp/evil.js",
     }
 
+    NPM_SENTINELS = {
+        "NPM_TOKEN": "sentinel-npm-token",
+        "GH_TOKEN": "sentinel-gh-token",
+        "GITHUB_TOKEN": "sentinel-github-token",
+        "AWS_ACCESS_KEY_ID": "sentinel-aws-key-id",
+        "AWS_SECRET_ACCESS_KEY": "sentinel-aws-secret",
+        "AWS_SESSION_TOKEN": "sentinel-aws-session",
+        "NPM_CONFIG_REGISTRY": "https://evil.example.invalid/",
+        "npm_config_registry": "https://evil-lower.example.invalid/",
+        "NPM_CONFIG_CACHE": "/tmp/attacker-cache",
+        "NPM_CONFIG__AUTH": "sentinel-npm-auth",
+    }
+
     def test_cli_env_strips_every_inherited_key_and_config(self):
         root = _tmp_root(self)
         paths = tl_graft.cache_paths(root)
@@ -243,12 +256,43 @@ class TestSubprocessEnvironment(unittest.TestCase):
         self.assertEqual(env["USERPROFILE"], str(paths["home"]))
 
     def test_npm_env_keeps_home_but_drops_keys(self):
+        root = _tmp_root(self)
+        paths = tl_graft.cache_paths(root)
         with mock.patch.dict(os.environ, self.SENTINELS, clear=False):
-            env = tl_graft._npm_env()
+            env = tl_graft._npm_env(paths)
         self.assertNotIn("GRAFT_API_KEY", env)
         self.assertEqual(env["DO_NOT_TRACK"], "1")
         if "HOME" in os.environ:
             self.assertEqual(env.get("HOME"), os.environ["HOME"])
+
+    def test_npm_env_strips_secrets_and_inherited_npm_config(self):
+        # R19: an install script or a leftover NPM_CONFIG_*/secret in the real environment
+        # must not reach `npm install`, whatever its case.
+        root = _tmp_root(self)
+        paths = tl_graft.cache_paths(root)
+        with mock.patch.dict(os.environ, self.NPM_SENTINELS, clear=False):
+            env = tl_graft._npm_env(paths)
+        # `npm_config_registry` is legitimately set by us below to the official host; every
+        # other inherited key here must not survive at all.
+        overridden = {"npm_config_registry"}
+        for name in self.NPM_SENTINELS:
+            if name.lower() not in overridden:
+                self.assertNotIn(name, env, f"{name} vazou para o npm install")
+        for value in self.NPM_SENTINELS.values():
+            self.assertNotIn(value, env.values(), f"valor herdado {value!r} sobreviveu")
+
+    def test_npm_env_pins_official_registry_and_isolates_config(self):
+        root = _tmp_root(self)
+        paths = tl_graft.cache_paths(root)
+        env = tl_graft._npm_env(paths)
+        self.assertEqual(env["npm_config_registry"], "https://registry.npmjs.org/")
+        self.assertEqual(env["npm_config_cache"], str(paths["npm_cache"]))
+        self.assertEqual(env["npm_config_userconfig"], str(paths["npm_no_userrc"]))
+        self.assertEqual(env["npm_config_globalconfig"], str(paths["npm_no_globalrc"]))
+        self.assertNotEqual(paths["npm_no_userrc"], paths["npm_no_globalrc"])
+        self.assertFalse(paths["npm_no_userrc"].exists())
+        self.assertFalse(paths["npm_no_globalrc"].exists())
+        self.assertNotEqual(paths["npm_cache"], paths["home"])
 
     def test_seed_update_check_writes_a_fresh_record(self):
         root = _tmp_root(self)
@@ -1170,6 +1214,98 @@ class TestPosixDescendantContainment(unittest.TestCase):
             elapsed = time.monotonic() - started
         self.assertEqual(run.status, "ok")
         self.assertLess(elapsed, 60, "_run ficou preso no pipe herdado pelo descendente")
+        self._assert_ended(self._descendant_pid(marker))
+
+    def test_capture_limit_ends_the_descendant_that_produced_the_output(self):
+        root = _tmp_root(self)
+        marker = root / "pid.txt"
+        run = tl_graft._run(
+            self._cmd(marker, self.FLOOD, "wait"),
+            cwd=root,
+            timeout=90,
+            env=os.environ.copy(),
+            byte_limit=200_000,
+        )
+        self.assertEqual(run.status, "limit")
+        self._assert_ended(self._descendant_pid(marker))
+
+
+@unittest.skipUnless(os.name == "nt", "contenção por job object é exclusiva do Windows")
+class TestWindowsDescendantContainment(unittest.TestCase):
+    """R20: the job object must end a descendant that outlives the leader, whether the leader
+    was killed on timeout/limit or exited on its own leaving the pipe inherited — the same
+    scope `TestPosixDescendantContainment` proves on POSIX via the process group."""
+
+    PARENT = TestPosixDescendantContainment.PARENT
+    SLEEPER = TestPosixDescendantContainment.SLEEPER
+    FLOOD = TestPosixDescendantContainment.FLOOD
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+
+    def _descendant_pid(self, marker: Path) -> int:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            try:
+                text = marker.read_text(encoding="utf-8").strip()
+            except OSError:
+                text = ""
+            if text:
+                return int(text)
+            time.sleep(0.05)
+        self.fail("o processo filho não registrou o pid do neto")
+
+    def _pid_alive(self, pid: int) -> bool:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(self.PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == self.STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+
+    def _assert_ended(self, pid: int) -> None:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if not self._pid_alive(pid):
+                return
+            time.sleep(0.05)
+        with __import__("contextlib").suppress(OSError):  # nunca deixar processo vivo no teste
+            os.kill(pid, signal.SIGTERM)
+        self.fail(f"o descendente {pid} sobreviveu ao encerramento")
+
+    def _cmd(self, marker: Path, child_code: str, mode: str) -> list[str]:
+        return [sys.executable, "-c", self.PARENT, str(marker), child_code, mode]
+
+    def test_timeout_ends_the_descendant_too(self):
+        root = _tmp_root(self)
+        marker = root / "pid.txt"
+        run = tl_graft._run(
+            self._cmd(marker, self.SLEEPER, "wait"), cwd=root, timeout=3, env=os.environ.copy()
+        )
+        self.assertEqual(run.status, "timeout")
+        self._assert_ended(self._descendant_pid(marker))
+
+    def test_a_descendant_that_outlives_the_leader_is_ended_and_drains_the_pipe(self):
+        # "exit" mode: the leader (PARENT) returns immediately after spawning the sleeper and
+        # never waits on it, so the sleeper is the one still holding whatever pipe it inherited
+        # once the leader is gone — the scenario R20 flagged as unreachable by `taskkill /T`.
+        root = _tmp_root(self)
+        marker = root / "pid.txt"
+        with mock.patch.object(tl_graft, "DRAIN_JOIN_SECONDS", 1.0):
+            started = time.monotonic()
+            run = tl_graft._run(
+                self._cmd(marker, self.SLEEPER, "exit"), cwd=root, timeout=90, env=os.environ.copy()
+            )
+            elapsed = time.monotonic() - started
+        self.assertEqual(run.status, "ok")
+        self.assertLess(elapsed, 60, "_run ficou preso no descendente após o líder sair")
         self._assert_ended(self._descendant_pid(marker))
 
     def test_capture_limit_ends_the_descendant_that_produced_the_output(self):

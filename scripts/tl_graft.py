@@ -33,6 +33,7 @@ being present.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -43,6 +44,11 @@ import sys
 import threading
 import time
 from pathlib import Path
+
+try:
+    import tl_job
+except ImportError:  # Imported as scripts.tl_graft from the repository root.
+    from scripts import tl_job
 
 # Pin an explicit, verified upstream release. Bump only after checking
 # `npm view @nanonets/graft versions --json` and re-running the smoke check in
@@ -83,9 +89,10 @@ QUERY_MODES = ("ask", "grep", "skeleton", "callers", "map")
 # of tooling dirs closely enough for a refusal check).
 _SKIP_CHILD_DIRS = frozenset({"node_modules", "__pycache__", "venv", ".venv", "dist", "build"})
 
-# Environment that must never reach the CLI: provider credentials and any inherited Graft or
-# dotenv configuration (which could switch on deep mode, move the context dir, disable the
-# refresh we rely on, or re-enable the ignore rewrites we deliberately suppress).
+# Environment that must never reach the CLI or `npm install`: provider credentials, package
+# registry/VCS tokens an install script could exfiltrate, and any inherited Graft or dotenv
+# configuration (which could switch on deep mode, move the context dir, disable the refresh we
+# rely on, or re-enable the ignore rewrites we deliberately suppress).
 ENV_STRIP_EXACT = (
     "OPENROUTER_API_KEY",
     "ORCAROUTER_API_KEY",
@@ -94,8 +101,18 @@ ENV_STRIP_EXACT = (
     "AZURE_OPENAI_API_KEY",
     "DOTENV_KEY",
     "NODE_OPTIONS",
+    "NPM_TOKEN",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
 )
 ENV_STRIP_PREFIXES = ("GRAFT_", "DOTENV_CONFIG_")
+# npm reads any `npm_config_*` env var case-insensitively (its own docs show the uppercase
+# spelling), so an inherited `NPM_CONFIG_REGISTRY`/`NPM_CONFIG_*` would otherwise survive
+# `ENV_STRIP_PREFIXES` (case-sensitive) and redirect or reconfigure the install unnoticed.
+_NPM_CONFIG_PREFIX = "npm_config_"
 
 # Upstream prints these on stderr when it answered from a graph it could not bring up to
 # date (`graph/refresh.ts`). Any of them means the answer is not backed by current code.
@@ -223,6 +240,12 @@ def cache_paths(root: Path) -> dict[str, Path]:
         "gitignore": base / ".gitignore",
         "rgignore": base / ".ignore",
         "no_dotenv": base / "no-dotenv.env",
+        "npm_cache": base / "npm-cache",
+        # npm refuses to load the same path for both scopes ("double-loading config ... as
+        # global, previously loaded as user"), so isolation needs two distinct nonexistent
+        # files, neither of which is ever created.
+        "npm_no_userrc": base / "no-npmrc-user.ini",
+        "npm_no_globalrc": base / "no-npmrc-global.ini",
         "cli_entry": base / "cli" / "node_modules" / "@nanonets" / "graft" / "dist" / "cli.js",
         "installed_marker": base / "cli" / ".installed-version",
         # Upstream's own wiring graph path for a context dir: `<dir>/.graph/wiring.json`.
@@ -237,7 +260,9 @@ def _scrubbed_env() -> dict[str, str]:
     env = {
         key: value
         for key, value in os.environ.items()
-        if key not in ENV_STRIP_EXACT and not key.startswith(ENV_STRIP_PREFIXES)
+        if key not in ENV_STRIP_EXACT
+        and not key.startswith(ENV_STRIP_PREFIXES)
+        and not key.lower().startswith(_NPM_CONFIG_PREFIX)
     }
     # Upstream's documented opt-out (TELEMETRY.md): silences the npm postinstall event and
     # every later CLI event.
@@ -245,10 +270,24 @@ def _scrubbed_env() -> dict[str, str]:
     return env
 
 
-def _npm_env() -> dict[str, str]:
-    """Install-time environment: scrubbed, but the real HOME is kept so npm still finds its
-    own config/cache."""
-    return _scrubbed_env()
+def _npm_env(paths: dict[str, Path]) -> dict[str, str]:
+    """Install-time environment: scrubbed of secrets/inherited npm config, the real HOME kept
+    so npm still resolves the platform toolchain, but npm's own cache and config isolated
+    inside the cache and the registry pinned to the official, verified host.
+
+    Without this, an inherited `NPM_CONFIG_REGISTRY`/`.npmrc` in the real home could point the
+    install at an unverified registry, and any leaked token would ride along with it.
+    """
+    env = _scrubbed_env()
+    env["npm_config_registry"] = "https://registry.npmjs.org/"
+    env["npm_config_cache"] = str(paths["npm_cache"])
+    # Point both configs at files we guarantee do not exist, so neither the user's `~/.npmrc`
+    # nor any global config is read into this install. npm refuses to load the same path for
+    # both scopes, so this must be two distinct paths, not one.
+    env["npm_config_userconfig"] = str(paths["npm_no_userrc"])
+    env["npm_config_globalconfig"] = str(paths["npm_no_globalrc"])
+    env["npm_config_update_notifier"] = "false"
+    return env
 
 
 def _cli_env(paths: dict[str, Path]) -> dict[str, str]:
@@ -329,31 +368,38 @@ def _spawn_kwargs() -> dict:
     return {"start_new_session": True} if _POSIX_PROCESS_GROUPS else {}
 
 
-def _kill_process_tree(proc: subprocess.Popen, pgid: int | None = None) -> None:
+def _open_windows_containment() -> tl_job.JobObjectContainment | None:
+    """The same job-object containment `tl_job` uses for its own units, or `None` when it
+    could not be established (reported by the caller as a spawn error, never silently
+    downgraded to the weaker taskkill-only ending it replaces)."""
+    try:
+        return tl_job.JobObjectContainment()
+    except tl_job.ContainmentError:
+        return None
+
+
+def _kill_process_tree(
+    proc: subprocess.Popen,
+    pgid: int | None = None,
+    containment: tl_job.JobObjectContainment | None = None,
+) -> None:
     """Terminate the child and whatever it started (npm spawns node; node spawns more).
 
     With a process group the signal goes to the group and is sent *even when the leader has
     already exited* — exactly the case where a surviving descendant keeps the inherited pipe
-    open. On Windows `taskkill /F /T` walks the tree down from a live parent; a descendant
-    orphaned by an already-dead leader is outside its reach, and outside what this helper
-    claims to end.
+    open. The Windows job object claims the same scope: `TerminateJobObject` ends every
+    process ever assigned to it, leader included, whether or not the leader is still alive —
+    unlike `taskkill /T`, which walks the tree down from a live parent and cannot reach a
+    descendant already orphaned by one that exited first.
     """
     if pgid is not None:
         try:
             os.killpg(pgid, signal.SIGKILL)
         except OSError:  # already gone, or not ours to signal
             pass
-    elif os.name == "nt" and proc.poll() is None:
-        taskkill = shutil.which("taskkill")
-        if taskkill:
-            try:
-                subprocess.run(
-                    [taskkill, "/F", "/T", "/PID", str(proc.pid)],
-                    capture_output=True,
-                    timeout=15,
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                pass
+    elif containment is not None:
+        with contextlib.suppress(Exception):
+            containment.sweep(proc, graceful=False)
     if proc.poll() is None:
         try:
             proc.kill()
@@ -378,87 +424,103 @@ def _run(
     into buffers capped at `byte_limit`; exceeding the cap or the deadline kills the process
     tree and reports it, instead of buffering an unbounded amount and truncating afterwards.
     """
+    containment = _open_windows_containment() if os.name == "nt" else None
     try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(cwd),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env,
-            **_spawn_kwargs(),
-        )
-    except (OSError, ValueError) as exc:
-        return RunResult(None, "", str(exc), "spawn_error")
-
-    pgid: int | None = None
-    if _POSIX_PROCESS_GROUPS:
         try:
-            pgid = os.getpgid(proc.pid)
-        except OSError:
-            pgid = None
-        if pgid is not None and (pgid != proc.pid or pgid == os.getpgrp()):
-            # The child did not become the leader of its own group; signalling that group
-            # could reach this very process, so fall back to the single pid.
-            pgid = None
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(cwd),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                **(containment.spawn_kwargs() if containment is not None else _spawn_kwargs()),
+            )
+        except (OSError, ValueError) as exc:
+            return RunResult(None, "", str(exc), "spawn_error")
 
-    buffers: dict[str, bytearray] = {"stdout": bytearray(), "stderr": bytearray()}
-    buffer_lock = threading.Lock()
-    over_limit = threading.Event()
-
-    def pump(stream, key: str) -> None:
-        try:
-            while True:
-                chunk = stream.read(8192)
-                if not chunk:
-                    break
-                with buffer_lock:
-                    buf = buffers[key]
-                    room = byte_limit - len(buf)
-                    if room > 0:
-                        buf.extend(chunk[:room])
-                    reached = len(buf) >= byte_limit
-                if reached and not over_limit.is_set():
-                    over_limit.set()
-                    _kill_process_tree(proc, pgid)
-                    # keep reading so the child is never blocked on a full pipe
-        except (OSError, ValueError):
-            pass
-        finally:
+        if containment is not None:
+            # Spawned suspended (`CREATE_SUSPENDED`): adopted into the job before it can start
+            # any descendant, then resumed. A failure here leaves it stuck suspended, never
+            # having run, so it is ended the same way a Windows spawn failure would be.
             try:
-                stream.close()
+                containment.adopt(proc)
+                containment.release(proc)
+            except tl_job.ContainmentError as exc:
+                _kill_process_tree(proc, None, containment)
+                return RunResult(None, "", str(exc), "spawn_error")
+
+        pgid: int | None = None
+        if _POSIX_PROCESS_GROUPS:
+            try:
+                pgid = os.getpgid(proc.pid)
             except OSError:
+                pgid = None
+            if pgid is not None and (pgid != proc.pid or pgid == os.getpgrp()):
+                # The child did not become the leader of its own group; signalling that group
+                # could reach this very process, so fall back to the single pid.
+                pgid = None
+
+        buffers: dict[str, bytearray] = {"stdout": bytearray(), "stderr": bytearray()}
+        buffer_lock = threading.Lock()
+        over_limit = threading.Event()
+
+        def pump(stream, key: str) -> None:
+            try:
+                while True:
+                    chunk = stream.read(8192)
+                    if not chunk:
+                        break
+                    with buffer_lock:
+                        buf = buffers[key]
+                        room = byte_limit - len(buf)
+                        if room > 0:
+                            buf.extend(chunk[:room])
+                        reached = len(buf) >= byte_limit
+                    if reached and not over_limit.is_set():
+                        over_limit.set()
+                        _kill_process_tree(proc, pgid, containment)
+                        # keep reading so the child is never blocked on a full pipe
+            except (OSError, ValueError):
                 pass
+            finally:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
 
-    threads = [
-        threading.Thread(target=pump, args=(proc.stdout, "stdout"), daemon=True),
-        threading.Thread(target=pump, args=(proc.stderr, "stderr"), daemon=True),
-    ]
-    for thread in threads:
-        thread.start()
+        threads = [
+            threading.Thread(target=pump, args=(proc.stdout, "stdout"), daemon=True),
+            threading.Thread(target=pump, args=(proc.stderr, "stderr"), daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
 
-    timed_out = False
-    try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        _kill_process_tree(proc, pgid)
-    for thread in threads:
-        thread.join(timeout=DRAIN_JOIN_SECONDS)
-    if any(thread.is_alive() for thread in threads):
-        # The child ended but its pipes did not close: a descendant inherited them. Ending the
-        # group closes them, which is what lets the pumps finish before we read their buffers.
-        _kill_process_tree(proc, pgid)
+        timed_out = False
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _kill_process_tree(proc, pgid, containment)
         for thread in threads:
             thread.join(timeout=DRAIN_JOIN_SECONDS)
+        if any(thread.is_alive() for thread in threads):
+            # The child ended but its pipes did not close: a descendant inherited them. Ending
+            # the group/job closes them, letting the pumps finish before we read their buffers.
+            _kill_process_tree(proc, pgid, containment)
+            for thread in threads:
+                thread.join(timeout=DRAIN_JOIN_SECONDS)
 
-    with buffer_lock:
-        out = bytes(buffers["stdout"]).decode("utf-8", "replace")
-        err = bytes(buffers["stderr"]).decode("utf-8", "replace")
-    if timed_out:
-        return RunResult(None, out, err, "timeout")
-    if over_limit.is_set():
-        return RunResult(proc.returncode, out, err, "limit")
-    return RunResult(proc.returncode, out, err, "ok")
+        with buffer_lock:
+            out = bytes(buffers["stdout"]).decode("utf-8", "replace")
+            err = bytes(buffers["stderr"]).decode("utf-8", "replace")
+        if timed_out:
+            return RunResult(None, out, err, "timeout")
+        if over_limit.is_set():
+            return RunResult(proc.returncode, out, err, "limit")
+        return RunResult(proc.returncode, out, err, "ok")
+    finally:
+        if containment is not None:
+            containment.close()
 
 
 def node_available() -> tuple[str | None, str | None]:
@@ -503,13 +565,15 @@ def multi_repo_children(root: Path) -> list[str]:
 # that was sealed honestly on a prior run can later have any one of these individually replaced
 # with a symlink/junction (not just the top-level cli/graph/home dirs), so all of them — the
 # ignore files, the version marker, the wiring report — are checked, not only the directories.
-_CACHE_DIR_KEYS = ("base", "cli", "graph", "home", "update_dir")
+_CACHE_DIR_KEYS = ("base", "cli", "graph", "home", "update_dir", "npm_cache")
 _CACHE_FILE_KEYS = (
     "cli_entry",
     "stamp",
     "gitignore",
     "rgignore",
     "no_dotenv",
+    "npm_no_userrc",
+    "npm_no_globalrc",
     "installed_marker",
     "wiring",
     "update_check",
@@ -790,6 +854,7 @@ def do_setup(target: str | None, force: bool) -> dict:
     else:
         try:
             paths["cli"].mkdir(parents=True, exist_ok=True)
+            paths["npm_cache"].mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             return _fallback(
                 "cache_unwritable",
@@ -810,7 +875,7 @@ def do_setup(target: str | None, force: bool) -> dict:
             ],
             cwd=paths["cli"],
             timeout=INSTALL_TIMEOUT_SECONDS,
-            env=_npm_env(),
+            env=_npm_env(paths),
             byte_limit=INSTALL_CAPTURE_BYTE_LIMIT,
         )
         if run.status == "timeout":

@@ -214,6 +214,15 @@ git-dir do worktree com `git rev-parse --absolute-git-dir`. Somente se não houv
 consultam o common-dir. Assim worktrees simultâneos não leem nem alteram a sessão um do outro, e um
 estado legado comum continua disponível como fallback controlado.
 
+## Runtime durável opcional
+
+Para executar um lote inteiro do Modo Automático sem sessão de Orquestrador aberta, o
+[runtime durável](RUNTIME.md) (`scripts/tl_runtime.py`) usa este protocolo por unidade e o
+supervisor abaixo como transporte de cada chamada: cada despacho é um step com intenção e
+resultado no journal, o Context Pack é montado por código, e portões, Checker, commit, push,
+PR, CI e merge ficam fora do modelo. O envelope e a lista fechada de resultado desta seção
+continuam sendo o contrato do papel.
+
 ## Supervisor opcional
 
 `scripts/tl_job.py` usa apenas a biblioteca padrão do Python 3 e é opcional: o método documental

@@ -4,6 +4,152 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-15
+
+### Adicionado
+
+- Runtime durável opcional (`scripts/tl_runtime.py`, [`docs/RUNTIME.md`](docs/RUNTIME.md)):
+  executa os estados `EXECUTE` → `CLOSE` de um lote já autorizado e congelado do Modo
+  Automático sem sessão de Orquestrador aberta. Cada ação é um Step com intenção gravada
+  antes do efeito e resultado depois (`journal.jsonl`, append-only, fsync por linha, um
+  escritor por lease); retomar é dobrar o journal, e um crash vira pausa. Intenções abertas
+  são reconciliadas com evidência (estado do `tl_job.py`, árvore de `HEAD`, `git ls-remote`,
+  `gh pr list/view`): efeito comprovado é reutilizado, não iniciado é liberado sem cobrança,
+  ambíguo é cobrado e continua de um checkpoint de árvore ou espera o operador. Nunca repete
+  push, PR ou merge às cegas.
+- Scheduler determinístico sobre o DAG do lote (estados `ready`, `running`, `waiting`,
+  `retryable`, `parked`, `blocked`, `completed`, `failed`, `awaiting_operator`), com
+  reserva de verificação antes de cada Maker, `continue_independent_after_block` honrado e
+  concorrência 1.
+- Classificação determinística de falhas (`transient`, `harness`, `environment`,
+  `semantic`, `verification`, `authorization`, `budget`, `scope`, `state_integrity`,
+  `security`, `unknown`) com movimentos limitados (`retry` com backoff, `rework`, `park`,
+  `stop`) e detector de progresso persistido: mesma assinatura normalizada `loop_threshold`
+  vezes, oscilação de árvore A→B→A e achados idênticos do Checker em rodadas consecutivas
+  param a unidade; troca de modelo não zera o contador.
+- Fronteira de política fora do prompt: ambiente do worker filtrado por allowlist, contenção
+  `dirty_paths ⊆ scope_paths` e `do_not_touch`, caminhos sensíveis, varredura de padrões de
+  segredo no diff antes de qualquer commit, efeitos externos (commit, push, PR, merge)
+  somente sob `permitted_effects`, Checker de família diferente obrigatório e Checker que
+  altera a árvore tratado como `unexpected_tree_state`. Capacidades de cada adapter
+  (allowlist de ferramentas, sandbox de rede, telemetria de uso, resume) são declaradas e as
+  ausentes aparecem como limitação no relatório.
+- Context Compiler por papel e fase: pack com ordem estável (contrato, política, spec,
+  aceite, comandos de verificação, testes relacionados, achados/portões/fatia de CI da
+  rodada, checkpoint, diff), tetos por seção e manifesto com digests gravado como evidência
+  do step. Nada de histórico, log bruto ou journal no pack.
+- Laço de CI: `gh pr checks` sem modelo; em falha, só o log dos jobs vermelhos é buscado e
+  fatiado por `scripts/tl_ci_slice.py` (job, step, testes falhos, assinatura normalizada,
+  classificação `code_failure`/`external_infrastructure`/`configuration`/`unknown`, trecho
+  limitado, ponteiro para o bruto). Falha de código vira rodada de rework; infraestrutura sem
+  teste falho ganha reexecução limitada; nada é chamado de flaky para avançar.
+- Orçamentos: despachos do lote, relógio de parede, retries por classe, rodadas de rework,
+  unidades paradas e teto em dólar aplicado apenas sobre custo observado (`claude_json`,
+  `codex_jsonl`); uso não observado permanece `unknown` e nunca é estimado.
+- Relatório da manhã determinístico (`report.md`: Completed, Changed, Commits / PRs,
+  Verification, Automatically Resolved, FYI, REVIEW, DECISION REQUIRED, BLOCKED, Cost /
+  Usage, Models, Recovery Events, What Happens Next), `status.json` para o operador,
+  `journal` diagnóstico, `decide --option retry|skip` e `notify_argv` opcional.
+- Schemas `runtime-config.schema.json` e `step-journal.schema.json`; `batch.schema.json`
+  ganha as chaves opcionais `permitted_effects.pull_request_merge` e `permitted_effects.ci_rerun`
+  (ausentes = `false`).
+- Integridade e contenção a posteriori: cadeia de hashes no journal (`prev`), `HEAD`/branch
+  comparados antes e depois de cada chamada de modelo, toda árvore descartada preservada em
+  `refs/tl/discarded/<lote>/<n>`, artefatos de portão nunca chegam ao commit, adapter sem
+  allowlist de ferramentas nem sandbox só roda com `accept_unisolated_worker: true`, e
+  `verificacao_pendente` do Checker que corresponde a um portão já verde é resolvida pelo
+  runtime com a evidência do próprio portão.
+- Revisão independente r2: `local_write` falso e `immutable_digest` ausente são recusas antes de
+  qualquer despacho; a varredura de segredos lê o diff integral (o teto `max_diff_bytes` só
+  limita o pack do Checker); merge remoto usa `--match-head-commit` e merge local exige que a
+  branch ainda aponte para o commit revisado; PR reconciliado só com a mesma base e o mesmo
+  head; a seção Changed do relatório vem dos arquivos gravados no step de commit, não de
+  `git diff` ao vivo.
+- Revisão independente r3: flags opcionais de `permitted_effects` precisam ser booleanas;
+  rename expõe origem e destino à contenção; segredo e caminho sensível têm precedência sobre
+  violação de escopo; `decide` e `--accept-stale-version` só escrevem no journal sob o lease;
+  PR e merge reconciliados contra o commit revisado gravado na intenção (o create adota PR
+  existente da branch em vez de duplicar); retomada só reserva as chamadas de modelo ainda
+  pendentes da rodada; sujeira pré-existente na branch da unidade é recusa; o cache de
+  portão inclui o `argv`; log e rerun de CI filtrados pelo commit revisado; títulos,
+  orçamento e modelos do relatório vêm do `batch_open`; `max_cost_usd: 0` é teto válido;
+  `merge --abort` nunca roda sobre um merge que o runtime não iniciou.
+- Revisão independente r4: varredura de segredo também nos bytes de cada arquivo alterado
+  (binário incluso); todo pack é redigido pelos mesmos padrões (saída de portão e fatia de CI
+  inclusas); commit só sobre a árvore exatamente aprovada pelo Checker; PR adotado ou
+  reconciliado só com `headRefOid` exato; portões sempre rodam sobre a árvore do Maker
+  gravada no step (resto de portão após crash nunca chega ao commit); `max_model_calls`
+  precisa ser inteiro ≥ 1; capacidades do relatório vêm do `batch_open`.
+- Revisão independente r5: `git status -z` (caminhos nunca entre aspas, rename com origem e
+  destino, arquivos com acento ou espaço são varridos de verdade); merge remoto revalida
+  base, head e estado do PR antes de `gh pr merge` e a recuperação exige a mesma base;
+  intenção de push grava `remote_before` e a recuperação só libera o push se o remoto está
+  exatamente como antes da intenção (qualquer outro estado espera o operador).
+  `notify_argv` mantido como comando do operador, fora de `permitted_effects` (documentado).
+- Revisão independente r6: `git push` que devolve erro é reconciliado contra o remoto antes de
+  qualquer retry (remoto no commit conta como enviado; estado desconhecido espera o operador);
+  base do PR verificada logo depois do merge, com `merged_into_unexpected_base` quando alguém
+  retargeta o PR entre a checagem e o merge (limitação do `gh` documentada).
+- Revisão independente r7: sucesso de `gh pr merge` não é prova de merge (merge queue): só o
+  estado terminal `MERGED` com base e head revisados conta; PR ainda aberto vira
+  `merge_queued` e espera o operador, e o retry adota o merge da fila sem nova chamada.
+  `decide` sobre um lote `blocked` o reabre para o próximo `run` (lote `stopped` continua
+  exigindo nova autorização).
+- Revisão independente r8: intenção de merge remoto interrompida com o PR ainda aberto é
+  `ambiguous` (enfileiramento não muda o estado do PR), nunca `released`; push interrompido
+  continua liberado só quando o remoto está exatamente como antes da intenção (rejeitado
+  como bloqueante: o resultado é idêntico ao autorizado). Correção de CI: a árvore de
+  trabalho é calculada comparando conteúdo (índice temporário com mtime de 1 s, o que força a checagem racy do git), porque um
+  arquivo reescrito com o mesmo tamanho no mesmo segundo era lido pelo stat obsoleto no
+  Linux.
+- Revisão independente r9: branch de unidade pré-existente fora da base esperada é
+  `stale_branch` (`awaiting_operator`, sem despacho); recuperação de merge local prova com o
+  commit revisado e com a ponta da base gravada na intenção (base movida → operador);
+  merge de dependência na branch da unidade documentado como escrita local, não
+  `local_merge` (rejeitado como bloqueante).
+- Revisão independente r10: push envia `<commit revisado>:refs/heads/<branch>` e recusa
+  (`awaiting_operator`) uma branch local que já não aponte para o commit revisado.
+- Revisão independente r11: commit já gravado no journal é adotado na retomada (branch que
+  não aponta mais para ele → operador); "nada a commitar" nunca adota `HEAD`.
+- Revisão independente r12: hooks do repositório não rodam em comandos git do runtime
+  (`core.hooksPath` vazio via `GIT_CONFIG_*`, git ≥ 2.31); resultado de modelo já gravado é
+  reutilizado pelo step id mesmo com pack recompilado diferente, e há checagem de orçamento
+  imediatamente antes de cada despacho; PR `MERGED` com base e head exatos completa a
+  unidade como mesclada, PR `CLOSED` espera o operador.
+- Revisão independente r13: restauração de árvore limpa antes de trocar as regras de ignore
+  (arquivo ignorado só pelas regras descartadas nunca é apagado); filtros clean/smudge do
+  git config documentados como código do operador (rejeitado como bloqueante).
+- Revisão independente r14: com `local_commit` falso, trabalho aprovado vai para
+  `awaiting_operator` com a árvore preservada em ref, nunca para `completed`/`done`.
+- Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
+  `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
+
+### Validação
+
+- `scripts/tests/test_tl_runtime.py` (93 testes, Git real, harness e `gh` scriptados):
+  DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
+  oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
+  segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec
+  e de `frozen_scope`, mesma família recusada, reserva de orçamento, árvore suja, lease
+  exclusivo, crash do harness com retry limitado, transitória com backoff, bloqueio por
+  autorização, injeção de falha via `TL_RUNTIME_FAULT` (crash antes e depois do efeito do
+  Maker, depois do commit, do push e do PR, remoto divergente → `awaiting_operator`, journal
+  corrompido, versão obsoleta → `--accept-stale-version`), laço de CI com fatia e rework,
+  rerun de infraestrutura (com e sem permissão), worker que move `HEAD`, journal adulterado,
+  árvore descartada preservada em ref, worktree vinculada, retomada após commit sem
+  redespacho, e o fatiador de log (Go, pytest, unittest, infra, configuração, CLI).
+- Dogfood real com `claude -p` (Maker) e `codex exec` (Checker) numa fixture Python: uso
+  observado por chamada (9 requisições de API numa invocação do Maker, US$0,37; Checker com
+  348k tokens de entrada e custo `unknown`, porque o Codex não o reporta), crash injetado após
+  o commit e retomada reconciliada sem novo despacho.
+
+### Migração
+
+- Nada muda para quem não ativa o runtime. Para ativar: criar `_tl-orc/runtime.json`
+  conforme `docs/RUNTIME.md`, manter o lote em JSON validável por `batch.schema.json` e rodar
+  `tl_runtime.py validate` antes de `run`. Reverter é deixar de chamar o script; o journal em
+  `_tl-orc/runtime/` pode ser apagado sem afetar o método documental.
+
 ## [0.16.0] - 2026-09-15
 
 ### Adicionado

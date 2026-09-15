@@ -823,6 +823,19 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(git(fx.repo, "rev-list", "--count", "main"), "2", "base untouched by the runtime")
         self.assertNotEqual(git(fx.repo, "rev-parse", "main"), merged_tip)
 
+    def test_branch_repointed_during_interrupted_push_is_not_pushed(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True})
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_intent:push").returncode, 70)
+        git(fx.repo, "commit", "-q", "--allow-empty", "-m", "unreviewed commit placed on the unit branch while down")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("not the reviewed", record.reason)
+        self.assertEqual(git(fx.repo, "ls-remote", "--heads", "origin", "tl/B001/T001"), "", "nothing reached the remote")
+
     # ---- policy -----------------------------------------------------------------------------
 
     def test_scope_expansion_restores_tree_then_parks_on_repeat(self) -> None:

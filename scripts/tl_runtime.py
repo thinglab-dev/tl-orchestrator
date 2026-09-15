@@ -1830,7 +1830,11 @@ class Runtime:
                 before = remote_before["stdout"].split()[0] if remote_before["stdout"].strip() else ""
 
                 def push(intent: dict) -> dict:
-                    out = run_argv([self.git.exe, "push", "--quiet", "-u", "origin", record.branch], self.repo, 600)
+                    tip = self.git.rev(record.branch)
+                    if tip != record.commit:
+                        return {"_status": "failed", "ambiguous": True, "detail": f"branch {record.branch} points at {str(tip)[:12]}, not the reviewed {record.commit[:12]}; nothing pushed"}
+                    # The refspec pins the effect to the reviewed commit; the branch name is only the destination.
+                    out = run_argv([self.git.exe, "push", "--quiet", "origin", f"{record.commit}:refs/heads/{record.branch}"], self.repo, 600)
                     if out["exit_code"] == 0:
                         return {"pushed": record.commit}
                     # An error reply does not prove the push failed: look at the remote before deciding.

@@ -80,12 +80,18 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   reconciliado só com `headRefOid` exato; portões sempre rodam sobre a árvore do Maker
   gravada no step (resto de portão após crash nunca chega ao commit); `max_model_calls`
   precisa ser inteiro ≥ 1; capacidades do relatório vêm do `batch_open`.
+- Revisão independente r5: `git status -z` (caminhos nunca entre aspas, rename com origem e
+  destino, arquivos com acento ou espaço são varridos de verdade); merge remoto revalida
+  base, head e estado do PR antes de `gh pr merge` e a recuperação exige a mesma base;
+  intenção de push grava `remote_before` e a recuperação só libera o push se o remoto está
+  exatamente como antes da intenção (qualquer outro estado espera o operador).
+  `notify_argv` mantido como comando do operador, fora de `permitted_effects` (documentado).
 - Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
   `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
 
 ### Validação
 
-- `scripts/tests/test_tl_runtime.py` (72 testes, Git real, harness e `gh` scriptados):
+- `scripts/tests/test_tl_runtime.py` (77 testes, Git real, harness e `gh` scriptados):
   DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
   oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
   segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec

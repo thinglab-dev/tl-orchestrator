@@ -44,7 +44,7 @@ def main(argv: list[str]) -> int:
         if pr and pr["state"] == "OPEN":
             head = next(h for h, p in state["prs"].items() if p is pr)
             pr["head_oid"] = subprocess.run(["git", "rev-parse", head], capture_output=True, text=True).stdout.strip() or pr.get("head_oid")
-        out = json.dumps({"state": pr["state"], "mergedAt": pr["mergedAt"], "headRefOid": pr.get("head_oid")} if pr else {})
+        out = json.dumps({"state": pr["state"], "mergedAt": pr["mergedAt"], "headRefOid": pr.get("head_oid"), "baseRefName": pr.get("base")} if pr else {})
         code = 0 if pr else 1
     elif argv[:2] == ["pr", "merge"]:
         number = int(argv[2])

@@ -425,22 +425,27 @@ class Git:
         return record["stdout"].strip() or None
 
     def dirty_paths(self) -> list[str]:
-        record = run_argv([self.exe, "status", "--porcelain", "--untracked-files=all"], self.repo, 120)
+        """Every changed, staged, renamed or untracked path, exactly as named on disk (NUL-separated, never quoted)."""
+        record = run_argv([self.exe, "status", "--porcelain=v1", "-z", "--untracked-files=all"], self.repo, 120)
         if record["exit_code"] != 0:
             raise Refusal(f"git status failed: {record['stderr'][:300]}")
+        tokens = record["stdout"].split(chr(0))
         paths = []
-        for line in record["stdout"].splitlines():
-            if len(line) < 4:
+        i = 0
+        while i < len(tokens):
+            entry = tokens[i]
+            i += 1
+            if len(entry) < 4:
                 continue
-            path = line[3:]
-            if " -> " in path:
-                source, path = path.split(" -> ", 1)
-                paths.append(source.strip().strip('"'))
-            path = path.strip().strip('"')
-            if path.startswith(RESULT_DIR_NAME + "/") or path.startswith(STATE_DIR_NAME + "/"):
-                continue
-            paths.append(path)
-        return sorted(paths)
+            status, path = entry[:2], entry[3:]
+            candidates = [path]
+            if "R" in status or "C" in status:
+                candidates.append(tokens[i])  # the rename/copy source follows as its own token
+                i += 1
+            for candidate in candidates:
+                if candidate and not (candidate.startswith(RESULT_DIR_NAME + "/") or candidate.startswith(STATE_DIR_NAME + "/")):
+                    paths.append(candidate)
+        return sorted(set(paths))
 
     def worktree_tree(self) -> str:
         """Tree of the working directory (tracked + untracked, respecting ignores) without touching the index."""
@@ -1262,8 +1267,11 @@ class Runtime:
 
     # ---- step primitive -----------------------------------------------------------------
 
-    def step(self, step_id: str, effect_class: str, unit: str, phase: str, intent: dict, fn, *, cacheable: bool = True) -> dict:
-        """Journal intent, run `fn(intent)`, journal result. A valid prior result is reused."""
+    def step(self, step_id: str, effect_class: str, unit: str, phase: str, intent: dict, fn, *, cacheable: bool = True, context: dict | None = None) -> dict:
+        """Journal intent, run `fn(intent)`, journal result. A valid prior result is reused.
+
+        `context` is journaled with the intent for reconciliation (pre-effect observations) but is
+        not part of the input digest, so it never invalidates a cached result."""
         if effect_class not in EFFECT_CLASSES:
             raise Refusal(f"unknown effect class {effect_class}")
         input_digest = digest_of(intent)
@@ -1273,7 +1281,8 @@ class Runtime:
         tree_before = self.git.worktree_tree() if effect_class in {"model_call", "local_write", "local_commit", "local_merge"} else ""
         head_before = (self.git.head(), self.git.current_branch()) if effect_class == "model_call" else None
         self.journal.append("step_intent", step_id=step_id, batch=self.batch_id, unit=unit, phase=phase, type=intent.get("type", phase),
-                            effect_class=effect_class, input_digest=input_digest, runtime_stamp=self.stamp, intent=intent, tree_before=tree_before)
+                            effect_class=effect_class, input_digest=input_digest, runtime_stamp=self.stamp, intent=intent, tree_before=tree_before,
+                            intent_context=context or {})
         self._fault_point(f"after_intent:{intent.get('type', phase)}")
         result = fn(intent)
         self._fault_point(f"after_effect:{intent.get('type', phase)}")
@@ -1808,7 +1817,11 @@ class Runtime:
                     if out["exit_code"] != 0:
                         return {"_status": "failed", "detail": out["stderr"][-400:]}
                     return {"pushed": record.commit}
-                result = self.step(f"{uid}:push:{record.commit}", "push", uid, "push", {"type": "push", "commit": record.commit, "branch": record.branch}, push)
+                remote_before = run_argv([self.git.exe, "ls-remote", "--heads", "origin", record.branch], self.repo, 120)
+                if remote_before["exit_code"] != 0:
+                    raise UnitPark("parked", "remote unreachable before push: " + remote_before["stderr"][-200:])
+                result = self.step(f"{uid}:push:{record.commit}", "push", uid, "push", {"type": "push", "commit": record.commit, "branch": record.branch}, push,
+                                   context={"remote_before": remote_before["stdout"].split()[0] if remote_before["stdout"].strip() else ""})
                 if not result.get("pushed"):
                     detail = str(result.get("detail", ""))
                     move = self.failure(unit, "transient" if _TRANSIENT.search(detail) else "environment", normalize_signature("push", detail), detail, phase="push")
@@ -1865,11 +1878,16 @@ class Runtime:
                     self.note(f"{uid}: merge skipped, CI state {record.ci.get('state') or 'unknown'}")
                 else:
                     def merge(intent: dict) -> dict:
+                        view = self._pr_view(record.pr["number"])
+                        if view is None:
+                            return {"_status": "failed", "detail": "gh pr view failed before merge"}
+                        if view.get("baseRefName") != intent["base"] or view.get("headRefOid") != record.commit or str(view.get("state", "")).upper() != "OPEN":
+                            return {"_status": "failed", "detail": f"pull request {record.pr['number']} is {view.get('state')} against {view.get('baseRefName')} at {str(view.get('headRefOid'))[:12]}; reviewed: {intent['base']} at {record.commit[:12]}"}
                         out = run_argv([*self.config["gh_argv"], "pr", "merge", str(record.pr["number"]), "--merge", "--delete-branch=false", "--match-head-commit", record.commit], self.repo, 300)
                         if out["exit_code"] != 0:
                             return {"_status": "failed", "detail": out["stderr"][-400:]}
                         return {"merged": True}
-                    result = self.step(f"{uid}:merge:{record.commit}", "pull_request_merge", uid, "merge", {"type": "pull_request_merge", "pr": record.pr["number"], "commit": record.commit}, merge)
+                    result = self.step(f"{uid}:merge:{record.commit}", "pull_request_merge", uid, "merge", {"type": "pull_request_merge", "pr": record.pr["number"], "commit": record.commit, "base": self.base_branch}, merge)
                     if result.get("merged"):
                         self.unit_state(uid, "running", "", phase="complete", merged=True)
                     else:
@@ -1964,6 +1982,14 @@ class Runtime:
                 self.unit_state(uid, "retryable", "resumed after restart", phase=record.phase)
         self.refold()
 
+    def _pr_view(self, number) -> dict | None:
+        out = run_argv([*self.config["gh_argv"], "pr", "view", str(number), "--json", "state,mergedAt,headRefOid,baseRefName"], self.repo, 120)
+        try:
+            view = json.loads(out["stdout"] or "{}") if out["exit_code"] == 0 else None
+        except ValueError:
+            view = None
+        return view if isinstance(view, dict) else None
+
     def _find_pr(self, branch: str) -> list | None:
         """Open or merged pull requests whose head is `branch`; None when gh failed."""
         out = run_argv([*self.config["gh_argv"], "pr", "list", "--head", branch, "--state", "all", "--json", "number,url,baseRefName,headRefOid,state", "--limit", "1"], self.repo, 120)
@@ -2027,12 +2053,12 @@ class Runtime:
             remote_sha = remote["stdout"].split()[0] if remote["stdout"].strip() else ""
             if remote_sha == commit:
                 return "ok", {"pushed": commit, "detail": "remote already at expected commit"}
-            if not remote_sha:
+            before = (intent.get("intent_context") or {}).get("remote_before")
+            if before is not None and remote_sha == before:
+                return "released", {"detail": "remote exactly as observed before the push intent; push will run"}
+            if before is None and not remote_sha:
                 return "released", {"detail": "remote branch absent; push will run"}
-            ancestor = run_argv([self.git.exe, "merge-base", "--is-ancestor", remote_sha, commit], self.repo, 60)
-            if ancestor["exit_code"] == 0:
-                return "released", {"detail": "remote behind local; fast-forward push will run"}
-            return "ambiguous", {"detail": f"remote {remote_sha[:12]} diverged from local {commit[:12]}"}
+            return "ambiguous", {"detail": f"remote at {remote_sha[:12] or 'absent'}: neither the pushed commit {commit[:12]} nor the pre-push state {str(before)[:12] or 'absent'}"}
         if effect == "pull_request":
             rows = self._find_pr(payload.get("branch", ""))
             if rows is None:
@@ -2045,14 +2071,12 @@ class Runtime:
                 return "ok", {"url": row.get("url"), "number": row.get("number"), "detail": "pull request already exists"}
             return "released", {"detail": "no pull request for branch; create will run"}
         if effect == "pull_request_merge":
-            out = run_argv([*self.config["gh_argv"], "pr", "view", str(payload.get("pr", "")), "--json", "state,mergedAt,headRefOid"], self.repo, 120)
-            try:
-                view = json.loads(out["stdout"] or "{}") if out["exit_code"] == 0 else None
-            except ValueError:
-                view = None
+            view = self._pr_view(payload.get("pr", ""))
             if view is None:
-                return "ambiguous", {"detail": "gh pr view failed: " + out["stderr"][-200:]}
+                return "ambiguous", {"detail": "gh pr view failed"}
             if str(view.get("state", "")).upper() == "MERGED" or view.get("mergedAt"):
+                if payload.get("base") and view.get("baseRefName") != payload.get("base"):
+                    return "ambiguous", {"detail": f"pull request merged into {view.get('baseRefName')}, not the reviewed base {payload.get('base')}"}
                 if payload.get("commit") and view.get("headRefOid") != payload.get("commit"):
                     return "ambiguous", {"detail": f"pull request merged at head {str(view.get('headRefOid'))[:12]}, not the reviewed commit {str(payload.get('commit'))[:12]}"}
                 return "ok", {"merged": True, "detail": "pull request already merged"}

@@ -618,6 +618,70 @@ class RuntimeTest(unittest.TestCase):
             fx.runtime()
         self.assertIn("max_model_calls", str(ctx.exception))
 
+    def test_secret_in_a_file_git_would_quote_is_caught(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", [{"argv": [sys.executable, "-c", "open('pkg/s\u00e9gredo espa\u00e7o.bin', 'wb').write(bytes([0, 1, 2, 255]) + b'AKIA" + "Q" * 16 + "')"]}])
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "stopped")
+        self.assertEqual(fx.fold().stop_reason, "secret_detected")
+
+    def test_retargeted_pr_is_not_merged(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_effect:ci_poll").returncode, 70)
+        state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
+        next(iter(state["prs"].values()))["base"] = "release"
+        fx.gh_state.write_text(json.dumps(state), encoding="utf-8")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("release", record.reason)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+
+    def test_pr_merged_into_another_base_after_crash_is_not_adopted(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_effect:pull_request_merge").returncode, 70)
+        state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
+        next(iter(state["prs"].values()))["base"] = "release"
+        fx.gh_state.write_text(json.dumps(state), encoding="utf-8")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertFalse(record.merged)
+
+    def test_remote_reset_after_a_pushed_crash_is_not_pushed_over(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True})
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_effect:push").returncode, 70)
+        # Somebody reset the remote branch back to main while the runtime was down.
+        git(fx.repo, "push", "-q", "-f", "origin", "main:tl/B001/T001")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        fold = fx.fold()
+        self.assertEqual(fold.recoveries[0]["verdict"], "ambiguous")
+        self.assertEqual(fold.units["T001"].state, "awaiting_operator")
+        self.assertEqual(git(fx.repo, "ls-remote", "--heads", "origin", "tl/B001/T001").split()[0], git(fx.repo, "rev-parse", "main"))
+
+    def test_crash_before_push_effect_is_released_and_pushed_once(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True})
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_intent:push").returncode, 70)
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        fold = fx.fold()
+        self.assertEqual(fold.recoveries[0]["verdict"], "released")
+        self.assertEqual(git(fx.repo, "ls-remote", "--heads", "origin", "tl/B001/T001").split()[0], fold.units["T001"].commit)
+
     # ---- policy -----------------------------------------------------------------------------
 
     def test_scope_expansion_restores_tree_then_parks_on_repeat(self) -> None:

@@ -143,9 +143,9 @@ sem resultado é reconciliado antes de qualquer escalonamento:
 | :--- | :--- | :--- |
 | `model_call` | estado do `tl_job.py` | nunca iniciou → `released` (não cobrada) · ainda rodando → o runtime **anexa** ao supervisor e espera · terminou sem resultado gravado → `ambiguous`, cobrada; a árvore suja vira checkpoint (`refs/tl/checkpoints/...`) e o próximo Maker recebe "continue do checkpoint" |
 | `local_commit` | árvore e pai de `HEAD` | árvore da intenção sobre o pai gravado → `ok` · `HEAD` avançou além do pai sem ser o commit esperado → `ambiguous`, `awaiting_operator` (nunca adota commit alheio) · senão → `released` |
-| `push` | `git ls-remote` | remoto no commit esperado → `ok` · ausente ou atrás → `released` (push roda) · divergente ou inacessível → `ambiguous`, unidade em `awaiting_operator` |
+| `push` | `git ls-remote` contra o `remote_before` gravado na intenção | remoto no commit esperado → `ok` · remoto exatamente como observado antes da intenção → `released` (push roda) · qualquer outro estado (movido, apagado, divergente, inacessível) → `ambiguous`, unidade em `awaiting_operator` |
 | `pull_request` | `gh pr list --head` | existe com a mesma base e `headRefOid` exatamente igual ao commit revisado gravado na intenção → `ok` · não existe → `released` (o create adota um PR existente da branch só com base e head exatos, nunca duplica) · base/head diferentes, head ausente ou `gh` falhou → `ambiguous`, `awaiting_operator` |
-| `pull_request_merge` | `gh pr view` | mesclado com `headRefOid` igual ao commit revisado → `ok` · aberto → `released` · mesclado em outro head ou `gh` falhou → `ambiguous`, `awaiting_operator` |
+| `pull_request_merge` | `gh pr view` | mesclado com `baseRefName` e `headRefOid` iguais à base e ao commit revisados → `ok` · aberto → `released` (o merge revalida base, head e estado `OPEN` antes de chamar `gh pr merge --match-head-commit`) · mesclado em outra base ou outro head, ou `gh` falhou → `ambiguous`, `awaiting_operator` |
 | `local_merge` | `merge-base --is-ancestor`, `MERGE_HEAD` | já mesclado → `ok` · merge em andamento na árvore → `ambiguous`, `awaiting_operator` (o runtime nunca faz `merge --abort` de um merge que não iniciou) · senão → `released` (o merge só roda se a branch ainda aponta para o commit revisado) |
 | `ci_rerun` | nenhuma | `ambiguous`: contado como reexecução, nunca repetido |
 | `gate`, `ci_query`, `prepare` | nenhuma | `released` (rodam de novo; antes dos portões a árvore volta à árvore do Maker gravada no step, para que resto de portão nunca chegue ao commit) |
@@ -258,6 +258,9 @@ ponteiro. `code_failure` vira rodada de rework; infraestrutura sem teste falho g
   BLOCKED, Cost / Usage, Models, Recovery Events, What Happens Next.
 - `journal`: dobra diagnóstica (tentativas, assinaturas, recuperações, checkpoints, uso).
 - `notify_argv`: comando opcional chamado com um JSON em cada mudança de estado relevante.
+  Roda com a confiança do operador, como os `argv` de adapters e portões (a configuração é
+  do consumidor, não do modelo), com o mesmo ambiente filtrado dos workers; não é um efeito
+  do lote e `permitted_effects` não o governa.
 
 `decide --option retry` devolve a unidade a `retryable` (o trabalho parado está no
 checkpoint); `skip` marca `failed`. Um lote já fechado não reabre: nova autorização.

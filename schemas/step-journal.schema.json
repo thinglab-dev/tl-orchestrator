@@ -22,7 +22,8 @@
           "effect_class": {"type": "string", "enum": ["none", "model_call", "local_write", "local_commit", "local_merge", "push", "pull_request", "pull_request_merge", "ci_query", "ci_rerun"]},
           "input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the canonical intent; a prior ok result is reused only when it matches."},
           "runtime_stamp": {"type": "string", "description": "<runtime version>:<config digest>. An open intent with another stamp stops the batch (stale_workflow_version) until accepted."},
-          "tree_before": {"type": "string", "description": "git tree of the working directory before the effect (mutating classes only)."}
+          "tree_before": {"type": "string", "description": "git tree of the working directory before the effect (mutating classes only)."},
+          "intent_context": {"type": "object", "description": "Pre-effect observations used by reconciliation (for push: remote_before, the remote branch tip or empty). Not part of input_digest."}
         }
       }
     },

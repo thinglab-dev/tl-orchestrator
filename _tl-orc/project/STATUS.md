@@ -2,7 +2,7 @@ format_version: 1
 work_method: native
 active_work_ref: none
 current_role: none
-next_action: T027 concluída. Atualizar package no consumidor platform.
+next_action: Solicitar autorização humana para merge do branch feat/t029-claude-usage-observation conforme CONTRIBUTING.md.
 coordinator:
   harness: claude
   session: claude-code-b5b7f943
@@ -12,7 +12,7 @@ coordinator:
 active_batch: none
 batch_status: none
 review_followups: []
-next_task_id: 29
+next_task_id: 30
 next_deliverable_id: 1
 next_decision_id: 1
 next_discussion_id: 1
@@ -50,3 +50,4 @@ open_discussions: []
 | T026 | feat | none | done | [T025] | [] | 6 | evidence/T026-r03.md |
 | T027 | feat | package | done | [T018, T026] | [] | 2 | evidence/T027-r01.md |
 | T028 | gov | none | draft | [T027] | [] | 1 | - |
+| T029 | feat | none | done | [T026] | [] | 12 | evidence/T029-r11.md |

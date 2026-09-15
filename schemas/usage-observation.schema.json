@@ -34,18 +34,22 @@
     },
     "harness": {
       "type": "string",
-      "enum": ["codex"]
+      "enum": ["codex", "claude"]
     },
     "harness_version": {
       "type": ["string", "null"]
     },
     "source_format": {
       "type": "string",
-      "enum": ["codex_session_jsonl"]
+      "enum": ["codex_session_jsonl", "claude_session_jsonl"]
     },
     "source_format_fingerprint": {
       "type": "string",
       "minLength": 1
+    },
+    "source_kind": {
+      "type": "string",
+      "enum": ["harness_native_log"]
     },
     "parser_status": {
       "type": "object",
@@ -191,11 +195,16 @@
             "type": ["string", "null"]
           },
           "turn_count": {
-            "type": "integer",
-            "minimum": 0
+            "oneOf": [
+              { "type": "integer", "minimum": 0 },
+              { "const": "not_observable" }
+            ]
           },
           "raw_usage": {
-            "$ref": "#/$defs/token_counters"
+            "oneOf": [
+              { "$ref": "#/$defs/token_counters" },
+              { "$ref": "#/$defs/claude_native_counters" }
+            ]
           }
         }
       }
@@ -228,8 +237,13 @@
                 "enum": ["root", "child", "auto_review", "guardian"]
               },
               "turn_count": {
-                "type": "integer",
-                "minimum": 0
+                "oneOf": [
+                  { "type": "integer", "minimum": 0 },
+                  { "const": "not_observable" }
+                ]
+              },
+              "tool_use_id": {
+                "type": ["string", "null"]
               }
             }
           }
@@ -283,41 +297,90 @@
     },
     "raw_usage_channels": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "token_usage_records",
-        "event_msg_token_counts",
-        "cumulative_snapshots"
-      ],
-      "properties": {
-        "token_usage_records": {
+      "oneOf": [
+        {
           "type": "object",
           "additionalProperties": false,
-          "required": ["event_count", "per_response_sum"],
+          "required": [
+            "token_usage_records",
+            "event_msg_token_counts",
+            "cumulative_snapshots"
+          ],
           "properties": {
-            "event_count": { "type": "integer", "minimum": 0 },
-            "per_response_sum": { "$ref": "#/$defs/token_counters" }
+            "token_usage_records": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["event_count", "per_response_sum"],
+              "properties": {
+                "event_count": { "type": "integer", "minimum": 0 },
+                "per_response_sum": { "$ref": "#/$defs/token_counters" }
+              }
+            },
+            "event_msg_token_counts": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["event_count", "per_response_sum"],
+              "properties": {
+                "event_count": { "type": "integer", "minimum": 0 },
+                "per_response_sum": { "$ref": "#/$defs/token_counters" }
+              }
+            },
+            "cumulative_snapshots": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["snapshot_count", "latest_snapshot"],
+              "properties": {
+                "snapshot_count": { "type": "integer", "minimum": 0 },
+                "latest_snapshot": { "$ref": "#/$defs/token_counters" }
+              }
+            }
           }
         },
-        "event_msg_token_counts": {
+        {
           "type": "object",
           "additionalProperties": false,
-          "required": ["event_count", "per_response_sum"],
+          "required": [
+            "claude_assistant_messages",
+            "claude_unique_responses"
+          ],
           "properties": {
-            "event_count": { "type": "integer", "minimum": 0 },
-            "per_response_sum": { "$ref": "#/$defs/token_counters" }
-          }
-        },
-        "cumulative_snapshots": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["snapshot_count", "latest_snapshot"],
-          "properties": {
-            "snapshot_count": { "type": "integer", "minimum": 0 },
-            "latest_snapshot": { "$ref": "#/$defs/token_counters" }
+            "claude_assistant_messages": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["event_count", "native_counters_sum"],
+              "properties": {
+                "status": {
+                  "enum": ["exact", "truncated", "not_observable"]
+                },
+                "event_count": {
+                  "oneOf": [
+                    { "type": "integer", "minimum": 0 },
+                    { "const": "not_observable" }
+                  ]
+                },
+                "native_counters_sum": { "$ref": "#/$defs/claude_native_counters" }
+              }
+            },
+            "claude_unique_responses": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["event_count", "native_counters_sum"],
+              "properties": {
+                "status": {
+                  "enum": ["exact", "truncated", "not_observable"]
+                },
+                "event_count": {
+                  "oneOf": [
+                    { "type": "integer", "minimum": 0 },
+                    { "const": "not_observable" }
+                  ]
+                },
+                "native_counters_sum": { "$ref": "#/$defs/claude_native_counters" }
+              }
+            }
           }
         }
-      }
+      ]
     },
     "semantic_correlations": {
       "type": "object",
@@ -382,7 +445,15 @@
                 "type": "array",
                 "items": { "type": "string" }
               },
-              "counters": { "$ref": "#/$defs/token_counters" },
+              "counters": {
+                "oneOf": [
+                  { "$ref": "#/$defs/token_counters" },
+                  { "$ref": "#/$defs/claude_native_counters" }
+                ]
+              },
+              "response_kind": {
+                "enum": ["model", "synthetic", "unknown"]
+              },
               "reasons": {
                 "type": "array",
                 "items": { "type": "string" }
@@ -426,6 +497,9 @@
         "semantic_per_response_sum": {
           "$ref": "#/$defs/token_counters"
         },
+        "semantic_request_sum": {
+          "$ref": "#/$defs/claude_native_counters"
+        },
         "cumulative": {
           "$ref": "#/$defs/token_counters"
         },
@@ -460,9 +534,60 @@
           }
         }
       }
+    },
+    "context_compaction_observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "trigger",
+          "pre_tokens",
+          "post_tokens",
+          "cumulative_dropped_tokens",
+          "duration_ms",
+          "preserved_messages_count"
+        ],
+        "properties": {
+          "trigger": { "type": ["string", "null"] },
+          "pre_tokens": { "$ref": "#/$defs/counter_value" },
+          "post_tokens": { "$ref": "#/$defs/counter_value" },
+          "cumulative_dropped_tokens": { "$ref": "#/$defs/counter_value" },
+          "duration_ms": {
+            "oneOf": [
+              { "type": "number", "minimum": 0 },
+              { "const": "not_observable" }
+            ]
+          },
+          "preserved_messages_count": {
+            "oneOf": [
+              { "type": "integer", "minimum": 0 },
+              { "const": "not_observable" }
+            ]
+          }
+        }
+      }
     }
   },
   "$defs": {
+    "claude_native_counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "thinking_tokens"
+      ],
+      "properties": {
+        "input_tokens": { "$ref": "#/$defs/counter_value" },
+        "output_tokens": { "$ref": "#/$defs/counter_value" },
+        "cache_creation_input_tokens": { "$ref": "#/$defs/counter_value" },
+        "cache_read_input_tokens": { "$ref": "#/$defs/counter_value" },
+        "thinking_tokens": { "$ref": "#/$defs/counter_value" }
+      }
+    },
     "token_counters": {
       "type": "object",
       "additionalProperties": false,

@@ -37,11 +37,63 @@ MAX_IDENTITY_LEDGER_CAP = 100
 
 RULE_ID_CODEX_0_153_4 = "codex-0.153.4-structural-event-dedup-v1"
 
+CLAUDE_SOURCE_FORMAT = "claude_session_jsonl"
+SUPPORTED_CLAUDE_CLI_VERSIONS = {"2.1.257"}
+CLAUDE_CANONICAL_ASSISTANT_PATHS = [
+    "message.id",
+    "message.model",
+    "message.role",
+    "message.usage.cache_creation_input_tokens",
+    "message.usage.cache_read_input_tokens",
+    "message.usage.input_tokens",
+    "message.usage.output_tokens",
+    "sessionId",
+    "type",
+    "uuid",
+]
+CLAUDE_CANONICAL_FINGERPRINT = "b3140fe31bd7968a"
+RULE_ID_CLAUDE_CODE_V1 = "rule_claude_code_v1"
+MAX_CLAUDE_IDENTITY_CAP = 100
+MAX_CLAUDE_RECORDS_CAP = 50
+MAX_CLAUDE_COMPACTIONS_CAP = 50
+MAX_CLAUDE_TOOL_USE_IDS_CAP = 100
+MAX_CLAUDE_NEGATIVE_MARKERS_CAP = 10
+MAX_CLAUDE_VERSIONS_CAP = 10
+MAX_CLAUDE_THREADS_CAP = 50
+MAX_CLAUDE_SUBAGENTS_CAP = 50
+MAX_CLAUDE_CONTEXT_STATS_CAP = 50
+
+CLAUDE_COUNTER_FIELDS = [
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+    "thinking_tokens",
+]
+CANONICAL_COUNTER_FIELDS = [
+    "input_tokens",
+    "cached_input_tokens",
+    "cache_write_input_tokens",
+    "output_tokens",
+    "reasoning_output_tokens",
+    "total_tokens",
+]
+
 
 def is_supported_harness_version(ver: Optional[str]) -> bool:
     if not ver or not isinstance(ver, str):
         return False
     return ver in SUPPORTED_CLI_VERSIONS
+
+
+def has_nested_path(d: Any, path: str) -> bool:
+    parts = path.split(".")
+    curr = d
+    for p in parts:
+        if not isinstance(curr, dict) or p not in curr:
+            return False
+        curr = curr[p]
+    return True
 
 
 def sanitize_rate_limit_bucket(bucket: Any) -> Optional[Dict[str, Any]]:
@@ -1375,6 +1427,8 @@ def build_empty_or_unsupported_observation(
     completeness_status: str,
     completeness_reasons: List[str],
     source_format_fingerprint: Optional[str] = None,
+    harness: str = "codex",
+    source_format: Optional[str] = None,
 ) -> Dict[str, Any]:
     counter_fields = [
         "input_tokens",
@@ -1385,6 +1439,7 @@ def build_empty_or_unsupported_observation(
         "total_tokens",
     ]
     not_obs_counters = {f: "not_observable" for f in counter_fields}
+    not_obs_claude_counters = {f: "not_observable" for f in CLAUDE_COUNTER_FIELDS}
     not_obs_recons = {
         f: {
             "status": "not_observable",
@@ -1395,13 +1450,71 @@ def build_empty_or_unsupported_observation(
         for f in counter_fields
     }
 
-    return enforce_schema_validation({
+    if harness == "claude":
+        s_format = source_format or CLAUDE_SOURCE_FORMAT
+        raw_channels: Dict[str, Any] = {
+            "claude_assistant_messages": {
+                "event_count": 0,
+                "native_counters_sum": not_obs_claude_counters,
+            },
+            "claude_unique_responses": {
+                "event_count": 0,
+                "native_counters_sum": not_obs_claude_counters,
+            },
+        }
+        normalized_block: Dict[str, Any] = {
+            "status": "not_observable",
+            "rule_id": None,
+            "eligible_for_normalization": False,
+            "ineligibility_reasons": parser_reasons or ["empty_or_unsupported_session"],
+            "semantic_response_count": 0,
+            "semantic_per_response_sum": not_obs_counters,
+            "semantic_request_sum": not_obs_claude_counters,
+            "cumulative": not_obs_counters,
+            "reconciliation": {
+                "status": "not_observable",
+                "fields": not_obs_recons,
+            },
+        }
+        compaction_obs: List[Dict[str, Any]] = []
+    else:
+        s_format = source_format or SOURCE_FORMAT
+        raw_channels = {
+            "token_usage_records": {
+                "event_count": 0,
+                "per_response_sum": not_obs_counters,
+            },
+            "event_msg_token_counts": {
+                "event_count": 0,
+                "per_response_sum": not_obs_counters,
+            },
+            "cumulative_snapshots": {
+                "snapshot_count": 0,
+                "latest_snapshot": not_obs_counters,
+            },
+        }
+        normalized_block = {
+            "status": "not_observable",
+            "rule_id": None,
+            "eligible_for_normalization": False,
+            "ineligibility_reasons": parser_reasons or ["empty_or_unsupported_session"],
+            "semantic_response_count": 0,
+            "semantic_per_response_sum": not_obs_counters,
+            "cumulative": not_obs_counters,
+            "reconciliation": {
+                "status": "not_observable",
+                "fields": not_obs_recons,
+            },
+        }
+        compaction_obs = []
+
+    res: Dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_id,
         "session_ref_digest": session_ref_digest,
-        "harness": "codex",
+        "harness": harness,
         "harness_version": None,
-        "source_format": SOURCE_FORMAT,
+        "source_format": s_format,
         "source_format_fingerprint": source_format_fingerprint or hashlib.sha256(b"empty_or_unsupported").hexdigest()[:16],
         "parser_status": {
             "status": parser_status,
@@ -1429,20 +1542,7 @@ def build_empty_or_unsupported_observation(
             },
             "response_count": 0,
         },
-        "raw_usage_channels": {
-            "token_usage_records": {
-                "event_count": 0,
-                "per_response_sum": not_obs_counters,
-            },
-            "event_msg_token_counts": {
-                "event_count": 0,
-                "per_response_sum": not_obs_counters,
-            },
-            "cumulative_snapshots": {
-                "snapshot_count": 0,
-                "latest_snapshot": not_obs_counters,
-            },
-        },
+        "raw_usage_channels": raw_channels,
         "semantic_correlations": {
             "rule_id": None,
             "summary": {
@@ -1455,19 +1555,7 @@ def build_empty_or_unsupported_observation(
             },
             "records": [],
         },
-        "normalized_usage": {
-            "status": "not_observable",
-            "rule_id": None,
-            "eligible_for_normalization": False,
-            "ineligibility_reasons": parser_reasons or ["empty_or_unsupported_session"],
-            "semantic_response_count": 0,
-            "semantic_per_response_sum": not_obs_counters,
-            "cumulative": not_obs_counters,
-            "reconciliation": {
-                "status": "not_observable",
-                "fields": not_obs_recons,
-            },
-        },
+        "normalized_usage": normalized_block,
         "derived_usage": {
             "uncached_input_tokens": "not_observable",
         },
@@ -1478,28 +1566,1071 @@ def build_empty_or_unsupported_observation(
             "threads": [],
         },
         "rate_limits": [],
+    }
+    if harness == "claude":
+        res["source_kind"] = "harness_native_log"
+        res["context_compaction_observations"] = compaction_obs
+    return enforce_schema_validation(res)
+
+
+def parse_claude_session(
+    session_path: str,
+    run_id: str,
+    subagent_paths: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Parse a Claude session JSONL file and extract factual usage observation."""
+    if not os.path.exists(session_path):
+        raise FileNotFoundError(f"Session file not found: {session_path}")
+    if os.path.isdir(session_path):
+        raise IsADirectoryError(f"Session path is a directory: {session_path}")
+
+    hasher = hashlib.sha256()
+
+    session_id: Optional[str] = None
+    harness_version: Optional[str] = None
+    observed_versions: set[str] = set()
+    version_inconsistency_encountered = False
+
+    first_valid_dt: Optional[datetime.datetime] = None
+    first_valid_ts_str: Optional[str] = None
+    last_valid_dt: Optional[datetime.datetime] = None
+    last_valid_ts_str: Optional[str] = None
+
+    parser_reasons: List[str] = []
+    completeness_reasons: List[str] = []
+    structural_ineligibility_reasons: List[str] = []
+
+    syntax_error_encountered = False
+    truncated_line_encountered = False
+    total_valid_json_count = 0
+    recognized_events_count = 0
+
+    negative_markers_encountered: List[str] = []
+    structural_paths_missing_in_assistant = False
+    has_ambiguous_identity = False
+    has_conflicting_identity = False
+    identity_ledger_cap_exceeded = False
+    compactions_cap_exceeded = False
+    tool_use_ids_cap_exceeded = False
+    invalid_counter_encountered = False
+    context_stats_cap_exceeded = False
+    subagents_cap_exceeded = False
+    subagents_error_encountered = False
+    subagent_association_unverifiable = False
+
+    # Counters tracking
+    claude_assistant_messages_count = 0
+    claude_assistant_messages_sums = {f: 0 for f in CLAUDE_COUNTER_FIELDS}
+    claude_assistant_messages_observed = {f: False for f in CLAUDE_COUNTER_FIELDS}
+    claude_counter_invalid = {f: False for f in CLAUDE_COUNTER_FIELDS}
+
+    # Bounded identity ledger: (sessionId, messageId) -> entry
+    identity_ledger: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    unique_response_count = 0
+    unique_response_sums = {f: 0 for f in CLAUDE_COUNTER_FIELDS}
+    unique_response_observed = {f: False for f in CLAUDE_COUNTER_FIELDS}
+    unique_response_invalid = {f: False for f in CLAUDE_COUNTER_FIELDS}
+
+    semantic_model_response_count = 0
+    semantic_model_sums = {f: 0 for f in CLAUDE_COUNTER_FIELDS}
+    semantic_model_observed = {f: False for f in CLAUDE_COUNTER_FIELDS}
+
+    context_stats: Dict[Tuple[Optional[str], Optional[str]], Dict[str, Any]] = {}
+    compaction_obs: List[Dict[str, Any]] = []
+    observed_tool_use_ids: set[str] = set()
+
+    semantic_correlations_records: List[Dict[str, Any]] = []
+    records_overflow_count = 0
+    correlated_events_count = 0
+    ambiguous_events_count = 0
+
+    pending_decode_error: Optional[Tuple[int, str, json.JSONDecodeError]] = None
+
+    def append_reason(reasons_list: List[str], reason: str) -> None:
+        if len(reasons_list) < MAX_REASONS_CAP - 1:
+            reasons_list.append(reason)
+        elif len(reasons_list) == MAX_REASONS_CAP - 1:
+            reasons_list.append("additional_reasons_truncated")
+
+    def commit_pending_error_as_syntax(err_tuple: Tuple[int, str, json.JSONDecodeError]) -> None:
+        nonlocal syntax_error_encountered
+        syntax_error_encountered = True
+        idx, _, exc = err_tuple
+        append_reason(completeness_reasons, f"json_syntax_error_line_{idx}:{exc.msg}")
+
+    with open(session_path, "rb") as bf:
+        for line_idx, raw_bytes in enumerate(bf, start=1):
+            hasher.update(raw_bytes)
+            raw_line = raw_bytes.decode("utf-8", errors="replace")
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+
+            try:
+                data = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                if pending_decode_error is not None:
+                    commit_pending_error_as_syntax(pending_decode_error)
+                pending_decode_error = (line_idx, raw_line, exc)
+                continue
+
+            if pending_decode_error is not None:
+                commit_pending_error_as_syntax(pending_decode_error)
+                pending_decode_error = None
+
+            if not isinstance(data, dict):
+                syntax_error_encountered = True
+                append_reason(parser_reasons, f"line_{line_idx}_not_a_json_object")
+                continue
+
+            total_valid_json_count += 1
+            line_type = data.get("type")
+
+            # Extract sessionId and version
+            s_id = data.get("sessionId")
+            if session_id is None and s_id is not None:
+                session_id = str(s_id) if isinstance(s_id, (str, int)) and not isinstance(s_id, bool) else None
+
+            v_val = data.get("version")
+            if v_val is not None:
+                v_str = str(v_val) if isinstance(v_val, (str, int)) and not isinstance(v_val, bool) else "invalid_version_type"
+                if len(observed_versions) < MAX_CLAUDE_VERSIONS_CAP:
+                    observed_versions.add(v_str)
+
+            # Timestamps
+            raw_ts = data.get("timestamp")
+            if isinstance(raw_ts, str) and raw_ts:
+                dt = parse_iso_timestamp(raw_ts)
+                if dt is not None:
+                    if first_valid_dt is None:
+                        first_valid_dt = dt
+                        first_valid_ts_str = raw_ts
+                    last_valid_dt = dt
+                    last_valid_ts_str = raw_ts
+
+            # Negative markers (completeness)
+            for m_key, m_name in [
+                ("isAbortedMidStream", "isAbortedMidStream_detected"),
+                ("interruptedByShutdown", "interruptedByShutdown_detected"),
+                ("isApiErrorMessage", "isApiErrorMessage_detected"),
+            ]:
+                if data.get(m_key) is True:
+                    if m_name not in negative_markers_encountered:
+                        if len(negative_markers_encountered) < MAX_CLAUDE_NEGATIVE_MARKERS_CAP:
+                            negative_markers_encountered.append(m_name)
+
+            if line_type in ("user", "system", "tool_result", "progress", "file-history-snapshot"):
+                recognized_events_count += 1
+
+            if line_type == "system":
+                cm = data.get("compactMetadata")
+                if isinstance(cm, dict):
+                    pm = cm.get("preservedMessages")
+                    uuids = pm.get("uuids") if isinstance(pm, dict) else []
+                    if len(compaction_obs) < MAX_CLAUDE_COMPACTIONS_CAP:
+                        compaction_obs.append({
+                            "trigger": str(cm.get("trigger")) if cm.get("trigger") is not None else None,
+                            "pre_tokens": format_counter(cm.get("preTokens")),
+                            "post_tokens": format_counter(cm.get("postTokens")),
+                            "cumulative_dropped_tokens": format_counter(cm.get("cumulativeDroppedTokens")),
+                            "duration_ms": cm.get("durationMs") if isinstance(cm.get("durationMs"), (int, float)) and cm.get("durationMs") >= 0 else "not_observable",
+                            "preserved_messages_count": len(uuids) if isinstance(uuids, list) else "not_observable",
+                        })
+                    else:
+                        compactions_cap_exceeded = True
+                        r_comp_cap = f"context_compaction_observations_cap_exceeded:{MAX_CLAUDE_COMPACTIONS_CAP}"
+                        if r_comp_cap not in structural_ineligibility_reasons:
+                            structural_ineligibility_reasons.append(r_comp_cap)
+
+            elif line_type == "assistant":
+                recognized_events_count += 1
+
+                # Compaction summary text is discarded per Invariant I13 (Privacy)
+                if data.get("isCompactSummary") is True:
+                    continue
+
+                msg = data.get("message")
+                if not isinstance(msg, dict):
+                    structural_paths_missing_in_assistant = True
+                    r_msg = "structural_profile_mismatch_in_assistant_message:message_not_dict"
+                    if r_msg not in structural_ineligibility_reasons:
+                        structural_ineligibility_reasons.append(r_msg)
+                    append_reason(parser_reasons, r_msg)
+                    continue
+
+                # Collect tool_use IDs for subagents linkage
+                content = msg.get("content")
+                if isinstance(content, list):
+                    for blk in content:
+                        if isinstance(blk, dict) and blk.get("type") == "tool_use":
+                            tu_id = blk.get("id")
+                            if tu_id and isinstance(tu_id, str):
+                                if tu_id not in observed_tool_use_ids:
+                                    if len(observed_tool_use_ids) < MAX_CLAUDE_TOOL_USE_IDS_CAP:
+                                        observed_tool_use_ids.add(tu_id)
+                                    else:
+                                        tool_use_ids_cap_exceeded = True
+                                        r_tu_cap = f"observed_tool_use_ids_cap_exceeded:{MAX_CLAUDE_TOOL_USE_IDS_CAP}"
+                                        if r_tu_cap not in structural_ineligibility_reasons:
+                                            structural_ineligibility_reasons.append(r_tu_cap)
+
+                usage = msg.get("usage")
+                if not isinstance(usage, dict):
+                    structural_paths_missing_in_assistant = True
+                    r_usg = "structural_profile_mismatch_in_assistant_message:usage_not_dict"
+                    if r_usg not in structural_ineligibility_reasons:
+                        structural_ineligibility_reasons.append(r_usg)
+                    append_reason(parser_reasons, r_usg)
+                    continue
+
+                # Verify required assistant paths
+                path_missing = False
+                for p in CLAUDE_CANONICAL_ASSISTANT_PATHS:
+                    if not has_nested_path(data, p):
+                        structural_paths_missing_in_assistant = True
+                        r_path = f"structural_path_missing_in_assistant:{p}"
+                        if r_path not in structural_ineligibility_reasons:
+                            structural_ineligibility_reasons.append(r_path)
+                        append_reason(parser_reasons, r_path)
+                        path_missing = True
+                        break
+                if path_missing:
+                    continue
+
+                inp = usage.get("input_tokens")
+                outp = usage.get("output_tokens")
+                cc = usage.get("cache_creation_input_tokens")
+                cr = usage.get("cache_read_input_tokens")
+                details = usage.get("output_tokens_details")
+                tt = details.get("thinking_tokens") if isinstance(details, dict) else (0 if details is None else details)
+
+                # Strict type validation on all counters
+                for cf_name, cf_raw in [
+                    ("input_tokens", inp),
+                    ("output_tokens", outp),
+                    ("cache_creation_input_tokens", cc),
+                    ("cache_read_input_tokens", cr),
+                ]:
+                    if cf_raw is not None:
+                        if not isinstance(cf_raw, int) or isinstance(cf_raw, bool):
+                            invalid_counter_encountered = True
+                            claude_counter_invalid[cf_name] = True
+                            r_cf = f"invalid_counter_type_{cf_name}:{type(cf_raw).__name__}"
+                            append_reason(structural_ineligibility_reasons, r_cf)
+                            append_reason(parser_reasons, r_cf)
+                        elif cf_raw < 0:
+                            invalid_counter_encountered = True
+                            claude_counter_invalid[cf_name] = True
+                            r_cf = f"negative_counter_value_{cf_name}"
+                            append_reason(structural_ineligibility_reasons, r_cf)
+                            append_reason(parser_reasons, r_cf)
+                    else:
+                        invalid_counter_encountered = True
+                        claude_counter_invalid[cf_name] = True
+                        r_cf = f"invalid_counter_type_{cf_name}:NoneType"
+                        append_reason(structural_ineligibility_reasons, r_cf)
+                        append_reason(parser_reasons, r_cf)
+
+                if details is not None:
+                    if not isinstance(details, dict):
+                        invalid_counter_encountered = True
+                        claude_counter_invalid["thinking_tokens"] = True
+                        r_det = f"invalid_output_tokens_details_type:{type(details).__name__}"
+                        append_reason(structural_ineligibility_reasons, r_det)
+                        append_reason(parser_reasons, r_det)
+                    elif "thinking_tokens" in details:
+                        tt_raw = details["thinking_tokens"]
+                        if not isinstance(tt_raw, int) or isinstance(tt_raw, bool):
+                            invalid_counter_encountered = True
+                            claude_counter_invalid["thinking_tokens"] = True
+                            r_tt = f"invalid_thinking_tokens_type:{type(tt_raw).__name__}"
+                            append_reason(structural_ineligibility_reasons, r_tt)
+                            append_reason(parser_reasons, r_tt)
+                        elif tt_raw < 0:
+                            invalid_counter_encountered = True
+                            claude_counter_invalid["thinking_tokens"] = True
+                            r_tt = "negative_thinking_tokens_value"
+                            append_reason(structural_ineligibility_reasons, r_tt)
+                            append_reason(parser_reasons, r_tt)
+
+                inp_val = inp if isinstance(inp, int) and not isinstance(inp, bool) and inp >= 0 else None
+                outp_val = outp if isinstance(outp, int) and not isinstance(outp, bool) and outp >= 0 else None
+                cc_val = cc if isinstance(cc, int) and not isinstance(cc, bool) and cc >= 0 else None
+                cr_val = cr if isinstance(cr, int) and not isinstance(cr, bool) and cr >= 0 else None
+                if details is None:
+                    tt_val = 0
+                elif isinstance(details, dict):
+                    if "thinking_tokens" in details:
+                        tt_raw = details["thinking_tokens"]
+                        tt_val = tt_raw if isinstance(tt_raw, int) and not isinstance(tt_raw, bool) and tt_raw >= 0 else None
+                    else:
+                        tt_val = 0
+                else:
+                    tt_val = None
+
+                # Physical accounting
+                claude_assistant_messages_count += 1
+                for cf, val in [
+                    ("input_tokens", inp_val),
+                    ("output_tokens", outp_val),
+                    ("cache_creation_input_tokens", cc_val),
+                    ("cache_read_input_tokens", cr_val),
+                    ("thinking_tokens", tt_val),
+                ]:
+                    if val is not None:
+                        claude_assistant_messages_sums[cf] += val
+                        claude_assistant_messages_observed[cf] = True
+
+                # Model & Response kind
+                model = msg.get("model")
+                model_str = str(model) if isinstance(model, str) else "unknown"
+                if model_str == "<synthetic>":
+                    response_kind = "synthetic"
+                elif model_str and not model_str.startswith("<") and model_str != "unknown":
+                    response_kind = "model"
+                else:
+                    response_kind = "unknown"
+
+                msg_id = msg.get("id")
+                req_id = data.get("requestId")
+                line_sess = data.get("sessionId") or session_id or "unknown"
+                req_id_str = str(req_id) if isinstance(req_id, str) else None
+
+                curr_counters = {
+                    "input_tokens": inp_val if inp_val is not None else "not_observable",
+                    "output_tokens": outp_val if outp_val is not None else "not_observable",
+                    "cache_creation_input_tokens": cc_val if cc_val is not None else "not_observable",
+                    "cache_read_input_tokens": cr_val if cr_val is not None else "not_observable",
+                    "thinking_tokens": tt_val if tt_val is not None else "not_observable",
+                }
+
+                if not msg_id or not isinstance(msg_id, str):
+                    has_ambiguous_identity = True
+                    ambiguous_events_count += 1
+                    r_amb = "ambiguous_usage_event_identity:missing_message_id"
+                    if r_amb not in structural_ineligibility_reasons:
+                        structural_ineligibility_reasons.append(r_amb)
+                    if len(semantic_correlations_records) < MAX_CLAUDE_RECORDS_CAP:
+                        semantic_correlations_records.append({
+                            "correlation_id": f"ambiguous_line_{line_idx}",
+                            "status": "ambiguous",
+                            "strategy": "none",
+                            "response_id": None,
+                            "turn_id": None,
+                            "thread_id": None,
+                            "channels": ["claude_assistant_messages"],
+                            "counters": curr_counters,
+                            "response_kind": response_kind,
+                            "reasons": [r_amb],
+                        })
+                    else:
+                        records_overflow_count += 1
+                else:
+                    key = (str(line_sess), str(msg_id))
+                    if key in identity_ledger:
+                        prev = identity_ledger[key]
+                        req_match = (req_id_str == prev["request_id"])
+                        model_match = (model_str == prev["model"])
+                        counters_match = (curr_counters == prev["counters"])
+                        if not (req_match and model_match and counters_match):
+                            has_conflicting_identity = True
+                            ambiguous_events_count += 1
+                            r_conflict = "conflicting_structural_identity:message_id_reused_with_divergent_requestId_model_or_counters"
+                            if r_conflict not in structural_ineligibility_reasons:
+                                structural_ineligibility_reasons.append(r_conflict)
+                            if len(semantic_correlations_records) < MAX_CLAUDE_RECORDS_CAP:
+                                semantic_correlations_records.append({
+                                    "correlation_id": f"{msg_id}_conflict_line_{line_idx}",
+                                    "status": "ambiguous",
+                                    "strategy": "none",
+                                    "response_id": str(msg_id),
+                                    "turn_id": None,
+                                    "thread_id": None,
+                                    "channels": ["claude_assistant_messages"],
+                                    "counters": curr_counters,
+                                    "response_kind": response_kind,
+                                    "reasons": [r_conflict],
+                                    })
+                            else:
+                                records_overflow_count += 1
+                        else:
+                            correlated_events_count += 1
+                            for rec in semantic_correlations_records:
+                                if rec.get("correlation_id") == str(msg_id):
+                                    rec["channels"].append("claude_assistant_messages")
+                                    rec["reasons"].append("duplicate_block_correlated_exact_identity")
+                                    break
+                    else:
+                        if len(identity_ledger) < MAX_CLAUDE_IDENTITY_CAP:
+                            identity_ledger[key] = {
+                                "request_id": req_id_str,
+                                "model": model_str,
+                                "counters": curr_counters,
+                                "response_kind": response_kind,
+                            }
+                            correlated_events_count += 1
+                            unique_response_count += 1
+                            for cf in CLAUDE_COUNTER_FIELDS:
+                                val = curr_counters[cf]
+                                if isinstance(val, int):
+                                    unique_response_sums[cf] += val
+                                    unique_response_observed[cf] = True
+                                else:
+                                    unique_response_invalid[cf] = True
+
+                            if response_kind == "model":
+                                semantic_model_response_count += 1
+                                for cf in CLAUDE_COUNTER_FIELDS:
+                                    val = curr_counters[cf]
+                                    if isinstance(val, int):
+                                        semantic_model_sums[cf] += val
+                                        semantic_model_observed[cf] = True
+
+                            ctx_key = (model_str, None)
+                            if ctx_key not in context_stats:
+                                if len(context_stats) < MAX_CLAUDE_CONTEXT_STATS_CAP:
+                                    context_stats[ctx_key] = {
+                                        "turn_count": 0,
+                                        "sums": {cf: 0 for cf in CLAUDE_COUNTER_FIELDS},
+                                        "observed": {cf: False for cf in CLAUDE_COUNTER_FIELDS},
+                                        "invalid": {cf: False for cf in CLAUDE_COUNTER_FIELDS},
+                                    }
+                                else:
+                                    context_stats_cap_exceeded = True
+                                    r_ctx_cap = f"context_stats_cap_exceeded:{MAX_CLAUDE_CONTEXT_STATS_CAP}"
+                                    if r_ctx_cap not in structural_ineligibility_reasons:
+                                        structural_ineligibility_reasons.append(r_ctx_cap)
+                                    append_reason(parser_reasons, r_ctx_cap)
+                            if ctx_key in context_stats:
+                                context_stats[ctx_key]["turn_count"] += 1
+                                for cf in CLAUDE_COUNTER_FIELDS:
+                                    val = curr_counters[cf]
+                                    if isinstance(val, int):
+                                        context_stats[ctx_key]["sums"][cf] += val
+                                        context_stats[ctx_key]["observed"][cf] = True
+                                    else:
+                                        context_stats[ctx_key]["invalid"][cf] = True
+
+                            if len(semantic_correlations_records) < MAX_CLAUDE_RECORDS_CAP:
+                                semantic_correlations_records.append({
+                                    "correlation_id": str(msg_id),
+                                    "status": "correlated",
+                                    "strategy": "exact_identity",
+                                    "response_id": str(msg_id),
+                                    "turn_id": None,
+                                    "thread_id": None,
+                                    "channels": ["claude_assistant_messages"],
+                                    "counters": curr_counters,
+                                    "response_kind": response_kind,
+                                    "reasons": ["exact_identity_registered"],
+                                })
+                            else:
+                                records_overflow_count += 1
+                        else:
+                            identity_ledger_cap_exceeded = True
+                            has_ambiguous_identity = True
+                            ambiguous_events_count += 1
+                            cap_r = f"identity_ledger_cap_exceeded:{MAX_CLAUDE_IDENTITY_CAP}"
+                            if cap_r not in structural_ineligibility_reasons:
+                                structural_ineligibility_reasons.append(cap_r)
+                            if len(semantic_correlations_records) < MAX_CLAUDE_RECORDS_CAP:
+                                semantic_correlations_records.append({
+                                    "correlation_id": f"ledger_overflow_{msg_id}",
+                                    "status": "ambiguous",
+                                    "strategy": "none",
+                                    "response_id": str(msg_id),
+                                    "turn_id": None,
+                                    "thread_id": None,
+                                    "channels": ["claude_assistant_messages"],
+                                    "counters": curr_counters,
+                                    "response_kind": response_kind,
+                                    "reasons": [cap_r],
+                                })
+                            else:
+                                records_overflow_count += 1
+
+    file_digest = hasher.hexdigest()
+
+    if pending_decode_error is not None:
+        p_idx, p_raw, p_exc = pending_decode_error
+        is_truncated = (
+            not p_raw.endswith("\n")
+            or "Unterminated" in p_exc.msg
+            or "unterminated" in p_exc.msg.lower()
+            or "Expecting" in p_exc.msg
+        )
+        if is_truncated:
+            truncated_line_encountered = True
+            append_reason(completeness_reasons, f"truncated_line_at_line_{p_idx}:{p_exc.msg}")
+        else:
+            syntax_error_encountered = True
+            append_reason(completeness_reasons, f"json_syntax_error_line_{p_idx}:{p_exc.msg}")
+        pending_decode_error = None
+
+    # Format fingerprint
+    if recognized_events_count == 0 or total_valid_json_count == 0:
+        format_fingerprint = hashlib.sha256(b"empty_or_unsupported").hexdigest()[:16]
+    elif structural_paths_missing_in_assistant:
+        format_fingerprint = hashlib.sha256(b"claude_session_jsonl:missing_paths").hexdigest()[:16]
+    else:
+        format_fingerprint = CLAUDE_CANONICAL_FINGERPRINT
+
+    if recognized_events_count == 0 or total_valid_json_count == 0:
+        return build_empty_or_unsupported_observation(
+            run_id=run_id,
+            session_ref_digest=file_digest,
+            parser_status="unsupported",
+            parser_reasons=["empty_or_completely_unparseable_file"],
+            completeness_status="incomplete",
+            completeness_reasons=completeness_reasons or ["no_valid_json_lines"],
+            source_format_fingerprint=format_fingerprint,
+            harness="claude",
+            source_format=CLAUDE_SOURCE_FORMAT,
+        )
+
+    # Subagent topology (evaluated before parser_status and ineligibility decision)
+    threads_list: List[Dict[str, Any]] = []
+    root_tid = session_id or "session_root"
+    root_turn_count: Any = "not_observable" if identity_ledger_cap_exceeded else unique_response_count
+    threads_list.append({
+        "thread_id": root_tid,
+        "parent_thread_id": None,
+        "role": "root",
+        "turn_count": root_turn_count,
+        "tool_use_id": None,
     })
+
+    if subagent_paths:
+        if len(subagent_paths) > MAX_CLAUDE_SUBAGENTS_CAP:
+            subagents_cap_exceeded = True
+            r_sa_cap = f"subagent_refs_cap_exceeded:{MAX_CLAUDE_SUBAGENTS_CAP}"
+            if r_sa_cap not in structural_ineligibility_reasons:
+                structural_ineligibility_reasons.append(r_sa_cap)
+            append_reason(parser_reasons, r_sa_cap)
+
+        meta_by_tu_id: Dict[str, List[Dict[str, Any]]] = {}
+        meta_base_keys: Dict[str, List[str]] = {}
+        meta_sessions: Dict[str, List[str]] = {}
+        meta_by_base: Dict[str, List[str]] = {}
+        meta_by_session: Dict[str, List[str]] = {}
+        total_meta_count = 0
+
+        explicit_jsonls: Dict[str, int] = {}
+        jsonl_turns_by_base: Dict[str, int] = {}
+        jsonl_turns_by_session: Dict[str, int] = {}
+        jsonl_by_base: Dict[str, List[str]] = {}
+        jsonl_by_session: Dict[str, List[str]] = {}
+        all_jsonl_count = 0
+
+        for sa_path in subagent_paths[:MAX_CLAUDE_SUBAGENTS_CAP]:
+            if not os.path.exists(sa_path):
+                subagents_error_encountered = True
+                r_sa_err = "subagent_ref_file_not_found"
+                if r_sa_err not in structural_ineligibility_reasons:
+                    structural_ineligibility_reasons.append(r_sa_err)
+                append_reason(parser_reasons, r_sa_err)
+                continue
+
+            sa_path_obj = Path(sa_path)
+            try:
+                resolved_sa_path = str(sa_path_obj.resolve())
+            except Exception:
+                resolved_sa_path = str(sa_path_obj)
+
+            if sa_path_obj.name.endswith(".meta.json") or (sa_path_obj.suffix == ".json" and not sa_path_obj.name.endswith(".meta.json")):
+                if total_meta_count >= MAX_CLAUDE_SUBAGENTS_CAP:
+                    subagents_cap_exceeded = True
+                    r_sa_meta_cap = f"explicit_metas_cap_exceeded:{MAX_CLAUDE_SUBAGENTS_CAP}"
+                    if r_sa_meta_cap not in structural_ineligibility_reasons:
+                        structural_ineligibility_reasons.append(r_sa_meta_cap)
+                    append_reason(parser_reasons, r_sa_meta_cap)
+                    continue
+
+                if sa_path_obj.name.endswith(".meta.json"):
+                    base_k = resolved_sa_path[:-10]
+                else:
+                    base_k = resolved_sa_path[:-5]
+
+                try:
+                    with open(sa_path_obj, "r", encoding="utf-8") as mf:
+                        meta_data = json.load(mf)
+                    if isinstance(meta_data, dict):
+                        tu_id = meta_data.get("toolUseId")
+                        if tu_id and isinstance(tu_id, str):
+                            total_meta_count += 1
+                            meta_by_tu_id.setdefault(tu_id, []).append(meta_data)
+                            meta_base_keys.setdefault(tu_id, []).append(base_k)
+                            meta_by_base.setdefault(base_k, []).append(tu_id)
+                            m_sess = meta_data.get("sessionId") or meta_data.get("agentId")
+                            if m_sess and isinstance(m_sess, str):
+                                meta_sessions.setdefault(tu_id, []).append(m_sess)
+                                meta_by_session.setdefault(m_sess, []).append(tu_id)
+                    else:
+                        subagents_error_encountered = True
+                        r_sa_err = "subagent_meta_not_dict"
+                        if r_sa_err not in structural_ineligibility_reasons:
+                            structural_ineligibility_reasons.append(r_sa_err)
+                        append_reason(parser_reasons, r_sa_err)
+                except Exception as ex:
+                    subagents_error_encountered = True
+                    r_sa_err = f"subagent_meta_read_error:{type(ex).__name__}"
+                    if r_sa_err not in structural_ineligibility_reasons:
+                        structural_ineligibility_reasons.append(r_sa_err)
+                    append_reason(parser_reasons, r_sa_err)
+            elif sa_path_obj.suffix == ".jsonl":
+                if all_jsonl_count >= MAX_CLAUDE_SUBAGENTS_CAP:
+                    subagents_cap_exceeded = True
+                    r_sa_jsonl_cap = f"explicit_jsonls_cap_exceeded:{MAX_CLAUDE_SUBAGENTS_CAP}"
+                    if r_sa_jsonl_cap not in structural_ineligibility_reasons:
+                        structural_ineligibility_reasons.append(r_sa_jsonl_cap)
+                    append_reason(parser_reasons, r_sa_jsonl_cap)
+                    continue
+
+                base_k = resolved_sa_path[:-6]
+                child_turns = 0
+                sa_session_id = None
+                jsonl_file_error = False
+                try:
+                    with open(sa_path_obj, "r", encoding="utf-8") as jf:
+                        for jl in jf:
+                            jl_str = jl.strip()
+                            if not jl_str:
+                                continue
+                            try:
+                                j_obj = json.loads(jl_str)
+                            except Exception as dec_ex:
+                                jsonl_file_error = True
+                                subagents_error_encountered = True
+                                r_sa_dec = f"subagent_jsonl_decode_error:{type(dec_ex).__name__}"
+                                if r_sa_dec not in structural_ineligibility_reasons:
+                                    structural_ineligibility_reasons.append(r_sa_dec)
+                                append_reason(parser_reasons, r_sa_dec)
+                                break
+                            if isinstance(j_obj, dict):
+                                if j_obj.get("type") == "assistant":
+                                    child_turns += 1
+                                if sa_session_id is None and j_obj.get("sessionId"):
+                                    sa_session_id = str(j_obj["sessionId"])
+                    if not jsonl_file_error:
+                        all_jsonl_count += 1
+                        jsonl_turns_by_base[base_k] = child_turns
+                        jsonl_by_base.setdefault(base_k, []).append(resolved_sa_path)
+                        if sa_session_id:
+                            jsonl_turns_by_session[sa_session_id] = child_turns
+                            jsonl_by_session.setdefault(sa_session_id, []).append(resolved_sa_path)
+                        explicit_jsonls[resolved_sa_path] = child_turns
+                except Exception as ex:
+                    subagents_error_encountered = True
+                    r_sa_err = f"subagent_jsonl_read_error:{type(ex).__name__}"
+                    if r_sa_err not in structural_ineligibility_reasons:
+                        structural_ineligibility_reasons.append(r_sa_err)
+                    append_reason(parser_reasons, r_sa_err)
+            else:
+                subagents_error_encountered = True
+                r_sa_err = "subagent_ref_unsupported_extension"
+                if r_sa_err not in structural_ineligibility_reasons:
+                    structural_ineligibility_reasons.append(r_sa_err)
+                append_reason(parser_reasons, r_sa_err)
+
+        for tu_id in sorted(meta_by_tu_id.keys()):
+            if len(threads_list) >= MAX_CLAUDE_THREADS_CAP:
+                subagents_cap_exceeded = True
+                r_th_cap = f"threads_list_cap_exceeded:{MAX_CLAUDE_THREADS_CAP}"
+                if r_th_cap not in structural_ineligibility_reasons:
+                    structural_ineligibility_reasons.append(r_th_cap)
+                append_reason(parser_reasons, r_th_cap)
+                break
+            if tu_id in observed_tool_use_ids:
+                c_turns: Any = 0
+                tu_metas = meta_by_tu_id.get(tu_id, [])
+
+                # Enforce uniqueness per toolUseId
+                if len(tu_metas) > 1:
+                    c_turns = "not_observable"
+                    subagent_association_unverifiable = True
+                    r_sa_unv = f"subagent_jsonl_association_unverifiable:{tu_id}"
+                    if r_sa_unv not in structural_ineligibility_reasons:
+                        structural_ineligibility_reasons.append(r_sa_unv)
+                    append_reason(parser_reasons, r_sa_unv)
+                else:
+                    b_keys = meta_base_keys.get(tu_id, [])
+                    b_k = b_keys[0] if b_keys else None
+                    s_keys = meta_sessions.get(tu_id, [])
+                    s_k = s_keys[0] if s_keys else None
+
+                    matched_from_base = False
+                    matched_from_session = False
+                    base_turn_val = None
+                    session_turn_val = None
+
+                    # 1. Structural match by base path stem
+                    if b_k and b_k in jsonl_turns_by_base and len(meta_by_base.get(b_k, [])) == 1 and len(jsonl_by_base.get(b_k, [])) == 1:
+                        matched_from_base = True
+                        base_turn_val = jsonl_turns_by_base[b_k]
+
+                    # 2. Structural match by sessionId
+                    if s_k and s_k in jsonl_turns_by_session and len(meta_by_session.get(s_k, [])) == 1 and len(jsonl_by_session.get(s_k, [])) == 1:
+                        matched_from_session = True
+                        session_turn_val = jsonl_turns_by_session[s_k]
+
+                    if matched_from_base and matched_from_session:
+                        if base_turn_val == session_turn_val:
+                            c_turns = base_turn_val
+                        else:
+                            c_turns = "not_observable"
+                            subagent_association_unverifiable = True
+                            r_sa_unv = f"subagent_jsonl_association_unverifiable:{tu_id}"
+                            if r_sa_unv not in structural_ineligibility_reasons:
+                                structural_ineligibility_reasons.append(r_sa_unv)
+                            append_reason(parser_reasons, r_sa_unv)
+                    elif matched_from_base:
+                        c_turns = base_turn_val
+                    elif matched_from_session:
+                        c_turns = session_turn_val
+                    elif all_jsonl_count == 0:
+                        c_turns = 0
+                    else:
+                        c_turns = "not_observable"
+                        subagent_association_unverifiable = True
+                        r_sa_unv = f"subagent_jsonl_association_unverifiable:{tu_id}"
+                        if r_sa_unv not in structural_ineligibility_reasons:
+                            structural_ineligibility_reasons.append(r_sa_unv)
+                        append_reason(parser_reasons, r_sa_unv)
+
+                threads_list.append({
+                    "thread_id": f"subagent_{tu_id}",
+                    "parent_thread_id": root_tid,
+                    "role": "child",
+                    "turn_count": c_turns,
+                    "tool_use_id": str(tu_id),
+                })
+
+    # Version evaluation across all lines
+    if len(observed_versions) == 0:
+        harness_version = None
+    elif len(observed_versions) == 1:
+        harness_version = next(iter(observed_versions))
+    else:
+        sorted_vers = sorted(list(observed_versions))
+        harness_version = "multiple_versions_observed"
+        version_inconsistency_encountered = True
+        append_reason(structural_ineligibility_reasons, f"multiple_versions_observed:{sorted_vers}")
+        append_reason(parser_reasons, f"multiple_versions_observed:{sorted_vers}")
+
+    # Completeness (Fail-Closed: never emit 'complete' in v1)
+    if syntax_error_encountered or truncated_line_encountered:
+        completeness_status = "incomplete"
+    elif negative_markers_encountered:
+        completeness_status = "incomplete"
+        for nm in negative_markers_encountered:
+            append_reason(completeness_reasons, nm)
+    else:
+        completeness_status = "not_observable"
+        append_reason(completeness_reasons, "no_conclusive_terminal_marker_in_claude_log")
+
+    # Parser Status
+    has_structural_issue_or_cap = (
+        has_ambiguous_identity
+        or has_conflicting_identity
+        or identity_ledger_cap_exceeded
+        or compactions_cap_exceeded
+        or tool_use_ids_cap_exceeded
+        or invalid_counter_encountered
+        or context_stats_cap_exceeded
+        or subagents_cap_exceeded
+        or subagents_error_encountered
+        or subagent_association_unverifiable
+        or structural_paths_missing_in_assistant
+    )
+
+    if syntax_error_encountered or truncated_line_encountered:
+        parser_status = "partial"
+        append_reason(parser_reasons, "encountered_json_syntax_or_truncation_errors")
+    elif harness_version != "2.1.257" or version_inconsistency_encountered:
+        parser_status = "partial"
+        append_reason(parser_reasons, f"unsupported_claude_version:{harness_version}")
+    elif format_fingerprint != CLAUDE_CANONICAL_FINGERPRINT:
+        parser_status = "partial"
+        append_reason(parser_reasons, f"unsupported_source_format_fingerprint:{format_fingerprint}")
+    elif has_structural_issue_or_cap:
+        parser_status = "partial"
+        for r in structural_ineligibility_reasons:
+            append_reason(parser_reasons, r)
+    elif negative_markers_encountered:
+        parser_status = "partial"
+        append_reason(parser_reasons, "negative_termination_marker_observed")
+    else:
+        parser_status = "supported"
+        append_reason(parser_reasons, "valid_claude_records_parsed_without_syntax_error")
+
+    # Ineligibility reasons for normalization
+    ineligibility_reasons: List[str] = []
+    if harness_version != "2.1.257" or version_inconsistency_encountered:
+        ineligibility_reasons.append(f"unsupported_rule_harness_version:{harness_version}")
+    if format_fingerprint != CLAUDE_CANONICAL_FINGERPRINT:
+        ineligibility_reasons.append(f"unsupported_source_format_fingerprint:{format_fingerprint}")
+    if syntax_error_encountered or truncated_line_encountered:
+        ineligibility_reasons.append("encountered_json_syntax_or_truncation_errors")
+    if has_structural_issue_or_cap:
+        for r in structural_ineligibility_reasons:
+            if r not in ineligibility_reasons:
+                ineligibility_reasons.append(r)
+
+    eligible_for_normalization = (len(ineligibility_reasons) == 0)
+
+    # Timing
+    span_seconds: Any = "not_observable"
+    if first_valid_dt is not None and last_valid_dt is not None and last_valid_dt >= first_valid_dt:
+        span_seconds = round((last_valid_dt - first_valid_dt).total_seconds(), 3)
+
+    timing = {
+        "observed_session_span_seconds": span_seconds,
+        "first_timestamp": first_valid_ts_str,
+        "last_timestamp": last_valid_ts_str,
+        "source": "rollout_first_last_timestamp",
+        "job_wall_seconds": "not_observable",
+        "model_latency_seconds": "not_observable",
+    }
+
+    # Raw usage canonical block
+    not_obs_token_counters = {f: "not_observable" for f in CANONICAL_COUNTER_FIELDS}
+    not_obs_claude_counters = {f: "not_observable" for f in CLAUDE_COUNTER_FIELDS}
+    not_obs_reconciliations = {
+        f: {
+            "status": "not_observable",
+            "cumulative_value": "not_observable",
+            "per_response_value": (
+                "not_observable"
+                if claude_counter_invalid.get(f, False) or not claude_assistant_messages_observed.get(f, False)
+                else claude_assistant_messages_sums.get(f, "not_observable")
+            ) if f in ("input_tokens", "output_tokens") else "not_observable",
+            "delta": None,
+        }
+        for f in CANONICAL_COUNTER_FIELDS
+    }
+
+    raw_usage = {
+        "cumulative": not_obs_token_counters,
+        "per_response_sum": {
+            "input_tokens": (
+                "not_observable"
+                if claude_counter_invalid["input_tokens"] or not claude_assistant_messages_observed["input_tokens"]
+                else claude_assistant_messages_sums["input_tokens"]
+            ),
+            "cached_input_tokens": "not_observable",
+            "cache_write_input_tokens": "not_observable",
+            "output_tokens": (
+                "not_observable"
+                if claude_counter_invalid["output_tokens"] or not claude_assistant_messages_observed["output_tokens"]
+                else claude_assistant_messages_sums["output_tokens"]
+            ),
+            "reasoning_output_tokens": "not_observable",
+            "total_tokens": "not_observable",
+        } if claude_assistant_messages_count > 0 else not_obs_token_counters,
+        "reconciliation": {
+            "status": "not_observable",
+            "fields": not_obs_reconciliations,
+        },
+        "response_count": claude_assistant_messages_count,
+    }
+
+    if identity_ledger_cap_exceeded:
+        unique_responses_status = "truncated"
+        unique_responses_count = "not_observable"
+        unique_responses_sums = not_obs_claude_counters
+    elif any(claude_counter_invalid.values()) or any(unique_response_invalid.values()):
+        unique_responses_status = "not_observable"
+        unique_responses_count = unique_response_count
+        unique_responses_sums = {
+            f: (
+                "not_observable"
+                if claude_counter_invalid[f] or unique_response_invalid[f] or not unique_response_observed[f]
+                else unique_response_sums[f]
+            )
+            for f in CLAUDE_COUNTER_FIELDS
+        }
+    else:
+        unique_responses_status = "exact"
+        unique_responses_count = unique_response_count
+        unique_responses_sums = {
+            f: (unique_response_sums[f] if unique_response_observed[f] else "not_observable")
+            for f in CLAUDE_COUNTER_FIELDS
+        }
+
+    asst_status = "not_observable" if any(claude_counter_invalid.values()) else "exact"
+    asst_counters_sum = {
+        f: (
+            "not_observable"
+            if claude_counter_invalid[f] or not claude_assistant_messages_observed[f]
+            else claude_assistant_messages_sums[f]
+        )
+        for f in CLAUDE_COUNTER_FIELDS
+    }
+
+    raw_usage_channels = {
+        "claude_assistant_messages": {
+            "status": asst_status,
+            "event_count": claude_assistant_messages_count,
+            "native_counters_sum": asst_counters_sum,
+        },
+        "claude_unique_responses": {
+            "status": unique_responses_status,
+            "event_count": unique_responses_count,
+            "native_counters_sum": unique_responses_sums,
+        },
+    }
+
+    records_retained = len(semantic_correlations_records)
+    records_observed = records_retained + records_overflow_count
+    records_truncated = records_overflow_count > 0
+    semantic_correlations = {
+        "rule_id": RULE_ID_CLAUDE_CODE_V1 if harness_version == "2.1.257" else None,
+        "summary": {
+            "records_observed": records_observed,
+            "records_retained": records_retained,
+            "records_truncated": records_truncated,
+            "correlated_events": correlated_events_count,
+            "ambiguous_events": ambiguous_events_count,
+            "unmatched_events": 0,
+        },
+        "records": semantic_correlations_records,
+    }
+
+    if eligible_for_normalization:
+        norm_status = "normalized"
+        norm_resp_count = semantic_model_response_count
+        norm_per_resp_sum = {
+            "input_tokens": semantic_model_sums["input_tokens"] if semantic_model_observed["input_tokens"] else "not_observable",
+            "cached_input_tokens": "not_observable",
+            "cache_write_input_tokens": "not_observable",
+            "output_tokens": semantic_model_sums["output_tokens"] if semantic_model_observed["output_tokens"] else "not_observable",
+            "reasoning_output_tokens": "not_observable",
+            "total_tokens": "not_observable",
+        }
+        norm_req_sum = {
+            f: (semantic_model_sums[f] if semantic_model_observed[f] else "not_observable")
+            for f in CLAUDE_COUNTER_FIELDS
+        }
+    else:
+        norm_status = "not_observable"
+        norm_resp_count = 0
+        norm_per_resp_sum = not_obs_token_counters
+        norm_req_sum = not_obs_claude_counters
+
+    normalized_usage = {
+        "status": norm_status,
+        "rule_id": RULE_ID_CLAUDE_CODE_V1,
+        "eligible_for_normalization": eligible_for_normalization,
+        "ineligibility_reasons": ineligibility_reasons,
+        "semantic_response_count": norm_resp_count,
+        "semantic_per_response_sum": norm_per_resp_sum,
+        "semantic_request_sum": norm_req_sum,
+        "cumulative": not_obs_token_counters,
+        "reconciliation": {
+            "status": "not_observable",
+            "fields": not_obs_reconciliations,
+        },
+    }
+
+    derived_usage = {
+        "uncached_input_tokens": "not_observable",
+    }
+
+    observed_contexts_list: List[Dict[str, Any]] = []
+    if not context_stats:
+        observed_contexts_list.append({
+            "model": "unknown",
+            "effort": None,
+            "turn_count": "not_observable" if (identity_ledger_cap_exceeded or context_stats_cap_exceeded) else 0,
+            "raw_usage": not_obs_claude_counters,
+        })
+    elif identity_ledger_cap_exceeded or context_stats_cap_exceeded:
+        for (m, _), c_data in context_stats.items():
+            observed_contexts_list.append({
+                "model": m,
+                "effort": None,
+                "turn_count": "not_observable",
+                "raw_usage": not_obs_claude_counters,
+            })
+    else:
+        for (m, _), c_data in context_stats.items():
+            observed_contexts_list.append({
+                "model": m,
+                "effort": None,
+                "turn_count": c_data["turn_count"],
+                "raw_usage": {
+                    f: (
+                        "not_observable"
+                        if claude_counter_invalid[f] or c_data.get("invalid", {}).get(f, False) or not c_data["observed"][f]
+                        else c_data["sums"][f]
+                    )
+                    for f in CLAUDE_COUNTER_FIELDS
+                },
+            })
+
+    obs_result = {
+        "schema_version": SCHEMA_VERSION,
+        "run_id": run_id,
+        "session_ref_digest": file_digest,
+        "harness": "claude",
+        "harness_version": harness_version,
+        "source_format": CLAUDE_SOURCE_FORMAT,
+        "source_format_fingerprint": format_fingerprint,
+        "source_kind": "harness_native_log",
+        "parser_status": {
+            "status": parser_status,
+            "parser_version": PARSER_VERSION,
+            "reasons": parser_reasons or ["valid_claude_session_parsed"],
+        },
+        "completeness": {
+            "status": completeness_status,
+            "reasons": completeness_reasons or ["claude_stream_analyzed"],
+        },
+        "timing": timing,
+        "raw_usage": raw_usage,
+        "raw_usage_channels": raw_usage_channels,
+        "semantic_correlations": semantic_correlations,
+        "normalized_usage": normalized_usage,
+        "derived_usage": derived_usage,
+        "observed_contexts": observed_contexts_list,
+        "thread_topology": {
+            "root_thread_id": root_tid,
+            "session_id": session_id,
+            "threads": threads_list,
+        },
+        "rate_limits": [],
+        "context_compaction_observations": compaction_obs,
+    }
+
+    return enforce_schema_validation(obs_result)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Extract factual usage observations from Codex rollout sessions."
+        description="Extract factual usage observations from Codex or Claude rollout sessions."
     )
     parser.add_argument("--run-id", required=True, help="Explicit run_id associated with this observation.")
-    parser.add_argument("--session-ref", required=True, help="Path to the Codex rollout JSONL file (read-only).")
+    parser.add_argument("--session-ref", required=True, help="Path to the rollout JSONL file (read-only).")
     parser.add_argument("--output", default=None, help="Destination file path for JSON output (default: stdout).")
     parser.add_argument("--format", choices=["json", "text"], default="json", help="Output format.")
     parser.add_argument("--verify-schema", action="store_true", help="Validate output against usage-observation schema.")
+    parser.add_argument("--harness", choices=["codex", "claude"], default="codex", help="Harness type (default: codex).")
+    parser.add_argument("--subagent-ref", action="append", default=[], help="Explicit path to subagent metadata or session file (optional).")
 
     args = parser.parse_args()
 
     try:
-        result = parse_codex_rollout(args.session_ref, args.run_id)
-    except FileNotFoundError as e:
-        sys.stderr.write(f"Error: {e}\n")
+        if args.harness == "claude":
+            result = parse_claude_session(args.session_ref, args.run_id, subagent_paths=args.subagent_ref)
+        else:
+            result = parse_codex_rollout(args.session_ref, args.run_id)
+    except FileNotFoundError:
+        sys.stderr.write(f"Error: session file not found: {os.path.basename(args.session_ref)}\n")
         return 1
     except Exception as e:
-        sys.stderr.write(f"Error parsing session: {e}\n")
+        err_msg = str(e)
+        sanitized_msg = re.sub(r"(/[a-zA-Z0-9_\.\-]+)+/([a-zA-Z0-9_\.\-]+)", r"\2", err_msg)
+        sys.stderr.write(f"Error parsing session: {type(e).__name__}: {sanitized_msg}\n")
         return 2
 
     if args.verify_schema:
@@ -1515,14 +2646,25 @@ def main() -> int:
         out_str = json.dumps(result, indent=2) + "\n"
     else:
         # Compact text summary
-        out_str = (
-            f"Run ID: {result['run_id']}\n"
-            f"Digest: {result['session_ref_digest']}\n"
-            f"Completeness: {result['completeness']['status']}\n"
-            f"Parser Status: {result['parser_status']['status']}\n"
-            f"Total Tokens: {result['raw_usage']['cumulative'].get('total_tokens')}\n"
-            f"Reconciliation: {result['raw_usage']['reconciliation']['status']}\n"
-        )
+        if result.get("harness") == "claude":
+            out_str = (
+                f"Run ID: {result['run_id']}\n"
+                f"Digest: {result['session_ref_digest']}\n"
+                f"Harness: {result['harness']}\n"
+                f"Completeness: {result['completeness']['status']}\n"
+                f"Parser Status: {result['parser_status']['status']}\n"
+                f"Normalized Status: {result.get('normalized_usage', {}).get('status')}\n"
+                f"Semantic Responses: {result.get('normalized_usage', {}).get('semantic_response_count')}\n"
+            )
+        else:
+            out_str = (
+                f"Run ID: {result['run_id']}\n"
+                f"Digest: {result['session_ref_digest']}\n"
+                f"Completeness: {result['completeness']['status']}\n"
+                f"Parser Status: {result['parser_status']['status']}\n"
+                f"Total Tokens: {result['raw_usage']['cumulative'].get('total_tokens')}\n"
+                f"Reconciliation: {result['raw_usage']['reconciliation']['status']}\n"
+            )
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:

@@ -1,0 +1,6 @@
+{
+  "agentType": "general-purpose",
+  "description": "Subagent review task",
+  "toolUseId": "toolu_sub_classe_f_01",
+  "spawnDepth": 1
+}

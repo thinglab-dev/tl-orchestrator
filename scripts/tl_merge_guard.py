@@ -20,6 +20,8 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from typing import Any
+
 try:
     from scripts.tl_usage import validate_against_schema
 except ImportError:
@@ -27,7 +29,17 @@ except ImportError:
         from tl_usage import validate_against_schema  # type: ignore[no-redef]
     except ImportError:
         def validate_against_schema(data: Any, schema_path: str) -> tuple[bool, list[str]]:
-            return True, []
+            return False, ["FAIL_CLOSED: schema validator unavailable: tl_usage.validate_against_schema could not be imported"]
+
+
+def _resolve_schema_path(schema_path: str | Path | None = None) -> Path:
+    """Resolve merge authorization schema path, falling back to canonical package schema."""
+    if schema_path is not None:
+        p = Path(schema_path)
+        if p.is_file():
+            return p
+        return p
+    return Path(__file__).resolve().parent.parent / "schemas" / "merge-authorization.schema.json"
 
 
 AUTHORIZATION_SIGNING_DOMAIN = b"TL_MERGE_AUTHORIZATION_V1\0"
@@ -133,24 +145,31 @@ def ed25519_verify(pubkey: bytes, message: bytes, sig: bytes) -> bool:
         return False
 
 
-DEFAULT_APP_SECRET_KEY = hashlib.sha256(b"thinglab-merge-authority-default-seed-v1").digest()
-DEFAULT_APP_PUBLIC_KEY, _ = ed25519_sign(DEFAULT_APP_SECRET_KEY, b"")
-DEFAULT_APP_KEY_ID = "key-tl-app-v1"
-DEFAULT_TRUSTED_APP_ID = 998811
-DEFAULT_TRUSTED_APP_SLUG = "thinglab-merge-authority"
-
-
 @dataclass
 class TrustRoot:
-    """External root of trust containing identity and public verification keys."""
-    trusted_app_id: int = DEFAULT_TRUSTED_APP_ID
-    trusted_app_slug: str = DEFAULT_TRUSTED_APP_SLUG
-    trusted_public_keys: dict[str, str] = field(default_factory=lambda: {
-        DEFAULT_APP_KEY_ID: DEFAULT_APP_PUBLIC_KEY.hex(),
-    })
+    """External root of trust containing identity and public verification keys (zero embedded private keys)."""
+    trusted_app_id: int = 0
+    trusted_app_slug: str = ""
+    trusted_public_keys: dict[str, str] = field(default_factory=dict)
 
-
-DEFAULT_TRUST_ROOT = TrustRoot()
+    @classmethod
+    def from_env(cls) -> TrustRoot:
+        """Resolve TrustRoot from environment variables TL_MERGE_AUTHORITY_*."""
+        app_id_str = os.environ.get("TL_MERGE_AUTHORITY_APP_ID", "")
+        app_id = int(app_id_str) if app_id_str.isdigit() else 0
+        app_slug = os.environ.get("TL_MERGE_AUTHORITY_APP_SLUG", "")
+        pubkeys: dict[str, str] = {}
+        env_keys = os.environ.get("TL_MERGE_AUTHORITY_PUBLIC_KEYS", "")
+        if env_keys:
+            for part in env_keys.split(","):
+                if "=" in part:
+                    kid, khex = part.split("=", 1)
+                    pubkeys[kid.strip()] = khex.strip()
+        single_key = os.environ.get("TL_MERGE_AUTHORITY_PUBLIC_KEY", "")
+        single_key_id = os.environ.get("TL_MERGE_AUTHORITY_KEY_ID", "key-default")
+        if single_key:
+            pubkeys[single_key_id] = single_key.strip()
+        return cls(trusted_app_id=app_id, trusted_app_slug=app_slug, trusted_public_keys=pubkeys)
 
 
 def canonicalize_payload(payload: Any) -> bytes:
@@ -206,28 +225,33 @@ def derive_authorization_id(claim: dict[str, Any]) -> str:
 
 def sign_authorization_envelope(
     claim: dict[str, Any],
-    secret_key: bytes | None = None,
-    key_id: str = DEFAULT_APP_KEY_ID,
+    secret_key: bytes,
+    key_id: str,
     mechanism: str = "dedicated_github_app",
-    integration_id: int = DEFAULT_TRUSTED_APP_ID,
+    integration_id: int | None = None,
     issuer: str = "thinglab-merge-authority[bot]",
 ) -> dict[str, Any]:
-    """Signs an authorization claim and returns a full, valid envelope."""
-    sk = secret_key or DEFAULT_APP_SECRET_KEY
+    """Signs an authorization claim using an externally provided private key."""
+    if not secret_key or not isinstance(secret_key, (bytes, bytearray)):
+        raise ValueError("secret_key is required and must be bytes to sign authorization envelope")
+    if not key_id or not isinstance(key_id, str):
+        raise ValueError("key_id is required and must be a string")
     auth_id = derive_authorization_id(claim)
     canonical_claim = canonicalize_payload(claim)
     signing_payload = AUTHORIZATION_SIGNING_DOMAIN + canonical_claim
-    _, sig_bytes = ed25519_sign(sk, signing_payload)
+    _, sig_bytes = ed25519_sign(bytes(secret_key), signing_payload)
 
     env = dict(claim)
     env["authorization_id"] = auth_id
-    env["provenance"] = {
+    provenance = {
         "issuer": issuer,
         "mechanism": mechanism,
-        "integration_id": integration_id,
         "key_id": key_id,
         "signature": sig_bytes.hex(),
     }
+    if integration_id is not None:
+        provenance["integration_id"] = integration_id
+    env["provenance"] = provenance
     return env
 
 
@@ -472,8 +496,10 @@ def parse_pr_comment_transport(
     expected_head: str,
     expected_base: str,
     candidate_commit: str,
+    checker_commit: str | None = None,
+    authority_mode: str | None = None,
     trust_root: TrustRoot | None = None,
-    schema_path: str = "schemas/merge-authorization.schema.json",
+    schema_path: str | Path | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """
     Deterministic transport parser for PR Comment Metadata envelopes.
@@ -488,7 +514,11 @@ def parse_pr_comment_transport(
     - ("missing_merge_authorization", []) when 0 valid active authorities exist.
     - ("FAIL_CLOSED: ...", []) on forged envelope, invalid schema, or ambiguity (> 1 distinct).
     """
-    root = trust_root or DEFAULT_TRUST_ROOT
+    resolved_schema = _resolve_schema_path(schema_path)
+    if not resolved_schema.is_file():
+        return f"FAIL_CLOSED: merge authorization schema file not found: {resolved_schema}", []
+
+    root = trust_root if trust_root is not None else TrustRoot.from_env()
 
     pattern = re.compile(
         r"```(?:json:tl-merge-authorization|tl-merge-authorization)\s*\n(.*?)\n```",
@@ -512,12 +542,10 @@ def parse_pr_comment_transport(
     valid_authorities: dict[str, dict[str, Any]] = {}
 
     for env, comment in found_envelopes:
-        # 1. Mandatory JSON Schema validation
-        schema_file = Path(schema_path)
-        if schema_file.exists():
-            is_valid, errors = validate_against_schema(env, str(schema_file))
-            if not is_valid:
-                return f"FAIL_CLOSED: invalid_envelope_schema: {errors}", []
+        # 1. Mandatory JSON Schema validation (fails closed)
+        is_valid, errors = validate_against_schema(env, str(resolved_schema))
+        if not is_valid:
+            return f"FAIL_CLOSED: invalid_envelope_schema: {errors}", []
 
         # 2. Scope bindings
         if env.get("target_repository") != expected_repo:
@@ -529,6 +557,10 @@ def parse_pr_comment_transport(
         if env.get("expected_base_sha") != expected_base:
             continue
         if env.get("integration_candidate_commit") != candidate_commit:
+            continue
+        if checker_commit is not None and env.get("checker_approved_commit") != checker_commit:
+            continue
+        if authority_mode is not None and env.get("authority_mode") != authority_mode:
             continue
 
         # 3. Validate acyclic authorization_id derivation
@@ -670,6 +702,8 @@ class MergeAuthorityGate:
             expected_head=head_sha,
             expected_base=base_sha,
             candidate_commit=candidate_commit,
+            checker_commit=checker_commit,
+            authority_mode=enforce_mode,
             trust_root=trust_root,
             schema_path=schema_path,
         )
@@ -688,6 +722,32 @@ class MergeAuthorityGate:
 
         envelope = envelopes[0]
         auth_id = envelope["authorization_id"]
+
+        # Scope validation on matched envelope (defense-in-depth)
+        if envelope.get("checker_approved_commit") != checker_commit:
+            return AuthorityReceipt(
+                status="REJECTED",
+                authorization_id=auth_id,
+                target_pr=pr_number,
+                head_sha=head_sha,
+                base_sha=base_sha,
+                checker_commit=checker_commit,
+                candidate_commit=candidate_commit,
+                reason=f"envelope_checker_commit_mismatch: {envelope.get('checker_approved_commit')} != {checker_commit}",
+                envelope=envelope,
+            )
+        if envelope.get("authority_mode") != enforce_mode:
+            return AuthorityReceipt(
+                status="REJECTED",
+                authorization_id=auth_id,
+                target_pr=pr_number,
+                head_sha=head_sha,
+                base_sha=base_sha,
+                checker_commit=checker_commit,
+                candidate_commit=candidate_commit,
+                reason=f"envelope_authority_mode_mismatch: {envelope.get('authority_mode')} != {enforce_mode}",
+                envelope=envelope,
+            )
 
         # External anti-replay CAS check
         store_state = authority_store.get_state(auth_id)

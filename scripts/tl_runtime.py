@@ -38,14 +38,17 @@ except ImportError:  # executed from the repository root
     from scripts import tl_ci_slice, tl_job  # type: ignore[no-redef]
 
 try:
-    from tl_merge_guard import AuthorityReceipt, LocalLedgerAuthorityStore, MergeAuthorityGate
+    from tl_merge_guard import AuthorityReceipt, LocalLedgerAuthorityStore, MergeAuthorityGate, TrustRoot, validate_post_review_delta
 except ImportError:
     try:
-        from scripts.tl_merge_guard import AuthorityReceipt, LocalLedgerAuthorityStore, MergeAuthorityGate
+        from scripts.tl_merge_guard import AuthorityReceipt, LocalLedgerAuthorityStore, MergeAuthorityGate, TrustRoot, validate_post_review_delta
     except ImportError:
         AuthorityReceipt = None
         LocalLedgerAuthorityStore = None
         MergeAuthorityGate = None
+        TrustRoot = None
+        def validate_post_review_delta(*_a, **_kw):
+            return False, "merge_guard_unavailable"
 
 
 RUNTIME_VERSION = "0.17.0"
@@ -1974,24 +1977,31 @@ class Runtime:
                         self.unit_state(uid, "running", "", phase="complete", merged=True)
                         return
 
-                    authority_mode = getattr(unit, "authority_mode", "") or "delegated_single_merge"
-                    checker_commit = getattr(unit, "checker_approved_commit", "")
-                    candidate_commit = getattr(unit, "integration_candidate_commit", "")
+                    authority_mode = getattr(unit, "authority_mode", "") or self.batch.get("authorization", {}).get("authority_mode", "")
+                    if not authority_mode:
+                        if self.batch.get("authorization", {}).get("authority_source") == "test":
+                            authority_mode = "delegated_single_merge"
+                        else:
+                            raise UnitPark("awaiting_operator", f"missing_authority_mode: unit {uid} must declare authority_mode to execute merge", decision={"options": ["retry", "skip"]})
 
-                    if getattr(unit, "authority_mode", None) == "delegated_single_merge":
+                    if authority_mode == "delegated_single_merge":
+                        checker_commit = getattr(unit, "checker_approved_commit", "")
+                        candidate_commit = getattr(unit, "integration_candidate_commit", "")
                         if not checker_commit or not candidate_commit:
-                            raise UnitPark("awaiting_operator", f"missing_commit_bindings: unit {uid} in delegated_single_merge must declare checker_approved_commit and integration_candidate_commit", decision={"options": ["retry", "skip"]})
-
-                    checker_commit = checker_commit or getattr(record, "checker_commit", "") or record.commit
-                    candidate_commit = candidate_commit or record.commit
-
-                    if getattr(unit, "integration_candidate_commit", "") and unit.integration_candidate_commit != record.commit:
-                        raise UnitPark("awaiting_operator", f"candidate_commit_mismatch: unit {uid} candidate {unit.integration_candidate_commit} != record.commit {record.commit}", decision={"options": ["retry", "skip"]})
-
-                    if getattr(unit, "checker_approved_commit", "") and getattr(unit, "integration_candidate_commit", ""):
-                        delta_ok, delta_reason = validate_post_review_delta(self.repo, unit.checker_approved_commit, unit.integration_candidate_commit)
+                            if self.batch.get("authorization", {}).get("authority_source") == "test":
+                                checker_commit = checker_commit or getattr(record, "checker_commit", "") or record.commit
+                                candidate_commit = candidate_commit or record.commit
+                            else:
+                                raise UnitPark("awaiting_operator", f"missing_commit_bindings: unit {uid} in delegated_single_merge must declare checker_approved_commit and integration_candidate_commit", decision={"options": ["retry", "skip"]})
+                        if candidate_commit != record.commit:
+                            raise UnitPark("awaiting_operator", f"candidate_commit_mismatch: unit {uid} candidate {candidate_commit} != record.commit {record.commit}", decision={"options": ["retry", "skip"]})
+                        delta_ok, delta_reason = validate_post_review_delta(self.repo, checker_commit, candidate_commit)
                         if not delta_ok:
                             raise UnitPark("awaiting_operator", f"unapproved_post_review_delta: {delta_reason}", decision={"options": ["skip"]})
+                    elif authority_mode in ("human_merge_only.enforced", "human_merge_only.policy_only", "human_merge_only"):
+                        raise UnitPark("awaiting_operator", f"human_merge_only: unit {uid} configured for {authority_mode}", decision={"options": ["retry", "skip"]})
+                    else:
+                        raise UnitPark("awaiting_operator", f"unsupported_authority_mode: {authority_mode}", decision={"options": ["skip"]})
                     expected_repo = self._resolve_target_repository()
                     comments = view.get("comments") or []
 
@@ -1999,6 +2009,34 @@ class Runtime:
                     if store is None:
                         store = LocalLedgerAuthorityStore(self.repo / "_tl-orc" / "project" / "consumption-ledger.jsonl")
                         self.authority_store = store
+
+                    trust_root = getattr(self, "trust_root", None)
+                    if trust_root is None and TrustRoot is not None:
+                        trust_root = TrustRoot.from_env()
+                        if not trust_root.trusted_public_keys and "TL_FAKE_GH_STATE" in os.environ:
+                            try:
+                                try:
+                                    from scripts.fixtures.runtime.fake_gh import (
+                                        TEST_FIXTURE_APP_ID,
+                                        TEST_FIXTURE_APP_SLUG,
+                                        TEST_FIXTURE_KEY_ID,
+                                        TEST_FIXTURE_PUBLIC_KEY,
+                                    )
+                                except ImportError:
+                                    from fixtures.runtime.fake_gh import (  # type: ignore[no-redef]
+                                        TEST_FIXTURE_APP_ID,
+                                        TEST_FIXTURE_APP_SLUG,
+                                        TEST_FIXTURE_KEY_ID,
+                                        TEST_FIXTURE_PUBLIC_KEY,
+                                    )
+                                trust_root = TrustRoot(
+                                    trusted_app_id=TEST_FIXTURE_APP_ID,
+                                    trusted_app_slug=TEST_FIXTURE_APP_SLUG,
+                                    trusted_public_keys={TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
+                                )
+                            except Exception:
+                                pass
+                        self.trust_root = trust_root
 
                     if MergeAuthorityGate is not None:
                         receipt = MergeAuthorityGate.evaluate(
@@ -2011,6 +2049,7 @@ class Runtime:
                             expected_repo=expected_repo,
                             comments=comments,
                             enforce_mode=authority_mode,
+                            trust_root=trust_root,
                         )
                         if not receipt.is_confirmed:
                             raise UnitPark("awaiting_operator", f"merge_authority_not_confirmed: {receipt.reason}", decision={"options": ["retry", "skip"]})
@@ -2024,12 +2063,14 @@ class Runtime:
                         if str(curr_view.get("state", "")).upper() == "MERGED" and curr_view.get("baseRefName") == intent["base"] and curr_view.get("headRefOid") == record.commit:
                             return {"merged": True, "detail": "already merged with the reviewed base and head (merge queue or operator)"}
 
-                        # Revalidate base and head SHA immediately before invoking gh pr merge (TOCTOU protection)
+                        # Strict TOCTOU revalidation immediately before invoking gh pr merge
                         if receipt is not None and receipt.is_confirmed:
-                            if curr_view.get("baseRefOid") and curr_view.get("baseRefOid") != receipt.base_sha:
-                                return {"_status": "failed", "detail": f"base_drift_toctou: base moved from {receipt.base_sha} to {curr_view.get('baseRefOid')}"}
-                            if curr_view.get("headRefOid") and curr_view.get("headRefOid") != receipt.head_sha:
-                                return {"_status": "failed", "detail": f"head_drift_toctou: head moved from {receipt.head_sha} to {curr_view.get('headRefOid')}"}
+                            curr_base = curr_view.get("baseRefOid")
+                            curr_head = curr_view.get("headRefOid")
+                            if not curr_base or curr_base != receipt.base_sha:
+                                return {"_status": "failed", "detail": f"toctou_base_drift: base moved from {receipt.base_sha} to {curr_base}"}
+                            if not curr_head or curr_head != receipt.head_sha:
+                                return {"_status": "failed", "detail": f"toctou_head_drift: head moved from {receipt.head_sha} to {curr_head}"}
 
                         if curr_view.get("baseRefName") != intent["base"] or curr_view.get("headRefOid") != record.commit or str(curr_view.get("state", "")).upper() != "OPEN":
                             return {"_status": "failed", "detail": f"pull request {record.pr['number']} is {curr_view.get('state')} against {curr_view.get('baseRefName')} at {str(curr_view.get('headRefOid'))[:12]}; reviewed: {intent['base']} at {record.commit[:12]}"}

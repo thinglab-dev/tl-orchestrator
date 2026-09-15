@@ -2,7 +2,7 @@ format_version: 1
 work_method: native
 active_work_ref: T028
 current_role: checker
-next_action: Executar revisão independente r01 via OpenAI Codex (gpt-5.6-terra/high) em fresh session report-only.
+next_action: Executar revisão independente r03 via OpenAI Codex (gpt-5.6-terra/high) em fresh session report-only.
 coordinator:
   harness: claude
   session: claude-code-b5b7f943

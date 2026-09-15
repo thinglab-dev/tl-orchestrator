@@ -33,7 +33,6 @@ import unittest
 
 from scripts.tl_merge_guard import (
     AUTHORIZATION_SIGNING_DOMAIN,
-    DEFAULT_TRUST_ROOT,
     DurableExternalAuthorityStore,
     InMemoryAuthorityStore,
     LocalLedgerAuthorityStore,
@@ -47,6 +46,13 @@ from scripts.tl_merge_guard import (
     parse_pr_comment_transport,
     sign_authorization_envelope,
     validate_post_review_delta,
+)
+from scripts.fixtures.runtime.fake_gh import (
+    TEST_FIXTURE_APP_ID,
+    TEST_FIXTURE_APP_SLUG,
+    TEST_FIXTURE_KEY_ID,
+    TEST_FIXTURE_PUBLIC_KEY,
+    TEST_FIXTURE_SECRET_KEY,
 )
 
 
@@ -79,13 +85,15 @@ def make_valid_claim(
 
 def make_envelope(
     claim: dict,
-    integration_id: int = 998811,
+    secret_key: bytes = TEST_FIXTURE_SECRET_KEY,
+    integration_id: int = TEST_FIXTURE_APP_ID,
     mechanism: str = "dedicated_github_app",
-    key_id: str = "key-tl-app-v1",
-    issuer: str = "thinglab-merge-authority[bot]",
+    key_id: str = TEST_FIXTURE_KEY_ID,
+    issuer: str = f"{TEST_FIXTURE_APP_SLUG}[bot]",
 ) -> dict:
     return sign_authorization_envelope(
         claim,
+        secret_key=secret_key,
         key_id=key_id,
         mechanism=mechanism,
         integration_id=integration_id,
@@ -93,7 +101,7 @@ def make_envelope(
     )
 
 
-def format_comment(envelope: dict, author_login: str = "thinglab-merge-authority[bot]") -> dict:
+def format_comment(envelope: dict, author_login: str = f"{TEST_FIXTURE_APP_SLUG}[bot]") -> dict:
     body = (
         "### Merge Authority Out-of-Band Attestation\n\n"
         "```json:tl-merge-authorization\n"
@@ -112,6 +120,17 @@ class MergeGuardBaseCase(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
+        self._orig_env = {
+            "TL_MERGE_AUTHORITY_APP_ID": os.environ.get("TL_MERGE_AUTHORITY_APP_ID"),
+            "TL_MERGE_AUTHORITY_APP_SLUG": os.environ.get("TL_MERGE_AUTHORITY_APP_SLUG"),
+            "TL_MERGE_AUTHORITY_PUBLIC_KEY": os.environ.get("TL_MERGE_AUTHORITY_PUBLIC_KEY"),
+            "TL_MERGE_AUTHORITY_KEY_ID": os.environ.get("TL_MERGE_AUTHORITY_KEY_ID"),
+        }
+        os.environ["TL_MERGE_AUTHORITY_APP_ID"] = str(TEST_FIXTURE_APP_ID)
+        os.environ["TL_MERGE_AUTHORITY_APP_SLUG"] = TEST_FIXTURE_APP_SLUG
+        os.environ["TL_MERGE_AUTHORITY_PUBLIC_KEY"] = TEST_FIXTURE_PUBLIC_KEY.hex()
+        os.environ["TL_MERGE_AUTHORITY_KEY_ID"] = TEST_FIXTURE_KEY_ID
+
         # Initialize a real Git repository in temp directory
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(self.root), check=True)
         subprocess.run(["git", "config", "user.name", "Test Runner"], cwd=str(self.root), check=True)
@@ -123,6 +142,11 @@ class MergeGuardBaseCase(unittest.TestCase):
         self.base_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(self.root), capture_output=True, text=True, check=True).stdout.strip()
 
     def tearDown(self):
+        for k, v in self._orig_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
         self.temp_dir.cleanup()
 
 
@@ -637,38 +661,255 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
         self.assertFalse(receipt.is_confirmed)
         self.assertEqual(receipt.reason, "missing_commit_bindings")
 
-    def test_probe_18_toctou_base_drift_detected_and_rejected(self):
+    def test_probe_18_toctou_base_drift_blocks_merge_execution(self):
         """
-        Probe 18: R4 Pre-merge TOCTOU base drift validation.
-        When baseRefOid advances between authority reservation and merge execution,
-        the TOCTOU check fails closed.
+        Probe 18: R4 Strict Pre-Merge TOCTOU Revalidation Runtime Integration Test.
+        Verifies that when baseRefOid drifts between authority evaluation (view 1)
+        and merge execution (view 2), the TOCTOU check blocks `gh pr merge` from
+        EVER being called and parks the unit with awaiting_operator.
+        """
+        from scripts.tests.test_tl_runtime import Fixture, CHECKER_OK, MAKER_OK
+        fx_dir = Path(self.temp_dir.name) / "rt_fx"
+        fx_dir.mkdir(parents=True, exist_ok=True)
+        fx = Fixture(fx_dir, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({
+            "checks_sequence": ["success"],
+            "toctou_base_drift": True,
+        }), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+
+        res = fx.run_cli("run")
+        self.assertNotEqual(res.returncode, 0)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("toctou_base_drift", record.reason)
+
+        gh_state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
+        calls = gh_state.get("calls", [])
+        # Verify that at least 2 view calls occurred (view 1 for authority evaluation, view 2 for TOCTOU revalidation)
+        view_calls = [c for c in calls if c[:2] == ["pr", "view"]]
+        self.assertGreaterEqual(len(view_calls), 2)
+        # Verify gh pr merge was NEVER executed
+        merge_calls = [c for c in calls if c[:2] == ["pr", "merge"]]
+        self.assertEqual(len(merge_calls), 0)
+
+    def test_probe_18b_toctou_missing_base_oid_blocks_merge_execution(self):
+        """
+        Probe 18b: R4 Missing baseRefOid on pre-merge view blocks merge execution.
+        Fails closed when baseRefOid is missing/empty on second view call.
+        """
+        from scripts.tests.test_tl_runtime import Fixture, CHECKER_OK, MAKER_OK
+        fx_dir = Path(self.temp_dir.name) / "rt_fx2"
+        fx_dir.mkdir(parents=True, exist_ok=True)
+        fx = Fixture(fx_dir, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({
+            "checks_sequence": ["success"],
+            "toctou_missing_base_oid": True,
+        }), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+
+        res = fx.run_cli("run")
+        self.assertNotEqual(res.returncode, 0)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("toctou_base_drift", record.reason)
+
+        gh_state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
+        calls = gh_state.get("calls", [])
+        merge_calls = [c for c in calls if c[:2] == ["pr", "merge"]]
+        self.assertEqual(len(merge_calls), 0)
+
+    def test_probe_19_fail_closed_schema_resolution_and_validation(self):
+        """
+        Probe 19: R1 Fail-closed schema resolution, missing validator, and invalid schema.
+        """
+        claim = make_valid_claim()
+        env = make_envelope(claim)
+        comment = format_comment(env)
+
+        # 19a: Missing schema file fails closed
+        status, envelopes = parse_pr_comment_transport(
+            comments=[comment],
+            expected_repo=claim["target_repository"],
+            pr_number=claim["target_pr"],
+            expected_head=claim["expected_head_sha"],
+            expected_base=claim["expected_base_sha"],
+            candidate_commit=claim["integration_candidate_commit"],
+            checker_commit=claim["checker_approved_commit"],
+            authority_mode=claim["authority_mode"],
+            schema_path=Path(self.temp_dir.name) / "nonexistent.schema.json",
+        )
+        self.assertTrue(status.startswith("FAIL_CLOSED: merge authorization schema file not found"))
+        self.assertEqual(envelopes, [])
+
+        # 19b: Unavailable validator fails closed
+        import scripts.tl_merge_guard as tmg
+        orig_val = tmg.validate_against_schema
+        try:
+            tmg.validate_against_schema = lambda data, schema_path: (False, ["FAIL_CLOSED: validator unavailable"])
+            status2, envs2 = parse_pr_comment_transport(
+                comments=[comment],
+                expected_repo=claim["target_repository"],
+                pr_number=claim["target_pr"],
+                expected_head=claim["expected_head_sha"],
+                expected_base=claim["expected_base_sha"],
+                candidate_commit=claim["integration_candidate_commit"],
+                checker_commit=claim["checker_approved_commit"],
+                authority_mode=claim["authority_mode"],
+            )
+            self.assertTrue(status2.startswith("FAIL_CLOSED: invalid_envelope_schema"))
+            self.assertIn("validator unavailable", status2)
+            self.assertEqual(envs2, [])
+        finally:
+            tmg.validate_against_schema = orig_val
+
+        # 19c: Envelope violating schema (missing required property nonce) fails closed
+        bad_claim = dict(claim)
+        del bad_claim["nonce"]
+        bad_env = make_envelope(bad_claim)
+        bad_comment = format_comment(bad_env)
+        status3, envs3 = parse_pr_comment_transport(
+            comments=[bad_comment],
+            expected_repo=claim["target_repository"],
+            pr_number=claim["target_pr"],
+            expected_head=claim["expected_head_sha"],
+            expected_base=claim["expected_base_sha"],
+            candidate_commit=claim["integration_candidate_commit"],
+            checker_commit=claim["checker_approved_commit"],
+            authority_mode=claim["authority_mode"],
+        )
+        self.assertTrue(status3.startswith("FAIL_CLOSED: invalid_envelope_schema"))
+        self.assertEqual(envs3, [])
+
+    def test_probe_20_zero_private_key_in_production_module(self):
+        """
+        Probe 20: R2 Elimination of Default/Embedded Private Key in Production.
+        Asserts that scripts.tl_merge_guard contains ZERO private keys, secret seeds,
+        or default signing keys. Signing requires an explicit secret_key: bytes.
+        """
+        import inspect
+        import scripts.tl_merge_guard as tmg
+
+        # Must NOT have DEFAULT_APP_SECRET_KEY or any secret key attribute
+        self.assertFalse(hasattr(tmg, "DEFAULT_APP_SECRET_KEY"))
+        self.assertFalse(hasattr(tmg, "DEFAULT_TRUST_ROOT"))
+        for attr in dir(tmg):
+            if attr.isupper():
+                self.assertNotIn("SECRET", attr)
+                self.assertNotIn("SEED", attr)
+
+        # Module source must not contain private seed literals
+        src = inspect.getsource(tmg)
+        self.assertNotIn("thinglab-merge-authority-default-seed", src)
+
+        # sign_authorization_envelope requires secret_key without default
+        claim = make_valid_claim()
+        with self.assertRaises((ValueError, TypeError)):
+            # Calling without secret_key or with None fails
+            tmg.sign_authorization_envelope(claim, None, "key-id")  # type: ignore[arg-type]
+
+        # TrustRoot() creates empty public keys when env is unset
+        empty_root = tmg.TrustRoot()
+        self.assertEqual(empty_root.trusted_public_keys, {})
+
+    def test_probe_21_strict_mode_validation_and_scope_binding(self):
+        """
+        Probe 21: R3 Strict Mode Validation, Fallback Elimination & Scope Binding.
+        Asserts that mismatched checker_approved_commit or authority_mode in envelope
+        are rejected, and missing authority_mode parks closed.
         """
         claim = make_valid_claim(
-            head_sha=self.base_sha,
-            base_sha=self.base_sha,
-            checker_commit=self.base_sha,
-            candidate_commit=self.base_sha,
+            checker_commit="a" * 40,
+            candidate_commit="a" * 40,
+            authority_mode="delegated_single_merge",
         )
         env = make_envelope(claim)
         comment = format_comment(env)
-        store = InMemoryAuthorityStore()
 
-        # Step 1: Authority evaluation passes for original base_sha
+        # 21a: Mismatched checker_approved_commit in envelope rejected
+        status, envs = parse_pr_comment_transport(
+            comments=[comment],
+            expected_repo=claim["target_repository"],
+            pr_number=claim["target_pr"],
+            expected_head=claim["expected_head_sha"],
+            expected_base=claim["expected_base_sha"],
+            candidate_commit=claim["integration_candidate_commit"],
+            checker_commit="b" * 40,  # Evaluator expects different checker commit
+            authority_mode="delegated_single_merge",
+        )
+        self.assertEqual(status, "missing_merge_authorization")
+        self.assertEqual(envs, [])
+
         receipt = MergeAuthorityGate.evaluate(
             repo_root=self.root,
             pr_number=claim["target_pr"],
-            live_pr_info={"state": "OPEN", "headRefOid": self.base_sha, "baseRefOid": self.base_sha},
-            checker_commit=self.base_sha,
-            candidate_commit=self.base_sha,
-            authority_store=store,
+            live_pr_info={"state": "OPEN", "headRefOid": "a" * 40, "baseRefOid": claim["expected_base_sha"]},
+            checker_commit="b" * 40,  # Mismatch
+            candidate_commit="a" * 40,
+            authority_store=InMemoryAuthorityStore(),
             expected_repo=claim["target_repository"],
             comments=[comment],
+            enforce_mode="delegated_single_merge",
         )
-        self.assertTrue(receipt.is_confirmed)
+        self.assertFalse(receipt.is_confirmed)
 
-        # Step 2: Now simulate base drift before gh pr merge
-        drifted_base_sha = "9" * 40
-        self.assertNotEqual(drifted_base_sha, receipt.base_sha)
+        # 21b: Mismatched authority_mode in envelope rejected
+        status2, envs2 = parse_pr_comment_transport(
+            comments=[comment],
+            expected_repo=claim["target_repository"],
+            pr_number=claim["target_pr"],
+            expected_head=claim["expected_head_sha"],
+            expected_base=claim["expected_base_sha"],
+            candidate_commit=claim["integration_candidate_commit"],
+            checker_commit="a" * 40,
+            authority_mode="human_merge_only",  # Evaluator expects human_merge_only
+        )
+        self.assertEqual(status2, "missing_merge_authorization")
+        self.assertEqual(envs2, [])
+
+        receipt2 = MergeAuthorityGate.evaluate(
+            repo_root=self.root,
+            pr_number=claim["target_pr"],
+            live_pr_info={"state": "OPEN", "headRefOid": "a" * 40, "baseRefOid": claim["expected_base_sha"]},
+            checker_commit="a" * 40,
+            candidate_commit="a" * 40,
+            authority_store=InMemoryAuthorityStore(),
+            expected_repo=claim["target_repository"],
+            comments=[comment],
+            enforce_mode="human_merge_only",
+        )
+        self.assertFalse(receipt2.is_confirmed)
+
+        # 21c: Runtime parks on missing authority_mode
+        import tl_runtime
+        from scripts.tests.test_tl_runtime import Fixture
+        fx_dir = Path(self.temp_dir.name) / "rt_no_mode"
+        fx_dir.mkdir(parents=True, exist_ok=True)
+        fx = Fixture(fx_dir, units=1, effects={"pull_request_merge": True})
+        fx.batch["authorization"]["authority_source"] = "production"
+        fx.batch["authorization"].pop("authority_mode", None)
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        fx.gh_state.write_text(json.dumps({
+            "prs": {
+                "head": {"number": 100, "state": "OPEN", "base": "main", "head_oid": "a" * 40}
+            }
+        }), encoding="utf-8")
+        old_gh_state = os.environ.get("TL_FAKE_GH_STATE")
+        os.environ["TL_FAKE_GH_STATE"] = str(fx.gh_state)
+        try:
+            rt = fx.runtime()
+            unit_obj = rt.units["T001"]
+            rt.fold.units["T001"] = tl_runtime.UnitRecord(id="T001", state="running", phase="merge", pr={"number": 100}, commit="a" * 40)
+            with self.assertRaises(tl_runtime.UnitPark) as ctx:
+                rt.deliver(unit_obj)
+            self.assertIn("missing_authority_mode", str(ctx.exception))
+        finally:
+            if old_gh_state is not None:
+                os.environ["TL_FAKE_GH_STATE"] = old_gh_state
+            else:
+                os.environ.pop("TL_FAKE_GH_STATE", None)
 
 
 if __name__ == "__main__":

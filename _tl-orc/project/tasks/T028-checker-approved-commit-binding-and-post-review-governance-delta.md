@@ -12,7 +12,7 @@ origin: instrução normativa do mantenedor em 2026-09-14 (ratificação B004) e
 decisions: []
 spec_author: orchestrator
 spec_revision: 765a1c3333c85d00
-rework_round: 1
+rework_round: 2
 affects_context: []
 effective_authors: [google]
 checker_independence: required

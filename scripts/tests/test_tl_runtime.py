@@ -547,9 +547,76 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(fx.runtime().run(), "done")
         fx.config["roles"]["maker"]["model"] = "m9"
         fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        fx.config["adapters"]["fake-maker"]["capabilities"]["network_sandbox"] = True
+        fx.config["adapters"]["fake-checker"]["capabilities"]["network_sandbox"] = True
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
         report = fx.run_cli("report").stdout
         self.assertIn("fake-maker / m1 / low", report)
         self.assertNotIn("m9", report)
+        self.assertIn("limitation: no network sandbox", report)
+
+    def test_secret_inside_a_binary_file_is_caught(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", [{"argv": [sys.executable, "-c", "open('pkg/blob.bin', 'wb').write(bytes([0, 1, 2, 255]) + b'AKIA" + "Q" * 16 + "')"]}])
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "stopped")
+        self.assertEqual(fx.fold().stop_reason, "secret_detected")
+
+    def test_gate_output_secret_is_redacted_from_packs(self) -> None:
+        leak = "AKIA" + "Q" * 16
+        fx = Fixture(self.root, units=1, max_rework=1, gates=[{"id": "leaky", "argv": [sys.executable, "-c", "import sys; print('token " + leak + "'); sys.exit(1)"]}])
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        fx.runtime().run()
+        pack = (fx.scenario / "maker-1.pack.md").read_text(encoding="utf-8")
+        self.assertIn("## gate_failures", pack)
+        self.assertNotIn(leak, pack)
+        self.assertIn("[REDACTED:", pack)
+
+    def test_operator_edit_after_review_is_never_committed(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_intent:commit").returncode, 70)
+        (fx.repo / "pkg" / "operator.py").write_text("mine = 1" + chr(10), encoding="utf-8")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("reviewed tree", record.reason)
+        self.assertEqual(git(fx.repo, "log", "--oneline", "tl/B001/T001").count(chr(10)), 0, "nothing was committed")
+        refs = git(fx.repo, "for-each-ref", "refs/tl", "--format=%(refname)").split()
+        kept = [ref for ref in refs if "pkg/operator.py" in git(fx.repo, "ls-tree", "-r", "--name-only", ref)]
+        self.assertTrue(kept, "the operator edit is preserved in a checkpoint ref, never committed nor lost")
+
+    def test_foreign_pr_on_the_branch_is_not_adopted(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True})
+        fx.gh_state.write_text(json.dumps({"prs": {"tl/B001/T001": {"number": 41, "url": "https://example.invalid/pr/41", "state": "MERGED", "mergedAt": "2025-01-01T00:00:00Z", "base": "main", "head_oid": "e" * 40}}}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "blocked")
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "parked")
+        self.assertIn("pull_request_failed", record.reason)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "create"] for c in calls))
+
+    def test_gate_leftovers_after_crash_are_not_committed(self) -> None:
+        fx = Fixture(self.root, units=1, gates=[{"id": "writer", "argv": [sys.executable, "-c", "open('pkg/artifact.txt', 'w').write('built')"]}])
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_effect:gate").returncode, 70)
+        self.assertTrue((fx.repo / "pkg" / "artifact.txt").exists(), "the crash left the gate artifact behind")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertNotIn("artifact.txt", git(fx.repo, "ls-tree", "-r", "--name-only", "main"))
+        self.assertEqual(git(fx.repo, "status", "--porcelain"), "")
+
+    def test_zero_model_call_budget_is_refused(self) -> None:
+        fx = Fixture(self.root, units=1, max_calls=0)
+        with self.assertRaises(tl_runtime.Refusal) as ctx:
+            fx.runtime()
+        self.assertIn("max_model_calls", str(ctx.exception))
 
     # ---- policy -----------------------------------------------------------------------------
 

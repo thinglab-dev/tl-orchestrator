@@ -214,6 +214,15 @@ def normalize_signature(*parts: str) -> str:
     return tl_ci_slice.signature(*parts)
 
 
+def redact_secrets(text: str) -> tuple[str, int]:
+    """Replace every secret-pattern match with a marker. Returns (text, replacements)."""
+    total = 0
+    for pattern in SECRET_PATTERNS:
+        text, n = pattern.subn("[REDACTED:" + pattern.pattern[:24] + "]", text)
+        total += n
+    return text, total
+
+
 def scan_secrets(text: str) -> list[str]:
     hits = []
     for pattern in SECRET_PATTERNS:
@@ -342,7 +351,8 @@ class Journal:
             if kind == "batch_open":
                 fold.runtime_stamp = event.get("runtime_stamp", "")
                 fold.base_branch = event.get("base_branch", "")
-                fold.meta = {"units": event.get("units_meta") or {}, "budget": event.get("budget") or {}, "roles": event.get("roles") or {}}
+                fold.meta = {"units": event.get("units_meta") or {}, "budget": event.get("budget") or {}, "roles": event.get("roles") or {},
+                             "capabilities": event.get("capabilities")}
                 for unit_id in event.get("units", []):
                     fold.units.setdefault(unit_id, UnitRecord(id=unit_id))
             elif kind == "step_intent":
@@ -582,6 +592,11 @@ def load_batch(path: Path) -> dict:
     units = scope.get("units")
     if not isinstance(units, list) or not units:
         raise Refusal("frozen_scope.units must be non-empty")
+    budget = batch["budget"]
+    if not isinstance(budget.get("max_model_calls"), int) or isinstance(budget.get("max_model_calls"), bool) or budget["max_model_calls"] < 1:
+        raise Refusal("budget.max_model_calls must be an integer >= 1")
+    if not isinstance(budget.get("max_rework_rounds_per_unit", 0), int) or budget.get("max_rework_rounds_per_unit", 0) < 0:
+        raise Refusal("budget.max_rework_rounds_per_unit must be an integer >= 0")
     if int(scope.get("batch_concurrency", 1)) != 1:
         raise Refusal("this runtime executes batch_concurrency = 1 only", 2)
     expected = frozen_scope_digest(scope)
@@ -795,7 +810,8 @@ class ContextCompiler:
         text = "\n\n".join(f"## {name}\n{body}" for name, body in sections)
         if len(text.encode("utf-8")) > self.max_bytes:
             text = text.encode("utf-8")[: self.max_bytes].decode("utf-8", "ignore") + "\n[pack truncated at max_pack_bytes]"
-        pack_manifest = {"role": role, "unit": unit.id, "phase": phase, "sections": manifest, "bytes": len(text.encode("utf-8")), "digest": sha256_text(text)}
+        text, redactions = redact_secrets(text)
+        pack_manifest = {"role": role, "unit": unit.id, "phase": phase, "sections": manifest, "bytes": len(text.encode("utf-8")), "digest": sha256_text(text), "redactions": redactions}
         return text, pack_manifest
 
 
@@ -1351,8 +1367,14 @@ class Runtime:
         states = {uid: self.fold.units.get(uid, UnitRecord(id=uid)).state for uid in self.units}
         if all(s == "completed" for s in states.values()):
             failures = []
+            head_tree = self.git.run("rev-parse", "HEAD^{tree}")
+            if self.git.worktree_tree() != head_tree:
+                self.restore(head_tree, "canonical gates: leftovers discarded", "")
             for gate in self.config["gates"]["canonical"]:
                 tree = self.git.worktree_tree()
+                if tree != head_tree:
+                    self.restore(head_tree, "canonical gate leftovers discarded", "")
+                    tree = head_tree
                 outcome = self.step(f"gate:canonical:{gate['id']}:{tree}", "none", "", "close", {"type": "gate", "gate": gate["id"], "tree": tree, "argv": [str(a) for a in gate["argv"]]},
                                     lambda intent, g=gate: run_gate(g, self.repo, self.policy.worker_env(), int(self.limits["gate_output_bytes"]), {"repo": self.repo.as_posix(), "tree": tree}))
                 if not outcome.get("passed"):
@@ -1534,7 +1556,7 @@ class Runtime:
             result = load_result(self.repo / result_rel, "unit_result")
             klass, signature, detail = classify_dispatch(dispatch, result, "unit_result")
             return {"_status": "released" if dispatch.get("state") in NO_DISPATCH_STATES else "ok","dispatch": {k: v for k, v in dispatch.items() if k != "receipt"} | {"receipt_state": (dispatch.get("receipt") or {}).get("state")},
-                    "result": result, "usage": dispatch.get("usage"), "class": klass, "signature": signature, "detail": detail,
+                    "result": result, "usage": dispatch.get("usage"), "class": klass, "signature": signature, "detail": detail, "tree": self.git.worktree_tree(),
                     "_evidence": [self.artifact(f"{step_id}.pack.manifest.json", canonical(manifest))]}
 
         outcome = self.step(step_id, "model_call", uid, "implement", {"type": "maker", "round": round_no, "pack_digest": manifest["digest"], "step": step_id}, do)
@@ -1557,7 +1579,15 @@ class Runtime:
         diff, truncated = self.git.diff_text(base_commit, 1 << 31)
         if truncated:
             raise StopBatch("unexpected_tree_state", "diff too large to scan for secrets")
-        klass, detail = self.policy.check_containment(unit, dirty, diff)
+        raw = []
+        for path in dirty:
+            file_path = self.repo / path
+            if file_path.is_file():
+                try:
+                    raw.append(file_path.read_bytes().decode("latin-1"))
+                except OSError as exc:
+                    raise StopBatch("unexpected_tree_state", f"cannot read {path} for the secret scan: {exc}")
+        klass, detail = self.policy.check_containment(unit, dirty, diff + "\n" + "\n".join(raw))
         intent_tree = ""
         for event in self.journal.read()[0]:
             if event.get("kind") == "step_intent" and str(event.get("step_id", "")).startswith(f"{uid}:r{round_no}:maker"):
@@ -1582,7 +1612,17 @@ class Runtime:
     def gates(self, unit: Unit, round_no: int) -> list[dict]:
         uid = unit.id
         failures = []
+        expected = ""
+        for step_id, step in self.fold.steps.items():
+            if step_id.startswith(f"{uid}:r{round_no}:maker") and step.get("status") == "ok":
+                expected = (step.get("result") or {}).get("tree") or ""
         tree = self.git.worktree_tree()
+        if expected and tree != expected:
+            # A crash between a gate's effect and its result leaves the gate's files behind; the
+            # tree under verification is the Maker's, so it is restored before any gate runs.
+            self.restore(expected, f"{uid}: tree drifted after the Maker (gate leftovers)", uid)
+            self.note(f"{uid}: tree restored to the Maker's tree before gates")
+            tree = self.git.worktree_tree()
         record = self.fold.units[uid]
         values = {"repo": self.repo.as_posix(), "unit": uid, "branch": record.branch, "base_commit": record.base_commit, "tree": tree}
         for gate in gates_for(self.config, unit):
@@ -1744,6 +1784,9 @@ class Runtime:
         # commit
         if record.phase in {"commit", "implement", "review", "gates", "contain"}:
             tree = self.git.worktree_tree()
+            if record.tree and tree != record.tree:
+                raise UnitPark("awaiting_operator", f"working tree {tree[:12]} differs from the reviewed tree {record.tree[:12]}; nothing committed",
+                               decision={"options": ["retry", "skip"]})
             message = f"{uid}: {unit.title}\n\nbatch: {self.batch_id}\nspec_revision: {unit.spec_revision}\ntree: {tree}"
 
             def commit(intent: dict) -> dict:
@@ -1787,8 +1830,8 @@ class Runtime:
                         return {"_status": "failed", "detail": "gh pr list failed before create"}
                     if rows:
                         row = rows[0]
-                        if row.get("baseRefName") != base:
-                            return {"_status": "failed", "detail": f"pull request {row.get('number')} exists against base {row.get('baseRefName')}, not {base}"}
+                        if row.get("baseRefName") != base or row.get("headRefOid") != record.commit:
+                            return {"_status": "failed", "detail": f"pull request {row.get('number')} exists for this branch with base {row.get('baseRefName')} at head {str(row.get('headRefOid'))[:12]}, not {base} at {record.commit[:12]}"}
                         return {"url": row.get("url"), "number": row.get("number"), "existing": True}
                     body = f"Batch {self.batch_id}, unit {uid}. Spec {unit.spec_path.relative_to(self.repo).as_posix()} @ {unit.spec_revision}.\n\nGenerated by tl_runtime {RUNTIME_VERSION}."
                     out = run_argv([*self.config["gh_argv"], "pr", "create", "--head", record.branch, "--base", base, "--title", title, "--body", body], self.repo, 300)
@@ -1997,7 +2040,7 @@ class Runtime:
             if rows:
                 row = rows[0]
                 expected_head = payload.get("commit") or self.git.rev(payload.get("branch", "")) or ""
-                if row.get("baseRefName") != payload.get("base") or (row.get("headRefOid") and row.get("headRefOid") != expected_head):
+                if row.get("baseRefName") != payload.get("base") or not row.get("headRefOid") or row.get("headRefOid") != expected_head:
                     return "ambiguous", {"detail": f"pull request {row.get('number')} exists but base/head differ from the journaled intent"}
                 return "ok", {"url": row.get("url"), "number": row.get("number"), "detail": "pull request already exists"}
             return "released", {"detail": "no pull request for branch; create will run"}
@@ -2010,7 +2053,7 @@ class Runtime:
             if view is None:
                 return "ambiguous", {"detail": "gh pr view failed: " + out["stderr"][-200:]}
             if str(view.get("state", "")).upper() == "MERGED" or view.get("mergedAt"):
-                if payload.get("commit") and view.get("headRefOid") and view.get("headRefOid") != payload.get("commit"):
+                if payload.get("commit") and view.get("headRefOid") != payload.get("commit"):
                     return "ambiguous", {"detail": f"pull request merged at head {str(view.get('headRefOid'))[:12]}, not the reviewed commit {str(payload.get('commit'))[:12]}"}
                 return "ok", {"merged": True, "detail": "pull request already merged"}
             return "released", {"detail": "pull request open; merge will run"}
@@ -2169,7 +2212,8 @@ def render_report(runtime: "Runtime") -> str:
         nxt.append("- batch closed; the runtime never opens another batch")
     else:
         nxt.append(f"- batch {fold.batch_state}: {fold.stop_reason}; a new authorization is needed to continue")
-    caps = [c for c in runtime.policy.capabilities_report() if not c.get("network_sandbox")]
+    journaled = (fold.meta or {}).get("capabilities")
+    caps = [c for c in (journaled if journaled is not None else runtime.policy.capabilities_report()) if not c.get("network_sandbox")]
     if caps:
         nxt.append("- limitation: no network sandbox for adapter(s) " + ", ".join(c["adapter"] for c in caps))
     section("What Happens Next", nxt)

@@ -74,12 +74,18 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   portão inclui o `argv`; log e rerun de CI filtrados pelo commit revisado; títulos,
   orçamento e modelos do relatório vêm do `batch_open`; `max_cost_usd: 0` é teto válido;
   `merge --abort` nunca roda sobre um merge que o runtime não iniciou.
+- Revisão independente r4: varredura de segredo também nos bytes de cada arquivo alterado
+  (binário incluso); todo pack é redigido pelos mesmos padrões (saída de portão e fatia de CI
+  inclusas); commit só sobre a árvore exatamente aprovada pelo Checker; PR adotado ou
+  reconciliado só com `headRefOid` exato; portões sempre rodam sobre a árvore do Maker
+  gravada no step (resto de portão após crash nunca chega ao commit); `max_model_calls`
+  precisa ser inteiro ≥ 1; capacidades do relatório vêm do `batch_open`.
 - Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
   `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
 
 ### Validação
 
-- `scripts/tests/test_tl_runtime.py` (66 testes, Git real, harness e `gh` scriptados):
+- `scripts/tests/test_tl_runtime.py` (72 testes, Git real, harness e `gh` scriptados):
   DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
   oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
   segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec

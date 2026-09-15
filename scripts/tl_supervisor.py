@@ -12,6 +12,7 @@ import json
 import math
 import os
 import posixpath
+import re
 import subprocess
 import tempfile
 import time
@@ -28,6 +29,7 @@ except ImportError:  # Imported as scripts.tl_supervisor from the repository roo
 LOCK_TIMEOUT_SECONDS = 10.0
 LOCK_RETRY_SECONDS = 0.01
 MERGE_FINALIZE_LOCK_GRACE_SECONDS = 30.0
+BOARD_ENTRY_PATTERN = re.compile(r"^[ \t]*([^\W_][\w.-]*)[ \t]*:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
 
 
 class _FileLock:
@@ -114,7 +116,8 @@ def _valid_story_id(story_id: object) -> bool:
         return False
     if story_id in {".", ".."}:
         return False
-    return all(character.isascii() and (character.isalnum() or character in "-_.") for character in story_id)
+    match = BOARD_ENTRY_PATTERN.fullmatch(f"{story_id}: value")
+    return match is not None and match.group(1) == story_id
 
 
 def _run_git(arguments: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:

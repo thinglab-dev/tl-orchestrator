@@ -50,6 +50,21 @@ unidade sem conversa de acompanhamento está no
 [protocolo de execução](../docs/EXECUTION_PROTOCOL.md): a unidade padrão de topo é a story inteira
 com sua cadeia autorizada, e os recibos de Maker, portões e Checker ficam internos ao condutor. Job
 por papel é opcional e quebrar a story em microjobs não autoriza turnos de acompanhamento.
+Depois do despacho em segundo plano, espere a notificação terminal sem polling, leitura parcial da
+saída ou checagens de progresso. Por parada, admita do `result.json` somente `blocking` e `reason`.
+Não envie mensagens de status entre passos triviais. Diagnóstico que exija ler código do condutor é
+uma unidade de manutenção ou uma sessão nova, não investigação dentro da conversa do Orquestrador.
+Acima de aproximadamente 120 mil tokens de contexto, escreva um handoff curto em arquivo e
+recomende continuar em sessão nova.
+
+Quatro ferramentas de escopo de usuário automatizam parte desta admissão sem mudar o critério:
+rtk condensa a saída de comandos Bash antes de entrar no contexto; headroom comprime, em modo
+`cache`, resultados de ferramenta já admitidos no histórico das sessões CLI e deixa um marcador
+`<<ccr:...>>` recuperável; ponytail reduz o código escrito ao mínimo que cumpre a spec; caveman
+encurta a prosa. O hook de sessão reporta `tl-tools: ...` no início de cada sessão; quando a
+linha faltar ou trouxer `INATIVO`, a correção é `python scripts/tl_tools.py doctor --fix`, não
+uma conversa de diagnóstico. Política, limites e medições estão em
+[ferramentas de economia](../docs/TOKEN_TOOLS.md).
 
 ### Leitura seletiva por seção (Selective Retrieval)
 
@@ -76,6 +91,15 @@ payload compacto.
 Na retomada de sessões e passagens de bastão, utilize o gerador do manifesto de retomada
 (`scripts/resume_generate.py`) para inspecionar integridade de fontes congeladas e compor o contexto
 resolvido da fase conforme `docs/CONTEXT_POLICY.md`.
+
+Para exploração ambígua de dependências/assinaturas num consumidor onde o usuário já ativou o
+acelerador local (ver [`docs/GRAFT.md`](../docs/GRAFT.md)), Planner e Maker podem consultar o
+helper antes de reabrir vários arquivos — localizando-o onde o pacote foi instalado (tipicamente
+`_tl-orc/package/scripts/tl_graft.py`) e passando o projeto em `--target`, com aspas em caminhos
+com espaços: `python "<pacote>/scripts/tl_graft.py" --target "<projeto>" --json query --mode ask
+--arg "..."`. Quando o caminho exato já é conhecido, leem direto. Consulta vazia, com erro, timeout ou grafo desatualizado não significa
+ausência de código: use `rg`/leitura direta como sempre. O mapa é dado derivado, nunca autoridade
+de requisito ou revisão, e ativá-lo não é pré-requisito de nenhum papel.
 
 ## Searcher sob demanda
 
@@ -179,7 +203,7 @@ execute primeiro a sincronização exigida pela política local e use somente o 
 
 Para a story escolhida, obtenha ou revalide a classificação da **fase atual** para somente os
 papéis necessários, seguindo os [perfis](orchestrator-perfis.md#classificar-e-resolver). O
-Classificador seleciona modelo e effort por papel/harness; Planner audita ou esclarece a spec aplicando a disciplina de endurecimento (`tl-spec-hardener`), Maker implementa e prova — aplicando a diretriz de design profissional (`tl-impeccable-design`) quando houver escopo de UI —, e Checker revisa sob as 4 lentes estritas (`tl-deep-review`) em nova sessão. Toda mudança de fase reclassifica os
+Classificador seleciona modelo e effort por papel/harness; Planner audita ou esclarece a spec aplicando a disciplina de endurecimento (`tl-spec-hardener`), Maker implementa e prova — usando perfil de UI somente quando a spec o selecionar explicitamente —, e Checker revisa sob as 4 lentes estritas (`tl-deep-review`) em nova sessão. Toda mudança de fase reclassifica os
 papéis requeridos. Indisponibilidade comprovada permite avançar na cadeia autorizada sem mudar a
 classificação; cadeia esgotada ou ambiguidade não resolvida bloqueia a fila. Revalide a
 independência do Checker após a escolha efetiva do Maker. Preserve um escritor por árvore.

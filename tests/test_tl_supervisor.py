@@ -442,6 +442,21 @@ class StatusBoardTest(SupervisorCase):
         self.assertEqual(result["state"], "task_not_found")
         self.assertEqual(status.read_bytes(), before)
 
+    def test_unicode_task_id_is_accepted_without_loosening_board_key_rules(self):
+        status = self.root / "STATUS.md"
+        status.write_text(
+            "## Tasks\n"
+            "| id | type | deliverable | status | depends_on | blocked_by | state_revision | last_evidence |\n"
+            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+            "| 14-2-navegação | feat | package | in-progress | [] | [] | 0 | - |\n",
+            encoding="utf-8",
+        )
+        result = tl_supervisor.update_task_status_atomic(status, "14-2-navegação", "done", 0)
+        self.assertEqual(result["state"], "updated")
+        self.assertIn("| 14-2-navegação | feat | package | done |", status.read_text(encoding="utf-8"))
+        for invalid in ("_privada", "#comentário", "chave com espaço", '"aspas"', "a:b", ""):
+            self.assertFalse(tl_supervisor._valid_story_id(invalid), invalid)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,137 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   - Guarda explícita T016 nos contratos e templates do Maker (`prompts/maker.md`, `prompts/orchestrator-playbook.md`) instruindo testes direcionados (*targeted verification*) em etapas intermediárias intragrupo e vedando a invocação de portões canônicos completos do sistema em ambiente sandbox sem permissão de sockets/rede.
   - Suíte contratual determinística em `scripts/tests/test_automatic_mode.py` cobrindo linha reta (4 chamadas), retry de classificador (5 chamadas), falha pré-despacho (0 chamadas) e despacho ambíguo (1 chamada com STOP conservador).
 
+## [0.16.0] - 2026-09-15
+
+### Adicionado
+
+- Acelerador de contexto opcional Graft (`scripts/tl_graft.py`, [`docs/GRAFT.md`](docs/GRAFT.md)):
+  ativa sob pedido em linguagem natural, instala uma versão pinada e verificada
+  (`@nanonets/graft@0.18.0`) num cache isolado por worktree, e gera um mapa estrutural do
+  código sem IA e sem chave. Nunca executa `graft init`, nunca toca `AGENTS.md`, `CLAUDE.md`,
+  `GEMINI.md`, `.claude/` ou configuração global de agente, e desativa a telemetria upstream
+  (`DO_NOT_TRACK=1`) em todo subprocesso que inicia.
+- `setup`/`status`/`query`/`disable` cobrem instalação/atualização de mapa, checagem de
+  atualidade, consulta (`ask`/`grep`/`skeleton`/`callers`/`map`) e remoção local; ausência de
+  Node/npm, erro, timeout, saída vazia ou mapa desatualizado nunca bloqueiam a tarefa nem são
+  tratados como ausência de código — o agente cai de volta para `rg`/leitura direta.
+- Contenção do cache no consumidor: o diretório `.tl-orc-graft-cache/` se auto-exclui por
+  inteiro (`.gitignore`/`.ignore` próprios com `*`), escrito antes da instalação e preservado
+  mesmo quando ela falha; os arquivos de ignore do projeto não são lidos nem alterados
+  (`GRAFT_NO_GITIGNORE`/`GRAFT_NO_IGNORE` no subprocesso).
+- Isolamento do subprocesso: chaves e configuração herdadas do ambiente são removidas, o
+  carregador de `.env` do Graft aponta para um arquivo inexistente e `HOME`/`USERPROFILE` vão
+  para dentro do cache com um registro de checagem semeado — o `~/.graft` real não é escrito e
+  a consulta em segundo plano ao registro npm não é disparada.
+- Recusas em vez de dano: layout de pasta-guarda-chuva sem Git com vários repositórios
+  (evitando builds dentro dos filhos), cache redirecionado por symlink/junção e cache de outro
+  dono são recusados com fallback, sem chamar o CLI e sem remover nada.
+- Contenção do subprocesso e da remoção: timeout e excesso de saída encerram o grupo de
+  processos inteiro no POSIX — inclusive descendentes que sobrevivem ao líder — e a saída só é
+  devolvida após terminar a drenagem dos pipes; o registro local de atualização só é escrito
+  depois de validar todo o caminho (`home/.graft/`) contra links/junções; o CLI é recusado se
+  `no-dotenv.env` existir, em vez de deixar o `dotenv` do upstream recarregar chaves; e uma
+  remoção parcial preserva os arquivos de ignore e o selo, mantendo o que sobrou ignorado e
+  permitindo concluir a desativação numa segunda tentativa. Os links legítimos que o npm cria
+  em `node_modules/.bin` são removidos sem serem seguidos.
+- Resposta de consulta só é considerada boa após checagem de frescor do grafo; grafo
+  desatualizado, saída degradada por contenção de lock, vazia ou ilegível viram fallback
+  explícito.
+- Integração mínima em `SKILL.md`, `prompts/orchestrator-playbook.md` e
+  `docs/PROJECT_CONFIGURATION.md` apontando para o guia, sem tornar a ativação pré-requisito do
+  método nem dar ao mapa autoridade de requisito ou revisão.
+
+### Validação
+
+- Testes offline (`scripts/tests/test_tl_graft.py`) cobrindo, além dos caminhos de fallback
+  (Node/npm ausente, erro/timeout de instalação e build, caminho com espaços e acentos, grafo
+  desatualizado, truncamento de saída): exclusão do cache verificada com `git status`/`git
+  check-ignore` em repositório real, recusa de junção/symlink e de cache alheio sem tocar nos
+  arquivos apontados, recusa do layout multi-repositório provando que nenhum filho foi escrito,
+  captura limitada e timeout de subprocessos reais com os dois fluxos cheios e UTF-8 parcial,
+  ambiente do subprocesso sem chaves-sentinela, e saída JSON em UTF-8 a partir de um processo
+  real sem `PYTHONIOENCODING`.
+- Prova real local com o CLI oficial (sem mocks) em fixture Go+Python: `setup`, os 5 modos de
+  `query`, `status` e `disable` executados com sucesso, inclusive em caminho com espaços;
+  telemetria confirmada suprimida com `DO_NOT_TRACK=1` (evento `build_completed` deixa de ser
+  enfileirado). Detalhes e comandos em `.tmp/graft-verification.md`.
+- Pacote canônico da distribuição passa de 42 para 44 arquivos (Graft).
+
+## [0.15.0] - 2026-09-15
+
+### Adicionado
+
+- Contratos opt-in e CLIs stdlib para prova de comportamento recuperável, avaliação pareada de
+  perfis, registro de ambiguidades ligado ao digest da spec, preflight somente leitura e reuso
+  fail-closed de gates. Browser/Reticle/Playwright continuam adaptadores externos e explícitos.
+- Perfil limitado de conhecimento com proveniência, hash, autoria e licença; referências a UI,
+  acessibilidade, erros, Chisle, Anti-Slop, FWC e 3D são selecionadas pelo consumidor, não
+  carregadas globalmente.
+
+### Corrigido
+
+- A camada opt-in de qualidade distribui `extract_tool_result.py`, `context_ledger.py`,
+  `context_lib.py` e a fixture de tarefas (42 arquivos), integra seus portões ao protocolo e exige
+  identidades, recibos recuperáveis, métricas brutas e limites de perfil/cache fail-closed.
+
+### Migração
+
+- Atualize a cópia verificada para os 42 arquivos. A camada nova fica inativa até a seleção de um
+  perfil; para rollback, desative o perfil e restaure a cópia anterior. Não há alegação de economia
+  local, e evidência sem identidade compatível ou expirada não é reutilizável.
+- `extract_tool_result.py`, `context_ledger.py` e `context_lib.py` são validados em Linux/CI.
+  No Windows, a baseline mantém 3 falhas e 7 erros em `test_context_ledger` e
+  `test_resume_generate`; suporte desses helpers não está validado nessa plataforma.
+
+## [0.14.0] - 2026-09-14
+
+### Adicionado
+
+- Ferramentas de economia de tokens em escopo de usuário, ativas em todo projeto sem lembrete:
+  `scripts/tl_tools.py` instala, verifica (`status`, `doctor --fix`), liga, desliga e mantém rtk
+  (hook de reescrita de Bash no Claude Code; instrução global no Codex), headroom (proxy local em
+  modo `cache` para as sessões CLI do Claude), ponytail (plugin, `full`) e caveman (plugin,
+  `lite`), com um hook `SessionStart` que garante o proxy e reporta `tl-tools: ...`.
+- Política, limites conhecidos e medições dessas ferramentas em `docs/TOKEN_TOOLS.md`; SKILL.md,
+  Maker, Checker e playbook passam a tratar saída condensada, marcadores `<<ccr:...>>` e solução
+  mínima como comportamento esperado, sem afrouxar a prova.
+- Pacote canônico da distribuição passa de 24 para 26 arquivos (`docs/TOKEN_TOOLS.md` e
+  `scripts/tl_tools.py`).
+
+## [0.13.0] - 2026-09-14
+
+### Adicionado
+
+- Contrato de verificação humana adiada: specs podem declarar inspeções humanas `deferred` com
+  responsável, procedimento e resultado esperado; Checker e Orquestrador preservam a pendência sem
+  convertê-la em `intent_gap` ou bloqueio, sem permitir que prova automatizável ou falha conhecida
+  seja ocultada.
+- Regra do dono em destaque e orçamento verificável de contexto: o Orquestrador não edita nem
+  diagnostica o consumidor sem permissão manual explícita e delimitada, não faz polling nem lê saída
+  parcial, admite somente `blocking` e `reason` por parada, separa manutenção do condutor, agrupa
+  comandos e recomenda handoff em sessão nova acima de aproximadamente 120 mil tokens.
+- Versão corrente explícita e validada entre `distribution-manifest.json`, `README.md` e `SKILL.md`.
+
+### Corrigido
+
+- IDs de board com letras Unicode passam pelos mesmos limites estruturais dos IDs ASCII no
+  supervisor, cobrindo chaves acentuadas sem aceitar espaço, `_` inicial, comentário, aspas ou `:`.
+- Planner e Maker agora usam portões na forma literal da allowlist; recusa de comando oficial é
+  registrada no summary sem loop de variantes, pois a execução autoritativa dos portões é do
+  condutor.
+- Documentada a recuperação de `advance` após checkpoint invalidado (`stop` e nova execução da
+  story) e a precedência do git-dir do worktree sobre o common-dir ao localizar `state.json`.
+
+### Migração
+
+- A verificação humana adiada é opt-in na spec e usa o array `deferred` já existente no schema de
+  revisão; não há conversão automática de `intent_gap` legado. Consumidores devem atualizar os
+  contratos carregados para obter a nova semântica.
+
+### Validação
+
+- No Windows com Python 3.13, `test_context_ledger` e `test_resume_generate` preservam as mesmas 3
+  falhas e 7 erros da tag v0.12.0; a matriz autoritativa da CI continua em `ubuntu-latest`.
 
 ## [0.12.0] - 2026-09-14
 
@@ -716,3 +847,7 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 [0.2.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.1.5...v0.2.0
 [0.11.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.10.0...v0.11.0
 [0.12.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.11.0...v0.12.0
+[0.13.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.12.0...v0.13.0
+[0.14.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.13.0...v0.14.0
+[0.15.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.14.0...v0.15.0
+[0.16.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.15.0...v0.16.0

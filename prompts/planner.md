@@ -25,6 +25,16 @@ A spec deve permitir ao Maker e ao Checker responder:
 - Que critérios observáveis definem o aceite e que provas os discriminam?
 - Quais portões existentes se aplicam e onde executá-los?
 
+Uma verificação que exige julgamento visual ou outra ação humana pode ser declarada explicitamente
+como `deferred`. A spec identifica responsável humano, procedimento, resultado esperado e onde a
+pendência será registrada. Isso não reduz critérios automatizáveis nem transforma falha conhecida em
+adiamento; torna a inspeção humana uma pendência não bloqueante, salvo regra do consumidor que a
+declare obrigatória antes da entrega.
+
+Ao copiar portões de uma allowlist, use o comando simples na forma literal permitida, no diretório
+de trabalho já definido pelo briefing. Não acrescente `cd`, `&&`, wrapper, variante com `.exe` ou
+caminho absoluto que não conste exatamente da allowlist. Os portões oficiais pertencem ao condutor.
+
 ## Planejamento blindado e endurecimento da spec
 
 Aplique rigorosamente as disciplinas de endurecimento de especificação (`tl-spec-hardener`):

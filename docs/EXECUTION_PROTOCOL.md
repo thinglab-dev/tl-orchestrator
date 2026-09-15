@@ -9,6 +9,23 @@ O protocolo é documental: vale com ou sem automação. O [supervisor opcional](
 apenas transporta uma execução já autorizada; ele não escolhe modelo, não inventa comando e não
 aprova entrega.
 
+## Orçamento de contexto do Orquestrador
+
+O custo dominante pode ser a quantidade de requisições que reenvia um contexto grande, não uma
+leitura isolada. Por isso estas regras são verificáveis:
+
+- dispare o processo em segundo plano uma vez e espere sua notificação de fim, sem polling, leitura
+  parcial de saída ou checagens de progresso;
+- por parada, leia do `result.json` somente `blocking` e `reason`;
+- diagnóstico que exija código do condutor vira unidade de manutenção ou sessão nova, nunca leitura
+  exploratória na conversa do Orquestrador;
+- não envie mensagens de status entre passos triviais e agrupe comandos independentes numa chamada;
+- acima de aproximadamente 120 mil tokens de contexto, grave um handoff curto em arquivo e
+  recomende sessão nova.
+
+Essas regras também delimitam ownership: salvo permissão manual explícita e específica, o
+Orquestrador não edita nem diagnostica o consumidor; despacha trabalho e lê recibos.
+
 ## Unidade de execução
 
 Uma **unidade** (`unit`) é um despacho com começo, critério de aceite e resultado terminal únicos.
@@ -46,9 +63,40 @@ O envelope de despacho declara, em texto ou em arquivo:
 | `scope_paths` | caminhos que o papel pode escrever |
 | `references` | leituras obrigatórias por caminho e hash, não por transcrição |
 | `result_file` | caminho relativo do JSON final que o papel escreve ao terminar; não existe antes da unidade começar |
+| `workflow_quality` | objeto opcional que ativa os contratos de qualidade descritos abaixo |
 
 Referência é por caminho e hash. Não cole conteúdo de arquivo, log ou transcrição no envelope
 quando o destinatário puder abrir o caminho; o hash é o que prende o parecer ao conteúdo revisado.
+
+`workflow_quality` ausente desativa essa camada. Quando presente, ele é um objeto com os caminhos
+relativos obrigatórios `profile`, `register`, `spec` e `acceptance`. `proof`, se declarado, é um
+objeto com `path`, `code_id` e `fixture_id` correntes. `gate_reuse`, se declarado, é um objeto com
+`prior_proof`, `current_identity`, `receipt` e `expected_receipt_sha256`; este último é o digest
+SHA-256 de 64 hexadecimais minúsculos que o condutor fornece, não um valor calculado pelo papel.
+Parâmetro obrigatório ausente, caminho fora da raiz declarada, identidade vazia ou digest inválido
+bloqueiam o despacho afetado.
+
+```json
+{
+  "workflow_quality": {
+    "profile": "evidence/ui-profile.json",
+    "register": "evidence/ambiguities.json",
+    "spec": "specs/story.md",
+    "acceptance": "evidence/acceptance.json",
+    "proof": {
+      "path": "evidence/runtime-proof.json",
+      "code_id": "commit-abc123",
+      "fixture_id": "checkout-flow-r3"
+    },
+    "gate_reuse": {
+      "prior_proof": "evidence/prior-gate.json",
+      "current_identity": "evidence/current-gate.json",
+      "receipt": "evidence/gate-receipt.json",
+      "expected_receipt_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  }
+}
+```
 
 ## Resultado da unidade
 
@@ -90,6 +138,23 @@ escrita. Resumo de conversa não é fonte de estado por padrão: ele descreve o 
 existe no disco. Divergência entre checkpoint e árvore é ponto de parada, não detalhe a conciliar em
 silêncio.
 
+Quando o envelope ativa `workflow_quality` explicitamente, antes do despacho rode os contratos opt-in abaixo. Sem essa ativação eles não são inferidos. Qualquer falha para o despacho afetado bloqueia fechado, sem declarar entrega.
+
+Use somente estes vínculos do envelope: `$profile` = `workflow_quality.profile`, `$register` =
+`workflow_quality.register`, `$spec` = `workflow_quality.spec`, `$acceptance` =
+`workflow_quality.acceptance`; se houver prova, `$proof`, `$current_code_id` e
+`$current_fixture_id` vêm respectivamente de `workflow_quality.proof.path`, `.code_id` e
+`.fixture_id`. Para reuso, `$prior_proof`, `$current_identity`, `$receipt` e
+`$trusted_receipt_sha256` vêm de `workflow_quality.gate_reuse`; o digest permanece fornecido pelo
+condutor.
+
+```sh
+python3 scripts/preflight_workflow.py --profile "$profile"
+python3 scripts/validate_ambiguities.py --register "$register" --spec "$spec" --acceptance "$acceptance"
+```
+
+O segundo comando roda antes do Maker. Se o envelope declarar uma prova de runtime, o condutor também roda, antes da entrega, `python3 scripts/validate_runtime_proof.py --proof "$proof" --code-id "$current_code_id" --fixture-id "$current_fixture_id"`; `--allow-interface` é necessário somente para a prova de interface declarada. Critério obrigatório não pode ser marcado `deferred` nem aprovado sem runner atual e evidência recuperável corrente. Para reuso opt-in de gate, rode `python3 scripts/validate_gate_reuse.py --proof "$prior_proof" --current "$current_identity" --receipt "$receipt" --receipt-sha256 "$trusted_receipt_sha256"`; falta de recibo, versão ou fingerprint força nova execução.
+
 ## Cadeia de execução
 
 No condutor do consumidor, a cadeia autorizada é:
@@ -110,6 +175,11 @@ No condutor do consumidor, a cadeia autorizada é:
    - **amostra crítica dirigida** — leia na árvore o trecho de que o aceite depende, escolhido pelo
      risco, e a fonte de uma prova. Para sondagem independente, despache um verificador próprio.
 6. **Entrega** conforme a autoridade existente.
+
+Verificação visual ou outra ação humana marcada pela spec como `deferred`, com responsável,
+procedimento e resultado esperado, é preservada no parecer e na evidência como pendência
+não bloqueante. Ela não vira `intent_gap` nem interrompe o condutor, salvo se a política do consumidor
+a exigir antes da entrega. O rótulo não serve para adiar prova automatizável ou encobrir falha.
 
 Não peça o parecer integral de volta ao contexto do condutor: o Checker entrega veredito, achados e
 caminho do relatório; o corpo do relatório e o diff ficam no disco. Reproduzir o diff inteiro no
@@ -132,6 +202,17 @@ Sem um callback comprovado no ambiente, não prometa retomada autônoma depois q
 processo local continua até terminar e grava seu resultado no disco, mas quem lê esse resultado é a
 próxima ativação. Uma tarefa agendada do harness pode iniciar essa ativação quando o consumidor a
 configurar; o método não fornece daemon, agendador ou notificação própria.
+
+## Recuperação operacional e estado em worktrees
+
+Se um `advance` falhar depois de invalidar o checkpoint, `--resume` não recupera a execução.
+Registre a causa, execute `stop` e rode a story novamente; não tente reconstruir o checkpoint
+invalidado à mão.
+
+Hooks e guardas de manutenção que procurem `state.json` em repositórios Git resolvem primeiro o
+git-dir do worktree com `git rev-parse --absolute-git-dir`. Somente se não houver estado próprio
+consultam o common-dir. Assim worktrees simultâneos não leem nem alteram a sessão um do outro, e um
+estado legado comum continua disponível como fallback controlado.
 
 ## Supervisor opcional
 

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Opt-in Knowledge Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "role", "task_kind", "conflict_authority", "skill_limit", "available_skills", "selected_skills"],
+  "properties": {
+    "schema_version": {"const": 1}, "role": {"type": "string", "minLength": 1}, "task_kind": {"type": "string", "minLength": 1}, "conflict_authority": {"const": "consumer"}, "skill_limit": {"type": "integer", "minimum": 1, "maximum": 5}, "available_skills": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "compression": {"type": "object", "additionalProperties": false, "required": ["adapter", "mode", "configuration_ref"], "properties": {"adapter": {"enum": ["claude", "pi", "codex", "other"]}, "mode": {"enum": ["input", "rules", "disabled", "unknown"]}, "configuration_ref": {"type": "string", "minLength": 1}}},
+    "selected_skills": {"type": "array", "maxItems": 5, "items": {"type": "object", "additionalProperties": false, "required": ["name", "source", "ref", "sha256", "authors", "license", "on_demand"], "properties": {"name": {"type": "string", "minLength": 1}, "source": {"type": "string", "format": "uri"}, "ref": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "authors": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "license": {"type": "string", "minLength": 1}, "on_demand": {"const": true}}}}
+  }
+}
+

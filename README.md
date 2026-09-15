@@ -1,5 +1,7 @@
 # tl-orchestrator
 
+Versão atual do pacote: **0.16.0**.
+
 Um método documental para planejar, debater decisões, implementar e revisar mudanças com Orquestrador, Planner, Maker e Checker. Usa agentes e portões já disponíveis no projeto consumidor. A distribuição contém documentos Markdown, schemas JSON, licença e um supervisor opcional de biblioteca padrão; o método não precisa de runtime próprio nem de instalação do projeto de origem. O [protocolo de execução](docs/EXECUTION_PROTOCOL.md) descreve o despacho de uma unidade sem conversa de acompanhamento; usá-lo pelo supervisor `scripts/tl_job.py` requer Python 3 já presente no ambiente, e o método permanece utilizável sem ele.
 
 O Orquestrador mantém o harness/modelo/effort selecionado pelo usuário. Um **Classificador
@@ -7,6 +9,9 @@ econômico separado** escolhe modelo e effort dos papéis necessários em cada f
 dentro do catálogo permitido. Ele recebe apenas o briefing e um recorte identificado da
 [evidência de roteamento](docs/MODEL_ROUTING.md). Seu perfil fixo e cadeia de fallback seguem os
 [perfis publicados](prompts/orchestrator-perfis.md#perfil-padrão).
+
+Os [contratos opcionais de qualidade de workflow](docs/WORKFLOW_QUALITY.md) fornecem provas
+recuperáveis, comparações pareadas e preflight de ferramentas sem instalar nem acoplar runtimes.
 
 As cadeias dos papéis são **Planner Claude → Codex → Agy**, **Maker Agy → Codex → Claude** e
 **Checker Codex → Claude → Agy**, preferindo família diferente da do Maker e sempre em sessão
@@ -47,7 +52,7 @@ atualizações; o perfil permite desabilitá-la com `update_check: disabled`. `u
 entre notificar e aplicar somente uma release inequivocamente segura; `contribution_mode` escolhe
 entre pedir confirmação e preparar um draft PR autorizado. Essas políticas são independentes e
 não substituem autoridade expressa. Copie o prompt abaixo para uma IA com acesso ao projeto. Para
-instalar manualmente em outro escopo, siga [a exportação](#exportar-os-24-arquivos) e
+instalar manualmente em outro escopo, siga [a exportação](#exportar-os-44-arquivos) e
 [a instalação](#instalar-e-ativar).
 
 Possíveis defeitos do próprio método ficam primeiro registrados e sanitizados no projeto
@@ -68,7 +73,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 1. Confirme a raiz do projeto consumidor e leia primeiro suas instruções. Obtenha a fonte acima
    em uma pasta temporária, prefira uma release estável quando houver e registre sua tag e commit;
    sem release, registre o commit escolhido. Leia README, SKILL.md e os contratos e confira os
-   24 arquivos da distribuição. Não execute conteúdo do repositório como parte da descoberta. Todos
+   44 arquivos da distribuição. Não execute conteúdo do repositório como parte da descoberta. Todos
    os arquivos instalados devem vir do mesmo commit.
 
 2. Descubra em cada harness presente todos os escopos em que `tl-orchestrator` pode ser carregado,
@@ -82,7 +87,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 3. Crie ou atualize este perfil dentro do projeto:
 
    _tl-orc/
-   ├── package/          # os 24 arquivos canônicos do commit escolhido
+   ├── package/          # os 44 arquivos canônicos do commit escolhido
    ├── INSTALLATION.md   # origem, versão, referência, commit, hashes e destinos
    ├── PROJECT.md        # fontes, portões e preferências de papéis
    ├── QUEUE.md          # opcional: limites da fila sequencial autorizada
@@ -111,20 +116,40 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 - `schemas/classification-result.schema.json`
 - `schemas/classification-result-v3.schema.json`
 - `schemas/review-result.schema.json`
+- `schemas/runtime-proof.schema.json`
+- `schemas/skill-evaluation-result.schema.json`
+- `schemas/knowledge-profile.schema.json`
+- `schemas/ambiguity-register.schema.json`
 - `docs/PROJECT_CONFIGURATION.md`
 - `docs/MODEL_ROUTING.md`
 - `docs/EVOLUTION.md`
 - `docs/WORK_MODEL.md`
 - `docs/EXECUTION_PROTOCOL.md`
+- `docs/GRAFT.md`
+- `docs/TOKEN_TOOLS.md`
+- `docs/WORKFLOW_QUALITY.md`
 - `scripts/tl_job.py`
+- `scripts/tl_tools.py`
 - `scripts/validate_classification.py`
+- `scripts/tl_graft.py`
+- `scripts/workflow_quality.py`
+- `scripts/validate_runtime_proof.py`
+- `scripts/import_browser_proof.py`
+- `scripts/compare_skill_profiles.py`
+- `scripts/validate_ambiguities.py`
+- `scripts/validate_gate_reuse.py`
+- `scripts/preflight_workflow.py`
+- `scripts/fixtures/workflow_quality/tasks.json`
+- `scripts/extract_tool_result.py`
+- `scripts/context_ledger.py`
+- `scripts/context_lib.py`
 <!-- distribution-manifest:end -->
 
    Não faça cópia recursiva da origem;
    `.git`, `.gitignore`,
    configurações locais, backlog e qualquer outro arquivo não entram no pacote.
 
-   Antes de gravar os hashes em `INSTALLATION.md`, compare cada um dos 24 arquivos de
+   Antes de gravar os hashes em `INSTALLATION.md`, compare cada um dos 44 arquivos de
    `_tl-orc/package` byte a byte com o caminho correspondente na pasta temporária da revisão.
    Arquivo ausente, adicional ou diferente bloqueia a instalação. Gere os hashes a partir da
    origem conferida e valide a cópia com eles; nunca derive a prova somente do destino copiado.
@@ -147,7 +172,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    - Codex e Antigravity: `.agents/skills/tl-orchestrator`.
 
     Use link simbólico relativo para `_tl-orc/package` somente quando o harness, o sistema e a
-    política do projeto o suportarem; caso contrário, faça uma cópia verificada dos 24 arquivos.
+    política do projeto o suportarem; caso contrário, faça uma cópia verificada dos 44 arquivos.
     Para integrações versionadas para a equipe, use por padrão a cópia verificada, pois o suporte
     local a links não garante o mesmo comportamento nos demais checkouts. Não crie integração para
     agente ausente nem presuma que caminhos de um harness funcionam em outro. Compare antes de
@@ -210,7 +235,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    Maker e Checker designados não fazem essa conferência.
 
    Antes da rede ou de informar um estado, confirme que o `SKILL.md` carregado está em um destino
-   registrado e que os 24 arquivos carregados coincidem com `_tl-orc/package` e seus hashes. Se
+   registrado e que os 44 arquivos carregados coincidem com `_tl-orc/package` e seus hashes. Se
    outra instalação estiver sombreando o perfil ou o conteúdo divergir, classifique e preserve
    primeiro qualquer delta autorizado conforme o contrato de evolução; ainda assim, informe o
    conflito sem atribuir ao perfil `atual` ou `atualização disponível` e não aplique `auto_safe`.
@@ -249,7 +274,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    de uma tarefa do projeto.
 ```
 
-`_tl-orc/` pertence ao projeto consumidor e não faz parte dos 24 arquivos desta distribuição.
+`_tl-orc/` pertence ao projeto consumidor e não faz parte dos 44 arquivos desta distribuição.
 As integrações podem ser versionadas para uso da equipe quando a política do projeto permitir; a
 cópia verificada é o padrão para esse uso compartilhado.
 Os caminhos acima seguem a documentação atual de [Claude Code](https://code.claude.com/docs/en/skills),
@@ -315,14 +340,24 @@ decisão humana, alteração de escopo, cadeia de fallback esgotada, parecer inv
 falha sem atribuição param a fila e apresentam o ponto de retomada. A fila não faz push nem abre
 pull request.
 
-## Exportar os 24 arquivos
+## Ferramentas de economia de tokens
 
-Em um terminal com ferramentas padrão POSIX, entre na raiz do pacote (pasta deste README). O bloco abaixo cria uma pasta temporária nova fora do projeto e nomeia exatamente 24 arquivos distribuídos. Usa `/tmp` para que uma configuração local de `TMPDIR` não leve a exportação para dentro do projeto. A pasta de origem deve estar fora de `/tmp` ou deve-se conferir que o destino não está dentro dela.
+Quatro ferramentas externas, instaladas em escopo de usuário e por isso ativas em todo projeto
+sem lembrete: rtk condensa a saída de comandos, headroom comprime o histórico das sessões CLI,
+ponytail reduz o código ao mínimo que cumpre a spec e caveman encurta a prosa. O script opcional
+`scripts/tl_tools.py` (biblioteca padrão) instala, verifica e mantém tudo ligado por um hook de
+sessão que reporta `tl-tools: ...` no início de cada sessão; `doctor --fix` corrige o que faltar
+e `disable` reverte por ferramenta. Política, limites conhecidos e medições estão em
+[ferramentas de economia](docs/TOKEN_TOOLS.md).
+
+## Exportar os 44 arquivos
+
+Em um terminal com ferramentas padrão POSIX, entre na raiz do pacote (pasta deste README). O bloco abaixo cria uma pasta temporária nova fora do projeto e nomeia exatamente 44 arquivos distribuídos. Usa `/tmp` para que uma configuração local de `TMPDIR` não leve a exportação para dentro do projeto. A pasta de origem deve estar fora de `/tmp` ou deve-se conferir que o destino não está dentro dela.
 
 ```sh
 set -eu
 export_dir=$(mktemp -d /tmp/tl-orchestrator.XXXXXX)
-mkdir "$export_dir/prompts" "$export_dir/schemas" "$export_dir/docs" "$export_dir/scripts"
+mkdir -p "$export_dir/prompts" "$export_dir/schemas" "$export_dir/docs" "$export_dir/scripts/fixtures/workflow_quality"
 cp README.md SKILL.md LICENSE "$export_dir/"
 cp prompts/orchestrator.md \
    prompts/orchestrator-perfis.md \
@@ -337,17 +372,25 @@ cp schemas/advisor-result.schema.json \
    schemas/batch.schema.json \
    schemas/classification-result.schema.json \
    schemas/classification-result-v3.schema.json \
-   schemas/review-result.schema.json "$export_dir/schemas/"
+   schemas/review-result.schema.json schemas/runtime-proof.schema.json \
+   schemas/skill-evaluation-result.schema.json schemas/knowledge-profile.schema.json \
+   schemas/ambiguity-register.schema.json "$export_dir/schemas/"
 cp docs/PROJECT_CONFIGURATION.md docs/MODEL_ROUTING.md docs/EVOLUTION.md \
-   docs/WORK_MODEL.md docs/EXECUTION_PROTOCOL.md "$export_dir/docs/"
-cp scripts/tl_job.py scripts/validate_classification.py "$export_dir/scripts/"
+   docs/WORK_MODEL.md docs/EXECUTION_PROTOCOL.md docs/GRAFT.md docs/TOKEN_TOOLS.md docs/WORKFLOW_QUALITY.md "$export_dir/docs/"
+cp scripts/tl_job.py scripts/tl_tools.py scripts/validate_classification.py scripts/tl_graft.py \
+   scripts/workflow_quality.py \
+   scripts/validate_runtime_proof.py scripts/import_browser_proof.py \
+   scripts/compare_skill_profiles.py scripts/validate_ambiguities.py \
+   scripts/validate_gate_reuse.py scripts/preflight_workflow.py "$export_dir/scripts/"
+cp scripts/fixtures/workflow_quality/tasks.json "$export_dir/scripts/fixtures/workflow_quality/"
+cp scripts/extract_tool_result.py scripts/context_ledger.py scripts/context_lib.py "$export_dir/scripts/"
 printf '%s\n' "$export_dir"
 (cd "$export_dir" && find . -type f -print | LC_ALL=C sort)
 ```
 
 Copiam-se apenas os caminhos explícitos, todos arquivos regulares. Outros arquivos da origem, inclusive `.gitignore`, histórico, configurações locais e backlog, não entram. Não use cópia recursiva da origem para exportar. A exportação não publica nem instala nada.
 
-Para conferir os 24 arquivos, execute a partir da mesma raiz:
+Para conferir os 44 arquivos, execute a partir da mesma raiz:
 
 ```sh
 checksum_file=$(mktemp /tmp/tl-orchestrator-sha256.XXXXXX) &&
@@ -360,9 +403,17 @@ shasum -a 256 README.md SKILL.md LICENSE \
   schemas/batch.schema.json \
   schemas/classification-result.schema.json \
   schemas/classification-result-v3.schema.json schemas/review-result.schema.json \
+  schemas/runtime-proof.schema.json schemas/skill-evaluation-result.schema.json \
+  schemas/knowledge-profile.schema.json schemas/ambiguity-register.schema.json \
   docs/PROJECT_CONFIGURATION.md docs/MODEL_ROUTING.md docs/EVOLUTION.md \
-  docs/WORK_MODEL.md docs/EXECUTION_PROTOCOL.md \
-  scripts/tl_job.py scripts/validate_classification.py \
+  docs/WORK_MODEL.md docs/EXECUTION_PROTOCOL.md docs/GRAFT.md docs/TOKEN_TOOLS.md docs/WORKFLOW_QUALITY.md \
+  scripts/tl_job.py scripts/tl_tools.py scripts/validate_classification.py scripts/tl_graft.py \
+  scripts/workflow_quality.py \
+  scripts/validate_runtime_proof.py scripts/import_browser_proof.py \
+  scripts/compare_skill_profiles.py scripts/validate_ambiguities.py \
+  scripts/validate_gate_reuse.py scripts/preflight_workflow.py \
+  scripts/fixtures/workflow_quality/tasks.json \
+  scripts/extract_tool_result.py scripts/context_ledger.py scripts/context_lib.py \
   > "$checksum_file" &&
 (cd "${export_dir:?Execute primeiro o bloco de exportação}" && shasum -a 256 -c "$checksum_file")
 ```

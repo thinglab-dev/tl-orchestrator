@@ -777,6 +777,52 @@ class RuntimeTest(unittest.TestCase):
         self.assertNotEqual(repo_git.worktree_tree(), head_tree)
         self.assertEqual(git(fx.repo, "rev-parse", "HEAD^{tree}"), head_tree, "the real index and HEAD are untouched")
 
+    def test_stale_unit_branch_with_foreign_commits_waits_for_operator(self) -> None:
+        fx = Fixture(self.root, units=1)
+        git(fx.repo, "checkout", "-q", "-b", "tl/B001/T001")
+        (fx.repo / "pkg" / "foreign.py").write_text("smuggled = 1" + chr(10), encoding="utf-8")
+        git(fx.repo, "add", "-A")
+        git(fx.repo, "commit", "-q", "-m", "foreign commit on a stale unit branch")
+        git(fx.repo, "checkout", "-q", "main")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "blocked")
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("stale_branch", record.reason)
+        self.assertNotIn("foreign", git(fx.repo, "log", "--oneline", "main"))
+        self.assertEqual(fx.fold().model_calls_done, 0, "no Maker was dispatched on a stale branch")
+
+    def test_base_moved_during_interrupted_local_merge_waits_for_operator(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_intent:local_merge").returncode, 70)
+        git(fx.repo, "checkout", "-q", "main")
+        git(fx.repo, "commit", "-q", "--allow-empty", "-m", "someone moved main while the runtime was down")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        fold = fx.fold()
+        self.assertEqual(fold.units["T001"].state, "awaiting_operator")
+        self.assertEqual(fold.recoveries[-1]["verdict"], "ambiguous")
+        self.assertNotIn("T001", git(fx.repo, "log", "--oneline", "main"), "no merge ran on a moved base")
+
+    def test_base_reset_after_a_completed_local_merge_is_not_merged_again(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_effect:local_merge").returncode, 70)
+        merged_tip = git(fx.repo, "rev-parse", "main")
+        git(fx.repo, "checkout", "-q", "main")
+        git(fx.repo, "reset", "-q", "--hard", "HEAD~1")
+        git(fx.repo, "commit", "-q", "--allow-empty", "-m", "base rewritten while the runtime was down")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        fold = fx.fold()
+        self.assertEqual(fold.units["T001"].state, "awaiting_operator")
+        self.assertEqual(git(fx.repo, "rev-list", "--count", "main"), "2", "base untouched by the runtime")
+        self.assertNotEqual(git(fx.repo, "rev-parse", "main"), merged_tip)
+
     # ---- policy -----------------------------------------------------------------------------
 
     def test_scope_expansion_restores_tree_then_parks_on_repeat(self) -> None:

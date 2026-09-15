@@ -1480,7 +1480,12 @@ class Runtime:
             raise StopBatch("unexpected_tree_state", f"dirty tree before {uid}: {', '.join(dirty[:8])}")
 
         def do(intent: dict) -> dict:
-            if self.git.rev(branch):
+            existing = self.git.rev(branch)
+            if existing:
+                expected = self.git.rev(base)
+                if existing != expected:
+                    # A stale branch with foreign commits would enter the delivery outside the reviewed diff.
+                    return {"_status": "failed", "detail": f"stale_branch: {branch} already exists at {existing[:12]}, not at base {str(expected)[:12]}; delete or rename it", "branch": branch}
                 self.git.run("checkout", "--quiet", branch)
             else:
                 self.git.run("checkout", "--quiet", "-b", branch, base)
@@ -1495,6 +1500,8 @@ class Runtime:
         result = self.step(f"{uid}:prepare", "none", uid, "prepare", {"type": "prepare", "branch": branch, "base": base, "deps": unit.dependencies}, do)
         if str(result.get("detail", "")).startswith("dependency_block"):
             raise UnitPark("parked", result["detail"])
+        if str(result.get("detail", "")).startswith("stale_branch"):
+            raise UnitPark("awaiting_operator", result["detail"][:200], decision={"options": ["retry", "skip"]})
         if self.git.current_branch() != branch:
             self.git.run("checkout", "--quiet", branch)
         if record.phase == "prepare":
@@ -1945,7 +1952,8 @@ class Runtime:
                         run_argv([self.git.exe, "merge", "--abort"], self.repo, 60)
                         return {"_status": "failed", "detail": out["stderr"][-400:] or out["stdout"][-400:]}
                     return {"merged": True, "base_commit": self.git.head()}
-                result = self.step(f"{uid}:local_merge:{record.commit}", "local_merge", uid, "merge", {"type": "local_merge", "branch": record.branch, "base": base, "commit": record.commit}, local_merge)
+                result = self.step(f"{uid}:local_merge:{record.commit}", "local_merge", uid, "merge", {"type": "local_merge", "branch": record.branch, "base": base, "commit": record.commit}, local_merge,
+                                   context={"base_before": self.git.rev(base) or ""})
                 if not result.get("merged"):
                     raise UnitPark("awaiting_operator", "local_merge_conflict: " + result.get("detail", "")[:200], decision={"options": ["retry", "skip"]})
                 self.unit_state(uid, "running", "", phase="complete", merged=True)
@@ -2126,13 +2134,18 @@ class Runtime:
         if effect == "ci_rerun":
             return "ambiguous", {"rerun": True, "detail": "rerun may have been requested; counted, not repeated"}
         if effect == "local_merge":
-            base, branch = payload.get("base", ""), payload.get("branch", "")
-            check = run_argv([self.git.exe, "merge-base", "--is-ancestor", branch, base], self.repo, 60)
+            base = payload.get("base", "")
+            commit = payload.get("commit") or payload.get("branch", "")
+            check = run_argv([self.git.exe, "merge-base", "--is-ancestor", commit, base], self.repo, 60)
             if check["exit_code"] == 0:
-                return "ok", {"merged": True, "base_commit": self.git.rev(base), "detail": "branch already merged into base"}
+                return "ok", {"merged": True, "base_commit": self.git.rev(base), "detail": "reviewed commit already reachable from base"}
             if run_argv([self.git.exe, "rev-parse", "-q", "--verify", "MERGE_HEAD"], self.repo, 60)["exit_code"] == 0:
                 return "ambiguous", {"detail": "a merge is in progress in the working tree; not aborted, operator decides"}
-            return "released", {"detail": "not merged; merge will run"}
+            base_before = (intent.get("intent_context") or {}).get("base_before")
+            base_now = self.git.rev(base) or ""
+            if base_before is None or base_now == base_before:
+                return "released", {"detail": "base exactly as observed before the merge intent; merge will run"}
+            return "ambiguous", {"detail": f"base {base} moved from {str(base_before)[:12]} to {base_now[:12]} while the merge intent was open; operator decides"}
         return "released", {"detail": "no external effect; step will rerun"}
 
 

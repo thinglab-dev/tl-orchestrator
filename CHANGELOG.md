@@ -102,12 +102,17 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   trabalho é calculada comparando conteúdo (índice temporário com mtime de 1 s, o que força a checagem racy do git), porque um
   arquivo reescrito com o mesmo tamanho no mesmo segundo era lido pelo stat obsoleto no
   Linux.
+- Revisão independente r9: branch de unidade pré-existente fora da base esperada é
+  `stale_branch` (`awaiting_operator`, sem despacho); recuperação de merge local prova com o
+  commit revisado e com a ponta da base gravada na intenção (base movida → operador);
+  merge de dependência na branch da unidade documentado como escrita local, não
+  `local_merge` (rejeitado como bloqueante).
 - Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
   `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
 
 ### Validação
 
-- `scripts/tests/test_tl_runtime.py` (82 testes, Git real, harness e `gh` scriptados):
+- `scripts/tests/test_tl_runtime.py` (85 testes, Git real, harness e `gh` scriptados):
   DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
   oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
   segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec

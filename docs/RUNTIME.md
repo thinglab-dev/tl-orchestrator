@@ -142,11 +142,11 @@ sem resultado é reconciliado antes de qualquer escalonamento:
 | Intenção aberta | Evidência consultada | Veredito |
 | :--- | :--- | :--- |
 | `model_call` | estado do `tl_job.py` | nunca iniciou → `released` (não cobrada) · ainda rodando → o runtime **anexa** ao supervisor e espera · terminou sem resultado gravado → `ambiguous`, cobrada; a árvore suja vira checkpoint (`refs/tl/checkpoints/...`) e o próximo Maker recebe "continue do checkpoint" |
-| `local_commit` | árvore de `HEAD` | igual à árvore da intenção → `ok` · senão → `released` |
+| `local_commit` | árvore e pai de `HEAD` | árvore da intenção sobre o pai gravado → `ok` · `HEAD` avançou além do pai sem ser o commit esperado → `ambiguous`, `awaiting_operator` (nunca adota commit alheio) · senão → `released` |
 | `push` | `git ls-remote` | remoto no commit esperado → `ok` · ausente ou atrás → `released` (push roda) · divergente ou inacessível → `ambiguous`, unidade em `awaiting_operator` |
-| `pull_request` | `gh pr list --head` | existe com a mesma base e o mesmo head → `ok` · não existe → `released` · base/head diferentes ou `gh` falhou → `ambiguous`, `awaiting_operator` |
-| `pull_request_merge` | `gh pr view` | mesclado → `ok` · aberto → `released` · `gh` falhou → `ambiguous`, `awaiting_operator` |
-| `local_merge` | `merge-base --is-ancestor` | já mesclado → `ok` · senão → `released` (o merge só roda se a branch ainda aponta para o commit revisado) |
+| `pull_request` | `gh pr list --head` | existe com a mesma base e head igual ao commit revisado gravado na intenção → `ok` · não existe → `released` (o create adota um PR existente da branch, nunca duplica) · base/head diferentes ou `gh` falhou → `ambiguous`, `awaiting_operator` |
+| `pull_request_merge` | `gh pr view` | mesclado com `headRefOid` igual ao commit revisado → `ok` · aberto → `released` · mesclado em outro head ou `gh` falhou → `ambiguous`, `awaiting_operator` |
+| `local_merge` | `merge-base --is-ancestor`, `MERGE_HEAD` | já mesclado → `ok` · merge em andamento na árvore → `ambiguous`, `awaiting_operator` (o runtime nunca faz `merge --abort` de um merge que não iniciou) · senão → `released` (o merge só roda se a branch ainda aponta para o commit revisado) |
 | `ci_rerun` | nenhuma | `ambiguous`: contado como reexecução, nunca repetido |
 | `gate`, `ci_query`, `prepare` | nenhuma | `released` (rodam de novo) |
 
@@ -212,7 +212,8 @@ achados do Checker em rodadas consecutivas → `stagnation` (a regra da fila seq
 | Spawn do worker | `tl_job.py` (contenção da árvore de processos, timeout, recibo limitado) com ambiente filtrado: só a allowlist base mais `env_allowlist`; `DO_NOT_TRACK=1` | ferramentas e sandbox de rede dependem do harness: use `{tools}` e sandbox nativos quando existirem; adapter sem nenhuma das duas só roda com `accept_unisolated_worker: true`, e o relatório avisa |
 | Depois de cada chamada de modelo | `HEAD` e branch comparados antes/depois: worker que faz commit, checkout ou merge por conta própria é `unexpected_tree_state` e para o lote | a detecção é a posteriori; o harness sem allowlist ainda consegue executar `git` |
 | Antes de descartar árvore | toda restauração (escopo, artefato de portão, Checker que escreveu, unidade parada) grava antes o estado atual em `refs/tl/discarded/<lote>/<n>` e anota no journal | nada é apagado sem cópia; limpar as refs é tarefa do operador |
-| Depois de cada Maker | `dirty_paths ⊆ scope_paths`, `do_not_touch`, `sensitive_paths`, varredura de padrões de segredo no diff **integral** (AWS, chaves privadas, GitHub, Anthropic/OpenAI, Slack, Google); só o pack do Checker é limitado por `max_diff_bytes` | varredura por padrão, não prova de ausência de segredo |
+| Antes de cada unidade | árvore suja antes do `prepare` para o lote (`unexpected_tree_state`), inclusive quando a branch da unidade já está em checkout: edição do operador nunca vira commit do runtime | sujeira produzida pelo próprio runtime (crash no meio do Maker) é reconhecida pelo journal e vira checkpoint |
+| Depois de cada Maker | `sensitive_paths` e varredura de padrões de segredo no diff **integral** (AWS, chaves privadas, GitHub, Anthropic/OpenAI, Slack, Google) têm precedência e param o lote; depois `dirty_paths ⊆ scope_paths` e `do_not_touch`, com os dois lados de um rename (`secrets/x -> pkg/x` é toque em `secrets/`); só o pack do Checker é limitado por `max_diff_bytes` | varredura por padrão, não prova de ausência de segredo |
 | Antes de cada efeito externo | `permitted_effects` do lote; merge remoto só com CI `success` quando CI está ativa e sempre com `--match-head-commit <commit revisado>`; merge local só se a branch ainda aponta para o commit revisado | `gh` autenticado é do operador; o runtime não gerencia credenciais |
 | Orçamento | reserva antes do Maker; contagem de despachos, relógio de parede, teto em dólar sobre custo observado | uma invocação do harness pode conter várias requisições de API; o runtime conta invocações e repassa uso observado |
 
@@ -249,7 +250,8 @@ ponteiro. `code_failure` vira rodada de rework; infraestrutura sem teste falho g
 
 - `status.json`: lote, progresso, unidade/fase/rodada corrente, bloqueados, esperando,
   orçamento, próxima unidade.
-- `report.md`: relatório da manhã, 100% derivado do journal e do Git: Completed, Changed,
+- `report.md`: relatório da manhã derivado do journal (títulos, orçamento e modelos são
+  gravados no `batch_open`; arquivos alterados vêm do step de commit): Completed, Changed,
   Commits / PRs, Verification, Automatically Resolved, FYI, REVIEW, DECISION REQUIRED,
   BLOCKED, Cost / Usage, Models, Recovery Events, What Happens Next.
 - `journal`: dobra diagnóstica (tentativas, assinaturas, recuperações, checkpoints, uso).

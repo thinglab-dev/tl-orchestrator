@@ -65,12 +65,21 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   branch ainda aponte para o commit revisado; PR reconciliado só com a mesma base e o mesmo
   head; a seção Changed do relatório vem dos arquivos gravados no step de commit, não de
   `git diff` ao vivo.
+- Revisão independente r3: flags opcionais de `permitted_effects` precisam ser booleanas;
+  rename expõe origem e destino à contenção; segredo e caminho sensível têm precedência sobre
+  violação de escopo; `decide` e `--accept-stale-version` só escrevem no journal sob o lease;
+  PR e merge reconciliados contra o commit revisado gravado na intenção (o create adota PR
+  existente da branch em vez de duplicar); retomada só reserva as chamadas de modelo ainda
+  pendentes da rodada; sujeira pré-existente na branch da unidade é recusa; o cache de
+  portão inclui o `argv`; log e rerun de CI filtrados pelo commit revisado; títulos,
+  orçamento e modelos do relatório vêm do `batch_open`; `max_cost_usd: 0` é teto válido;
+  `merge --abort` nunca roda sobre um merge que o runtime não iniciou.
 - Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
   `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
 
 ### Validação
 
-- `scripts/tests/test_tl_runtime.py` (55 testes, Git real, harness e `gh` scriptados):
+- `scripts/tests/test_tl_runtime.py` (66 testes, Git real, harness e `gh` scriptados):
   DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
   oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
   segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec

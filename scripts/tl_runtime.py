@@ -278,6 +278,7 @@ class Fold:
     notes: list = field(default_factory=list)
     closed: bool = False
     invalid_lines: int = 0
+    meta: dict = field(default_factory=dict)           # units/budget/roles as journaled at batch_open
 
 
 class Journal:
@@ -341,6 +342,7 @@ class Journal:
             if kind == "batch_open":
                 fold.runtime_stamp = event.get("runtime_stamp", "")
                 fold.base_branch = event.get("base_branch", "")
+                fold.meta = {"units": event.get("units_meta") or {}, "budget": event.get("budget") or {}, "roles": event.get("roles") or {}}
                 for unit_id in event.get("units", []):
                     fold.units.setdefault(unit_id, UnitRecord(id=unit_id))
             elif kind == "step_intent":
@@ -422,7 +424,8 @@ class Git:
                 continue
             path = line[3:]
             if " -> " in path:
-                path = path.split(" -> ", 1)[1]
+                source, path = path.split(" -> ", 1)
+                paths.append(source.strip().strip('"'))
             path = path.strip().strip('"')
             if path.startswith(RESULT_DIR_NAME + "/") or path.startswith(STATE_DIR_NAME + "/"):
                 continue
@@ -570,6 +573,9 @@ def load_batch(path: Path) -> dict:
             raise Refusal(f"permitted_effects.{key} must be boolean")
     effects.setdefault("pull_request_merge", False)
     effects.setdefault("ci_rerun", False)
+    for key in ("pull_request_merge", "ci_rerun"):
+        if not isinstance(effects[key], bool):
+            raise Refusal(f"permitted_effects.{key} must be boolean")
     if not effects.get("local_write"):
         raise Refusal("external_effect_not_authorized: permitted_effects.local_write is false; the runtime cannot run a Maker without it", 2)
     scope = batch["frozen_scope"]
@@ -668,16 +674,16 @@ class Policy:
 
     def check_containment(self, unit: Unit, dirty: list[str], diff_text: str) -> tuple[str, str]:
         """Return (failure_class, detail); ('', '') when contained."""
-        outside = [p for p in dirty if not path_within(p, unit.scope_paths)]
-        forbidden = [p for p in dirty if unit.do_not_touch and path_within(p, unit.do_not_touch)]
-        if outside or forbidden:
-            return "scope", "scope_expansion: " + ", ".join(sorted(set(outside + forbidden))[:12])
         sensitive = [p for p in dirty if self.sensitive and path_within(p, self.sensitive)]
         if sensitive:
             return "security", "sensitive_path_touched: " + ", ".join(sensitive[:12])
         secrets = scan_secrets(diff_text)
         if secrets:
             return "security", "secret_pattern_in_diff: " + ", ".join(secrets)
+        outside = [p for p in dirty if not path_within(p, unit.scope_paths)]
+        forbidden = [p for p in dirty if unit.do_not_touch and path_within(p, unit.do_not_touch)]
+        if outside or forbidden:
+            return "scope", "scope_expansion: " + ", ".join(sorted(set(outside + forbidden))[:12])
         return "", ""
 
     def capabilities_report(self) -> list[dict]:
@@ -1049,11 +1055,21 @@ class CI:
             state = "success"
         return {"state": state, "rows": rows}
 
-    def failed_log(self, pr_number: int, branch: str) -> tuple[str, str]:
-        runs = run_argv([*self.gh, "run", "list", "--branch", branch, "--json", "databaseId,conclusion,status", "--limit", "5"], self.repo, 120)
+    def _runs(self, branch: str, commit: str) -> list:
+        argv = [*self.gh, "run", "list", "--branch", branch, "--json", "databaseId,conclusion,status,headSha", "--limit", "10"]
+        if commit:
+            argv += ["--commit", commit]
+        runs = run_argv(argv, self.repo, 120)
+        try:
+            rows = json.loads(runs["stdout"] or "[]")
+        except ValueError:
+            return []
+        return [r for r in rows if isinstance(r, dict) and (not commit or not r.get("headSha") or r.get("headSha") == commit)]
+
+    def failed_log(self, pr_number: int, branch: str, commit: str = "") -> tuple[str, str]:
         run_id = None
         try:
-            for row in json.loads(runs["stdout"] or "[]"):
+            for row in self._runs(branch, commit):
                 if str(row.get("conclusion", "")).lower() in {"failure", "cancelled", "timed_out"}:
                     run_id = row.get("databaseId")
                     break
@@ -1067,10 +1083,9 @@ class CI:
         raw.write_text(log["stdout"], encoding="utf-8")
         return log["stdout"], raw.as_posix()
 
-    def rerun_failed(self, branch: str) -> bool:
-        runs = run_argv([*self.gh, "run", "list", "--branch", branch, "--json", "databaseId,conclusion", "--limit", "5"], self.repo, 120)
+    def rerun_failed(self, branch: str, commit: str = "") -> bool:
         try:
-            for row in json.loads(runs["stdout"] or "[]"):
+            for row in self._runs(branch, commit):
                 if str(row.get("conclusion", "")).lower() == "failure":
                     return run_argv([*self.gh, "run", "rerun", str(row["databaseId"]), "--failed"], self.repo, 120)["exit_code"] == 0
         except (ValueError, KeyError):
@@ -1163,6 +1178,8 @@ class Runtime:
     # ---- lease and journal --------------------------------------------------------------
 
     def acquire(self) -> None:
+        if self._lease is not None:
+            return
         self.state_dir.mkdir(parents=True, exist_ok=True)
         (self.state_dir / "artifacts").mkdir(exist_ok=True)
         (self.state_dir / "packs").mkdir(exist_ok=True)
@@ -1179,7 +1196,10 @@ class Runtime:
             self.journal.append("batch_open", batch=self.batch_id, runtime_stamp=self.stamp, runtime_version=RUNTIME_VERSION,
                                 proposal_digest=self.batch["authorization"]["proposal_digest"], units=sorted(self.units),
                                 repo_head=self.git.head(), base_branch=self.config["base_branch"] or self.git.current_branch(),
-                                capabilities=self.policy.capabilities_report())
+                                capabilities=self.policy.capabilities_report(),
+                                units_meta={uid: {"title": u.title} for uid, u in self.units.items()},
+                                budget={k: self.batch["budget"].get(k) for k in ("max_model_calls", "max_rework_rounds_per_unit")},
+                                roles={role: {k: cfg.get(k) for k in ("adapter", "model", "effort", "family")} for role, cfg in self.config["roles"].items()})
             self.fold = self.journal.fold()
 
     def release(self) -> None:
@@ -1260,6 +1280,11 @@ class Runtime:
     def model_calls_consumed(self) -> int:
         return self.fold.model_calls_done + len([i for i in self.fold.open_intents if i.get("effect_class") == "model_call"])
 
+    def _calls_needed(self, uid: str, round_no: int) -> int:
+        """Model calls a round still has to make: a journaled ok Maker or Checker result is not charged again."""
+        return sum(1 for role in ("maker", "checker")
+                   if not any(k.startswith(f"{uid}:r{round_no}:{role}") and v.get("status") == "ok" for k, v in self.fold.steps.items()))
+
     def check_budget(self, needed_calls: int = 0) -> None:
         budget = self.batch["budget"]
         max_calls = int(budget.get("max_model_calls", 0))
@@ -1272,7 +1297,7 @@ class Runtime:
             if time.time() - started > float(max_wall):
                 raise StopBatch("wall_clock_exhausted", f"batch older than {max_wall}s")
         cap = self.limits.get("max_cost_usd")
-        if cap:
+        if cap is not None:
             known = [u.get("cost_usd") for u in self.fold.usage if isinstance(u.get("cost_usd"), (int, float))]
             if known and sum(known) >= float(cap):
                 raise StopBatch("cost_budget_exhausted", f"observed {sum(known):.2f} USD >= cap {cap}")
@@ -1328,7 +1353,7 @@ class Runtime:
             failures = []
             for gate in self.config["gates"]["canonical"]:
                 tree = self.git.worktree_tree()
-                outcome = self.step(f"gate:canonical:{gate['id']}:{tree}", "none", "", "close", {"type": "gate", "gate": gate["id"], "tree": tree},
+                outcome = self.step(f"gate:canonical:{gate['id']}:{tree}", "none", "", "close", {"type": "gate", "gate": gate["id"], "tree": tree, "argv": [str(a) for a in gate["argv"]]},
                                     lambda intent, g=gate: run_gate(g, self.repo, self.policy.worker_env(), int(self.limits["gate_output_bytes"]), {"repo": self.repo.as_posix(), "tree": tree}))
                 if not outcome.get("passed"):
                     failures.append(outcome["id"])
@@ -1357,7 +1382,8 @@ class Runtime:
     def execute_unit(self, uid: str) -> None:
         unit = self.units[uid]
         record = self.fold.units.setdefault(uid, UnitRecord(id=uid))
-        self.check_budget(needed_calls=2)
+        self.check_budget(needed_calls=self._calls_needed(uid, record.round if record.round and record.phase in {"implement", "contain", "gates", "review"} else record.round + 1)
+                          if record.phase not in {"commit", "push", "pull_request", "ci", "merge", "complete"} else 0)
         if record.state != "running":
             self.unit_state(uid, "running", "", phase=record.phase or "prepare", started_at=record.started_at or now_iso())
         self.notify({"event": "unit_started", "batch": self.batch_id, "unit": uid})
@@ -1414,7 +1440,7 @@ class Runtime:
         if record.phase == "prepare":
             self.unit_state(uid, "running", "", phase="prepare", branch=branch, base=base)
         dirty = self.git.dirty_paths()
-        if dirty and self.git.current_branch() != branch:
+        if dirty and (record.phase == "prepare" or self.git.current_branch() != branch):
             raise StopBatch("unexpected_tree_state", f"dirty tree before {uid}: {', '.join(dirty[:8])}")
 
         def do(intent: dict) -> dict:
@@ -1450,9 +1476,9 @@ class Runtime:
         resume_round = (record.round > 0 and not feedback and record.phase in {"implement", "contain", "gates", "review"}
                         and any(s.startswith(f"{uid}:r{record.round}:maker") for s in self.fold.steps))
         while True:
-            self.check_budget(needed_calls=2)
             round_no = record.round if resume_round else record.round + 1
             resume_round = False
+            self.check_budget(needed_calls=self._calls_needed(uid, round_no))
             if round_no > max_rounds + 1:
                 raise UnitPark("parked", "rework_limit_exhausted")
             record.round = round_no
@@ -1560,7 +1586,7 @@ class Runtime:
         record = self.fold.units[uid]
         values = {"repo": self.repo.as_posix(), "unit": uid, "branch": record.branch, "base_commit": record.base_commit, "tree": tree}
         for gate in gates_for(self.config, unit):
-            outcome = self.step(f"gate:{gate['id']}:{tree}", "none", uid, "gates", {"type": "gate", "gate": gate["id"], "tree": tree, "base_commit": record.base_commit},
+            outcome = self.step(f"gate:{gate['id']}:{tree}", "none", uid, "gates", {"type": "gate", "gate": gate["id"], "tree": tree, "base_commit": record.base_commit, "argv": [str(a) for a in gate["argv"]]},
                                 lambda intent, g=gate: run_gate(g, self.repo, self.policy.worker_env(), int(self.limits["gate_output_bytes"]), values))
             after = self.git.worktree_tree()
             if after != tree:
@@ -1756,6 +1782,14 @@ class Runtime:
                 title = f"{uid}: {unit.title}"[:120]
 
                 def pr(intent: dict) -> dict:
+                    rows = self._find_pr(record.branch)
+                    if rows is None:
+                        return {"_status": "failed", "detail": "gh pr list failed before create"}
+                    if rows:
+                        row = rows[0]
+                        if row.get("baseRefName") != base:
+                            return {"_status": "failed", "detail": f"pull request {row.get('number')} exists against base {row.get('baseRefName')}, not {base}"}
+                        return {"url": row.get("url"), "number": row.get("number"), "existing": True}
                     body = f"Batch {self.batch_id}, unit {uid}. Spec {unit.spec_path.relative_to(self.repo).as_posix()} @ {unit.spec_revision}.\n\nGenerated by tl_runtime {RUNTIME_VERSION}."
                     out = run_argv([*self.config["gh_argv"], "pr", "create", "--head", record.branch, "--base", base, "--title", title, "--body", body], self.repo, 300)
                     if out["exit_code"] != 0:
@@ -1763,7 +1797,7 @@ class Runtime:
                     url = out["stdout"].strip().splitlines()[-1] if out["stdout"].strip() else ""
                     number = int(url.rstrip("/").rsplit("/", 1)[-1]) if url.rstrip("/").rsplit("/", 1)[-1].isdigit() else None
                     return {"url": url, "number": number}
-                result = self.step(f"{uid}:pr", "pull_request", uid, "pull_request", {"type": "pull_request", "branch": record.branch, "base": base, "title": title}, pr)
+                result = self.step(f"{uid}:pr", "pull_request", uid, "pull_request", {"type": "pull_request", "branch": record.branch, "base": base, "title": title, "commit": record.commit}, pr)
                 if result.get("number") is None and not result.get("url"):
                     raise UnitPark("parked", "pull_request_failed: " + str(result.get("detail", ""))[:200])
                 self.unit_state(uid, "running", "", phase="ci", pr={"url": result.get("url"), "number": result.get("number")})
@@ -1834,7 +1868,7 @@ class Runtime:
                     raise UnitPark("awaiting_operator", f"ci_timeout: state {state} after {self.config['ci']['timeout_seconds']}s", decision={"options": ["retry", "skip"]})
                 self.sleep(float(self.config["ci"]["poll_seconds"]))
                 continue
-            log, raw_ref = self.ci.failed_log(number, record.branch)
+            log, raw_ref = self.ci.failed_log(number, record.branch, record.commit)
             slice_ = tl_ci_slice.slice_log(log, raw_ref=raw_ref) if log else {"classification": "unknown", "signature": normalize_signature("ci", "nolog"), "excerpt": "", "failed_tests": []}
             self.journal.append("note", text=f"{uid}: CI failure {slice_['classification']}", ci_slice={k: v for k, v in slice_.items() if k != "excerpt"})
             if slice_["classification"] in {"external_infrastructure", "unknown"} and not slice_.get("failed_tests") and reruns < int(self.limits["flaky_reruns"]):
@@ -1844,7 +1878,7 @@ class Runtime:
                 self.journal.append("attempt", unit=uid, phase="ci", round=record.round, **{"class": "ci_rerun"}, signature=slice_["signature"], detail=slice_["classification"], tree=record.tree, findings_digest="", move="rerun", step_id="")
                 record.attempts.append({"class": "ci_rerun", "phase": "ci", "signature": slice_["signature"]})
                 rerun = self.step(f"{uid}:ci_rerun:{record.commit}:{reruns}", "ci_rerun", uid, "ci", {"type": "ci_rerun", "commit": record.commit, "n": reruns},
-                                  lambda intent: {"rerun": self.ci.rerun_failed(record.branch)})
+                                  lambda intent: {"rerun": self.ci.rerun_failed(record.branch, record.commit)})
                 if not rerun.get("rerun"):
                     raise UnitPark("parked", "ci_rerun_failed: " + slice_["classification"])
                 self.sleep(float(self.config["ci"]["poll_seconds"]))
@@ -1876,7 +1910,7 @@ class Runtime:
                                 input_digest=intent.get("input_digest"), result=result, tree_after=self.git.worktree_tree() if intent.get("tree_before") else "", evidence=[], reconciled=True)
             if verdict == "ambiguous" and uid and uid in self.fold.units:
                 self._checkpoint_dirty(uid, intent)
-            if verdict == "ambiguous" and effect in {"local_commit", "push", "pull_request", "pull_request_merge"}:
+            if verdict == "ambiguous" and effect in {"local_commit", "local_merge", "push", "pull_request", "pull_request_merge"}:
                 self.unit_state(uid, "awaiting_operator", f"ambiguous effect after crash: {step_id}: {str(result.get('detail', ''))[:160]}", decision={"options": ["retry", "skip"]})
         self.refold()
         for uid, record in self.fold.units.items():
@@ -1886,6 +1920,15 @@ class Runtime:
                     self._checkpoint_dirty(uid, {"step_id": "resume"})
                 self.unit_state(uid, "retryable", "resumed after restart", phase=record.phase)
         self.refold()
+
+    def _find_pr(self, branch: str) -> list | None:
+        """Open or merged pull requests whose head is `branch`; None when gh failed."""
+        out = run_argv([*self.config["gh_argv"], "pr", "list", "--head", branch, "--state", "all", "--json", "number,url,baseRefName,headRefOid,state", "--limit", "1"], self.repo, 120)
+        try:
+            rows = json.loads(out["stdout"] or "[]") if out["exit_code"] == 0 else None
+        except ValueError:
+            rows = None
+        return rows if isinstance(rows, list) or rows is None else None
 
     def _version_accepted(self) -> bool:
         return any(d.get("option") == "accept_stale_version" and d.get("stamp") == self.stamp for d in self.fold.decisions)
@@ -1948,22 +1991,18 @@ class Runtime:
                 return "released", {"detail": "remote behind local; fast-forward push will run"}
             return "ambiguous", {"detail": f"remote {remote_sha[:12]} diverged from local {commit[:12]}"}
         if effect == "pull_request":
-            out = run_argv([*self.config["gh_argv"], "pr", "list", "--head", payload.get("branch", ""), "--state", "all", "--json", "number,url,baseRefName,headRefOid,state", "--limit", "1"], self.repo, 120)
-            try:
-                rows = json.loads(out["stdout"] or "[]") if out["exit_code"] == 0 else None
-            except ValueError:
-                rows = None
+            rows = self._find_pr(payload.get("branch", ""))
             if rows is None:
-                return "ambiguous", {"detail": "gh pr list failed: " + out["stderr"][-200:]}
+                return "ambiguous", {"detail": "gh pr list failed"}
             if rows:
                 row = rows[0]
-                expected_head = self.git.rev(payload.get("branch", "")) or ""
+                expected_head = payload.get("commit") or self.git.rev(payload.get("branch", "")) or ""
                 if row.get("baseRefName") != payload.get("base") or (row.get("headRefOid") and row.get("headRefOid") != expected_head):
                     return "ambiguous", {"detail": f"pull request {row.get('number')} exists but base/head differ from the journaled intent"}
                 return "ok", {"url": row.get("url"), "number": row.get("number"), "detail": "pull request already exists"}
             return "released", {"detail": "no pull request for branch; create will run"}
         if effect == "pull_request_merge":
-            out = run_argv([*self.config["gh_argv"], "pr", "view", str(payload.get("pr", "")), "--json", "state,mergedAt"], self.repo, 120)
+            out = run_argv([*self.config["gh_argv"], "pr", "view", str(payload.get("pr", "")), "--json", "state,mergedAt,headRefOid"], self.repo, 120)
             try:
                 view = json.loads(out["stdout"] or "{}") if out["exit_code"] == 0 else None
             except ValueError:
@@ -1971,6 +2010,8 @@ class Runtime:
             if view is None:
                 return "ambiguous", {"detail": "gh pr view failed: " + out["stderr"][-200:]}
             if str(view.get("state", "")).upper() == "MERGED" or view.get("mergedAt"):
+                if payload.get("commit") and view.get("headRefOid") and view.get("headRefOid") != payload.get("commit"):
+                    return "ambiguous", {"detail": f"pull request merged at head {str(view.get('headRefOid'))[:12]}, not the reviewed commit {str(payload.get('commit'))[:12]}"}
                 return "ok", {"merged": True, "detail": "pull request already merged"}
             return "released", {"detail": "pull request open; merge will run"}
         if effect == "ci_rerun":
@@ -1980,7 +2021,8 @@ class Runtime:
             check = run_argv([self.git.exe, "merge-base", "--is-ancestor", branch, base], self.repo, 60)
             if check["exit_code"] == 0:
                 return "ok", {"merged": True, "base_commit": self.git.rev(base), "detail": "branch already merged into base"}
-            run_argv([self.git.exe, "merge", "--abort"], self.repo, 60)
+            if run_argv([self.git.exe, "rev-parse", "-q", "--verify", "MERGE_HEAD"], self.repo, 60)["exit_code"] == 0:
+                return "ambiguous", {"detail": "a merge is in progress in the working tree; not aborted, operator decides"}
             return "released", {"detail": "not merged; merge will run"}
         return "released", {"detail": "no external effect; step will rerun"}
 
@@ -2074,7 +2116,9 @@ def render_report(runtime: "Runtime") -> str:
         lines.extend(rows or [f"- {empty}"])
         lines.append("")
 
-    section("Completed", [f"- {uid}: {runtime.units[uid].title}" + (" (merged)" if r.merged else "") for uid, r in records.items() if r.state == "completed"])
+    meta = fold.meta or {}
+    titles = {uid: (meta.get("units") or {}).get(uid, {}).get("title") or runtime.units[uid].title for uid in records}
+    section("Completed", [f"- {uid}: {titles[uid]}" + (" (merged)" if r.merged else "") for uid, r in records.items() if r.state == "completed"])
     changed = []
     for uid in order:
         files: list[str] = []
@@ -2106,16 +2150,16 @@ def render_report(runtime: "Runtime") -> str:
     decisions = [f"- {uid}: {r.reason} → options: {', '.join((r.decision or {}).get('options', ['retry', 'skip']))} (`tl_runtime.py decide --unit {uid} --option <choice>`)" for uid, r in records.items() if r.state == "awaiting_operator"]
     section("DECISION REQUIRED", decisions)
     section("BLOCKED", [f"- {uid}: {r.state} — {r.reason}" for uid, r in records.items() if r.state in {"parked", "blocked", "failed"}])
-    cost = [f"- model calls: {totals['calls']} / {runtime.batch['budget'].get('max_model_calls', '∞')}"]
+    cost = [f"- model calls: {totals['calls']} / {(meta.get('budget') or {}).get('max_model_calls') or runtime.batch['budget'].get('max_model_calls', '∞')}"]
     if totals["tokens_known"]:
         cost.append(f"- tokens: input {totals['input_tokens']}, cache read {totals['cache_read_tokens']}, output {totals['output_tokens']}")
     else:
         cost.append(f"- tokens: unknown ({totals['calls_with_tokens']} of {totals['calls']} calls reported usage)")
     cost.append(f"- cost: {'US$ %.2f' % totals['cost_usd'] if totals['cost_known'] else 'unknown (%d of %d calls reported cost)' % (totals['calls_with_cost'], totals['calls'])}")
-    if runtime.limits.get("max_cost_usd") and not totals["cost_known"]:
+    if runtime.limits.get("max_cost_usd") is not None and not totals["cost_known"]:
         cost.append("- cost cap declared but not enforceable: some calls did not report cost")
     section("Cost / Usage", cost)
-    section("Models", [f"- {role}: {cfg.get('adapter')} / {cfg.get('model')} / {cfg.get('effort')} (family {cfg.get('family')})" for role, cfg in runtime.config["roles"].items()])
+    section("Models", [f"- {role}: {cfg.get('adapter')} / {cfg.get('model')} / {cfg.get('effort')} (family {cfg.get('family')})" for role, cfg in (meta.get("roles") or runtime.config["roles"]).items()])
     section("Recovery Events", [f"- {e.get('step_id')}: {e.get('verdict')} — {e.get('detail')}" for e in fold.recoveries])
     nxt = []
     if fold.batch_state == "in_progress":
@@ -2198,9 +2242,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "run":
             if args.accept_stale_version:
-                runtime.state_dir.mkdir(parents=True, exist_ok=True)
-                runtime.journal.fold()
+                runtime.acquire()
                 runtime.journal.append("decision", option="accept_stale_version", stamp=runtime.stamp)
+                runtime.refold()
             state = runtime.run(max_units=args.max_units)
             print(canonical(status_projection(runtime)))
             return {"done": 0, "in_progress": 0, "stopped": 2, "blocked": 3}.get(state, 2)
@@ -2224,6 +2268,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
         if args.command == "decide":
+            runtime.acquire()
             record = runtime.fold.units.get(args.unit)
             if record is None or record.state not in {"awaiting_operator", "parked", "blocked", "failed"}:
                 raise Refusal(f"unit {args.unit} is not waiting for a decision")
@@ -2234,6 +2279,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime.unit_state(args.unit, "failed", "operator: skipped")
             runtime.fold = runtime.journal.fold()
             runtime.project()
+            runtime.release()
             print(canonical({"unit": args.unit, "state": runtime.fold.units[args.unit].state}))
             return 0
         raise Refusal("unknown command")

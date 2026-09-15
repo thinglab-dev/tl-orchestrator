@@ -432,6 +432,125 @@ class RuntimeTest(unittest.TestCase):
         calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
         self.assertEqual(sum(1 for c in calls if c[:2] == ["pr", "merge"]), 0)
 
+    def test_non_boolean_optional_effects_are_refused(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"pull_request_merge": "false"})
+        with self.assertRaises(tl_runtime.Refusal) as ctx:
+            fx.runtime()
+        self.assertIn("pull_request_merge", str(ctx.exception))
+
+    def test_rename_out_of_scope_into_scope_is_contained(self) -> None:
+        fx = Fixture(self.root, units=1, max_rework=0)
+        fx.script("maker", [{"argv": ["git", "mv", "secrets/keep.txt", "pkg/keep.txt"]}])
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "stopped")
+        self.assertEqual(fx.fold().stop_reason, "external_effect_not_authorized")
+        self.assertEqual(git(fx.repo, "log", "--oneline", "tl/B001/T001").count(chr(10)), 0, "nothing was committed")
+        self.assertIn("keep.txt", git(fx.repo, "status", "--porcelain"), "tree left for inspection, not committed")
+
+    def test_secret_with_scope_violation_still_stops(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", [{"files": {"other.txt": "outside", "pkg/greet.py": "TOKEN = 'AKIA" + "Q" * 16 + "'" + chr(10)}}])
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "stopped")
+        self.assertEqual(fx.fold().stop_reason, "secret_detected")
+
+    def test_decide_needs_the_lease(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "done")
+        holder = fx.runtime()
+        holder.acquire()
+        try:
+            out = fx.run_cli("decide", "--unit", "T001", "--option", "skip")
+        finally:
+            holder.release()
+        self.assertEqual(out.returncode, 5, out.stderr)
+        self.assertIn("coordinator_conflict", out.stderr)
+
+    def test_merged_pr_at_another_head_is_not_adopted(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_intent:pull_request_merge").returncode, 70)
+        state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
+        pr = next(iter(state["prs"].values()))
+        pr["state"], pr["mergedAt"], pr["head_oid"] = "MERGED", "2026-01-01T00:00:00Z", "f" * 40
+        fx.gh_state.write_text(json.dumps(state), encoding="utf-8")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertFalse(record.merged)
+
+    def test_resume_after_commit_does_not_reserve_new_calls(self) -> None:
+        fx = Fixture(self.root, units=1, max_calls=2)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_effect:commit").returncode, 70)
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        fold = fx.fold()
+        self.assertEqual(fold.batch_state, "done")
+        self.assertEqual(fold.model_calls_done, 2)
+
+    def test_pre_existing_dirt_on_the_unit_branch_is_refused(self) -> None:
+        fx = Fixture(self.root, units=1)
+        git(fx.repo, "checkout", "-q", "-b", "tl/B001/T001")
+        (fx.repo / "pkg" / "user_edit.py").write_text("mine = 1" + chr(10), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "stopped")
+        self.assertEqual(fx.fold().stop_reason, "unexpected_tree_state")
+        self.assertEqual((fx.repo / "pkg" / "user_edit.py").read_text(encoding="utf-8"), "mine = 1" + chr(10))
+
+    def test_changed_gate_command_is_not_served_from_cache(self) -> None:
+        fx = Fixture(self.root, units=1, max_rework=0)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_effect:gate").returncode, 70)
+        fx.config["gates"]["always"] = [{"id": "compile", "argv": [sys.executable, "-c", "import sys; sys.exit(1)"]}]
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        fx.run_cli("run", "--accept-stale-version")
+        gates = [v for k, v in fx.fold().steps.items() if k.startswith("gate:compile:") and v["status"] == "ok"]
+        self.assertTrue(gates)
+        self.assertTrue(all(not v["result"]["passed"] and "sys.exit(1)" in " ".join(v["result"]["argv"]) for v in gates), "no green result served from the stale command")
+
+    def test_zero_cost_cap_is_enforced_on_observed_cost(self) -> None:
+        fx = Fixture(self.root, units=2)
+        fx.config["adapters"]["fake-maker"]["usage_parser"] = "claude_json"
+        fx.config["limits"]["max_cost_usd"] = 0
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        fx.script("maker", [{"files": {"pkg/greet.py": "x = 1" + chr(10)}, "stdout": json.dumps({"usage": {"input_tokens": 10, "output_tokens": 5}, "total_cost_usd": 0.5, "num_turns": 1})}])
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "stopped")
+        self.assertEqual(fx.fold().stop_reason, "cost_budget_exhausted")
+
+    def test_merge_in_progress_after_crash_waits_for_operator(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_intent:local_merge").returncode, 70)
+        merge_head = Path(git(fx.repo, "rev-parse", "--git-path", "MERGE_HEAD"))
+        merge_head = merge_head if merge_head.is_absolute() else fx.repo / merge_head
+        merge_head.write_text(git(fx.repo, "rev-parse", "tl/B001/T001") + chr(10), encoding="utf-8")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        self.assertEqual(fx.fold().units["T001"].state, "awaiting_operator")
+        self.assertTrue(merge_head.exists(), "runtime must not abort a merge it did not start")
+
+    def test_report_models_come_from_the_journal(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "done")
+        fx.config["roles"]["maker"]["model"] = "m9"
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        report = fx.run_cli("report").stdout
+        self.assertIn("fake-maker / m1 / low", report)
+        self.assertNotIn("m9", report)
+
     # ---- policy -----------------------------------------------------------------------------
 
     def test_scope_expansion_restores_tree_then_parks_on_repeat(self) -> None:
@@ -707,6 +826,8 @@ class RuntimeTest(unittest.TestCase):
         calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
         self.assertEqual(sum(1 for c in calls if c[:2] == ["pr", "merge"]), 1)
         self.assertEqual(sum(1 for c in calls if c[:2] == ["pr", "create"]), 1)
+        self.assertTrue(any(c[:3] == ["run", "view", "7"] for c in calls), "log taken from the run of the reviewed commit")
+        self.assertFalse(any(c[:3] == ["run", "view", "6"] for c in calls))
         self.assertEqual(git(fx.repo, "rev-list", "--count", "main"), "1", "remote merge, no local merge")
 
     def test_ci_infrastructure_failure_reruns_once_then_parks(self) -> None:
@@ -720,6 +841,7 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(record.state, "parked")
         self.assertIn("ci_external_infrastructure", record.reason)
         self.assertEqual(json.loads(fx.gh_state.read_text(encoding="utf-8"))["reruns"], 1)
+        self.assertTrue(any(c[:3] == ["run", "rerun", "7"] for c in json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]))
         self.assertFalse(record.merged)
         self.assertIn("T001:ci_rerun:" + record.commit + ":1", fx.fold().steps)
 

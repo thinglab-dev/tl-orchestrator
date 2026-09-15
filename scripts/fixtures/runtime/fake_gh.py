@@ -35,11 +35,16 @@ def main(argv: list[str]) -> int:
     elif argv[:2] == ["pr", "list"]:
         head = argv[argv.index("--head") + 1]
         pr = state["prs"].get(head)
+        if pr and pr["state"] == "OPEN":
+            pr["head_oid"] = subprocess.run(["git", "rev-parse", head], capture_output=True, text=True).stdout.strip() or pr.get("head_oid")
         out = json.dumps([{"number": pr["number"], "url": pr["url"], "baseRefName": pr.get("base"), "headRefOid": pr.get("head_oid"), "state": pr["state"]}] if pr else [])
     elif argv[:2] == ["pr", "view"]:
         number = int(argv[2])
         pr = next((p for p in state["prs"].values() if p["number"] == number), None)
-        out = json.dumps({"state": pr["state"], "mergedAt": pr["mergedAt"]} if pr else {})
+        if pr and pr["state"] == "OPEN":
+            head = next(h for h, p in state["prs"].items() if p is pr)
+            pr["head_oid"] = subprocess.run(["git", "rev-parse", head], capture_output=True, text=True).stdout.strip() or pr.get("head_oid")
+        out = json.dumps({"state": pr["state"], "mergedAt": pr["mergedAt"], "headRefOid": pr.get("head_oid")} if pr else {})
         code = 0 if pr else 1
     elif argv[:2] == ["pr", "merge"]:
         number = int(argv[2])
@@ -50,7 +55,7 @@ def main(argv: list[str]) -> int:
             code = 1
             sys.stderr.write("merge refused" + chr(10))
         else:
-            pr["state"], pr["mergedAt"] = "MERGED", "2026-01-01T00:00:00Z"
+            pr["state"], pr["mergedAt"], pr["head_oid"] = "MERGED", "2026-01-01T00:00:00Z", head_now
     elif argv[:2] == ["pr", "checks"]:
         seq = state["checks_sequence"]
         current = seq.pop(0) if len(seq) > 1 else seq[0]
@@ -58,7 +63,9 @@ def main(argv: list[str]) -> int:
         out = json.dumps([{"name": "ci", "state": mapping.get(current, current), "link": "", "workflow": "Validate"}])
         code = 0 if current == "success" else 1
     elif argv[:2] == ["run", "list"]:
-        out = json.dumps([{"databaseId": 7, "conclusion": "failure", "status": "completed"}])
+        commit = argv[argv.index("--commit") + 1] if "--commit" in argv else ""
+        out = json.dumps([{"databaseId": 6, "conclusion": "failure", "status": "completed", "headSha": "0" * 40},
+                          {"databaseId": 7, "conclusion": "failure", "status": "completed", "headSha": commit}])
     elif argv[:2] == ["run", "view"]:
         out = state["failed_log"]
     elif argv[:2] == ["run", "rerun"]:

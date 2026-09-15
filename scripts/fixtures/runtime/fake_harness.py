@@ -41,6 +41,9 @@ def main() -> int:
         path.write_text(content, encoding="utf-8")
     for rel in action.get("delete") or []:
         Path(rel).unlink(missing_ok=True)
+    if action.get("argv"):
+        import subprocess
+        subprocess.run(action["argv"], check=False)
     if action.get("stdout"):
         sys.stdout.write(action["stdout"] + "\n")
     if action.get("stderr"):

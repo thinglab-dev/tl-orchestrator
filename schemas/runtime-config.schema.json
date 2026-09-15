@@ -55,6 +55,7 @@
       }
     },
     "allow_same_family_review": {"type": "boolean", "default": false, "description": "Only for offline fixtures. In real use the Checker must come from another family."},
+    "accept_unisolated_worker": {"type": "boolean", "default": false, "description": "Required to run an adapter that declares neither tools_allowlist nor network_sandbox. The runtime refuses otherwise, so the lack of isolation is a conscious choice."},
     "gates": {
       "type": "object",
       "additionalProperties": false,

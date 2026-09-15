@@ -64,8 +64,8 @@ esperado). As seções mutáveis `budget` e `execution` são **projeção**: o r
 reescreve a partir do journal para que leitores do Modo Automático vejam consumo, chamada
 pendente e unidade corrente; as seções congeladas nunca são tocadas.
 
-`permitted_effects` ganha a chave opcional `pull_request_merge` (v0.17.0): sem ela, o
-runtime abre o PR e para ali. `local_merge` faz merge `--no-ff` na branch base quando não há
+`permitted_effects` ganha as chaves opcionais `pull_request_merge` e `ci_rerun` (v0.17.0):
+sem a primeira, o runtime abre o PR e para ali; sem a segunda, nunca reexecuta CI. `local_merge` faz merge `--no-ff` na branch base quando não há
 PR. `continue_independent_after_block` decide se unidades independentes continuam depois
 de uma unidade parada; o padrão do schema continua `false`.
 
@@ -112,7 +112,9 @@ SHA-256 do arquivo (64, 16 ou 12 hex); divergência é `unexpected_revision_drif
 ```
 
 Placeholders do `argv`: `{pack_path}`, `{pack_text}`, `{result_path}`, `{model}`,
-`{effort}`, `{tools}`, `{role}`. As capacidades são declaradas pelo consumidor, não
+`{effort}`, `{tools}`, `{role}`. Portões aceitam `{repo}`, `{unit}`, `{branch}`, `{base_commit}` e
+`{tree}` (por exemplo, `audit_diff.py --base {base_commit}` do tl-deep-review), e seus
+resultados entram no pack do Checker como verificação já executada. As capacidades são declaradas pelo consumidor, não
 inferidas; toda capacidade `false` aparece como limitação no relatório. Maker e Checker
 precisam de `family` diferente (`required_checker_independence_unavailable` caso contrário).
 
@@ -132,6 +134,7 @@ write-ahead AC07 do Modo Automático generalizado de "chamada de modelo" para qu
 | `pull_request` | `T042:pr` |
 | `pull_request_merge` / `local_merge` | `T042:merge:<commit>` |
 | `ci_query` | `T042:ci:<commit>:<ts>` (nunca reutilizado) |
+| `ci_rerun` | `T042:ci_rerun:<commit>:1` (só com `permitted_effects.ci_rerun`) |
 
 Retomar é dobrar o journal: resultado `ok` com o mesmo `input_digest` é reutilizado; step
 sem resultado é reconciliado antes de qualquer escalonamento:
@@ -144,12 +147,15 @@ sem resultado é reconciliado antes de qualquer escalonamento:
 | `pull_request` | `gh pr list --head` | existe → `ok` · não existe → `released` · `gh` falhou → `ambiguous` |
 | `pull_request_merge` | `gh pr view` | mesclado → `ok` · aberto → `released` · `gh` falhou → `ambiguous`, `awaiting_operator` |
 | `local_merge` | `merge-base --is-ancestor` | já mesclado → `ok` · senão → `released` |
+| `ci_rerun` | nenhuma | `ambiguous`: contado como reexecução, nunca repetido |
 | `gate`, `ci_query`, `prepare` | nenhuma | `released` (rodam de novo) |
 
 Cada intenção carrega `runtime_stamp` (`<versão>:<digest da config>`). Uma intenção aberta
 gravada por outra versão para o lote com `stale_workflow_version`; depois de inspecionar,
-`run --accept-stale-version` registra a aceitação e continua. Linha inválida no journal é
-recusa (exit 2), nunca ignorada em silêncio.
+`run --accept-stale-version` registra a aceitação e continua. Cada linha carrega `prev`, os
+primeiros 16 hex do SHA-256 da linha anterior: linha editada, removida ou inserida depois
+quebra a cadeia. Linha inválida ou cadeia quebrada é recusa (exit 2), nunca ignorada em
+silêncio.
 
 ### Por que JSONL e não SQLite
 
@@ -203,7 +209,9 @@ achados do Checker em rodadas consecutivas → `stagnation` (a regra da fila seq
 
 | Ponto | Mecanismo | Limitação declarada |
 | :--- | :--- | :--- |
-| Spawn do worker | `tl_job.py` (contenção da árvore de processos, timeout, recibo limitado) com ambiente filtrado: só a allowlist base mais `env_allowlist`; `DO_NOT_TRACK=1` | ferramentas e sandbox de rede dependem do harness: use `{tools}` e sandbox nativos quando existirem; sem eles, o adapter declara `false` e o relatório avisa |
+| Spawn do worker | `tl_job.py` (contenção da árvore de processos, timeout, recibo limitado) com ambiente filtrado: só a allowlist base mais `env_allowlist`; `DO_NOT_TRACK=1` | ferramentas e sandbox de rede dependem do harness: use `{tools}` e sandbox nativos quando existirem; adapter sem nenhuma das duas só roda com `accept_unisolated_worker: true`, e o relatório avisa |
+| Depois de cada chamada de modelo | `HEAD` e branch comparados antes/depois: worker que faz commit, checkout ou merge por conta própria é `unexpected_tree_state` e para o lote | a detecção é a posteriori; o harness sem allowlist ainda consegue executar `git` |
+| Antes de descartar árvore | toda restauração (escopo, artefato de portão, Checker que escreveu, unidade parada) grava antes o estado atual em `refs/tl/discarded/<lote>/<n>` e anota no journal | nada é apagado sem cópia; limpar as refs é tarefa do operador |
 | Depois de cada Maker | `dirty_paths ⊆ scope_paths`, `do_not_touch`, `sensitive_paths`, varredura de padrões de segredo no diff (AWS, chaves privadas, GitHub, Anthropic/OpenAI, Slack, Google) | varredura por padrão, não prova de ausência de segredo |
 | Antes de cada efeito externo | `permitted_effects` do lote; merge remoto só com CI `success` quando CI está ativa | `gh` autenticado é do operador; o runtime não gerencia credenciais |
 | Orçamento | reserva antes do Maker; contagem de despachos, relógio de parede, teto em dólar sobre custo observado | uma invocação do harness pode conter várias requisições de API; o runtime conta invocações e repassa uso observado |
@@ -234,7 +242,8 @@ só o log dos jobs vermelhos, grava o bruto em `artifacts/` e passa ao Maker a f
 `tl_ci_slice.py`: job, step, testes falhos, assinatura normalizada, classificação
 (`code_failure`, `external_infrastructure`, `configuration`, `unknown`), trecho limitado e
 ponteiro. `code_failure` vira rodada de rework; infraestrutura sem teste falho ganha até
-`flaky_reruns` reexecuções; o resto é `parked`. O fatiador nunca chama um vermelho de flaky.
+`flaky_reruns` reexecuções, e só com `permitted_effects.ci_rerun` (cada uma é um step
+`ci_rerun` no journal); o resto é `parked`. O fatiador nunca chama um vermelho de flaky.
 
 ## Saídas para o operador
 
@@ -272,5 +281,6 @@ rerun de infraestrutura e reconciliação de merge.
 - A classificação de falha é por padrão; `unknown` leva a `parked`, não a tentativa cega.
 - O journal e o lote não são protegidos por sistema de arquivos contra um worker com escrita
   irrestrita (por exemplo, `claude` sem sandbox). O runtime detecta árvore alterada pelo
-  Checker, mas não adulteração do journal; mantenha `--state-dir` fora do repositório, use a
-  allowlist de ferramentas do harness e um sandbox quando ele existir.
+  Checker, `HEAD`/branch movidos por qualquer worker e journal adulterado (cadeia de hashes),
+  mas detecção não é prevenção: mantenha `--state-dir` fora do repositório, use a allowlist
+  de ferramentas do harness e um sandbox quando ele existir.

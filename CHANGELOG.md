@@ -51,13 +51,20 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   Usage, Models, Recovery Events, What Happens Next), `status.json` para o operador,
   `journal` diagnóstico, `decide --option retry|skip` e `notify_argv` opcional.
 - Schemas `runtime-config.schema.json` e `step-journal.schema.json`; `batch.schema.json`
-  ganha a chave opcional `permitted_effects.pull_request_merge` (ausente = `false`).
+  ganha as chaves opcionais `permitted_effects.pull_request_merge` e `permitted_effects.ci_rerun`
+  (ausentes = `false`).
+- Integridade e contenção a posteriori: cadeia de hashes no journal (`prev`), `HEAD`/branch
+  comparados antes e depois de cada chamada de modelo, toda árvore descartada preservada em
+  `refs/tl/discarded/<lote>/<n>`, artefatos de portão nunca chegam ao commit, adapter sem
+  allowlist de ferramentas nem sandbox só roda com `accept_unisolated_worker: true`, e
+  `verificacao_pendente` do Checker que corresponde a um portão já verde é resolvida pelo
+  runtime com a evidência do próprio portão.
 - Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
   `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
 
 ### Validação
 
-- `scripts/tests/test_tl_runtime.py` (40 testes, Git real, harness e `gh` scriptados):
+- `scripts/tests/test_tl_runtime.py` (49 testes, Git real, harness e `gh` scriptados):
   DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
   oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
   segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec
@@ -66,8 +73,13 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   autorização, injeção de falha via `TL_RUNTIME_FAULT` (crash antes e depois do efeito do
   Maker, depois do commit, do push e do PR, remoto divergente → `awaiting_operator`, journal
   corrompido, versão obsoleta → `--accept-stale-version`), laço de CI com fatia e rework,
-  rerun de infraestrutura, e o fatiador de log (Go, pytest, unittest, infra, configuração,
-  CLI).
+  rerun de infraestrutura (com e sem permissão), worker que move `HEAD`, journal adulterado,
+  árvore descartada preservada em ref, worktree vinculada, retomada após commit sem
+  redespacho, e o fatiador de log (Go, pytest, unittest, infra, configuração, CLI).
+- Dogfood real com `claude -p` (Maker) e `codex exec` (Checker) numa fixture Python: uso
+  observado por chamada (9 requisições de API numa invocação do Maker, US$0,37; Checker com
+  348k tokens de entrada e custo `unknown`, porque o Codex não o reporta), crash injetado após
+  o commit e retomada reconciliada sem novo despacho.
 
 ### Migração
 

@@ -9,7 +9,8 @@
     "format_version": {"const": 1},
     "seq": {"type": "integer", "minimum": 1},
     "at": {"type": "string", "format": "date-time"},
-    "kind": {"type": "string", "enum": ["batch_open", "step_intent", "step_result", "unit_state", "attempt", "recovery", "decision", "note", "batch_state"]}
+    "kind": {"type": "string", "enum": ["batch_open", "step_intent", "step_result", "unit_state", "attempt", "recovery", "decision", "note", "batch_state"]},
+    "prev": {"type": "string", "description": "First 16 hex of the SHA-256 of the previous line (empty for the first). A line edited, removed or inserted later breaks the chain and the runtime refuses the journal."}
   },
   "allOf": [
     {
@@ -18,7 +19,7 @@
         "required": ["step_id", "batch", "unit", "phase", "type", "effect_class", "input_digest", "runtime_stamp", "intent"],
         "properties": {
           "step_id": {"type": "string", "description": "Stable id: <unit>:r<round>:<role>[:a<attempt>], gate:<id>:<tree>, <unit>:commit:<tree>, <unit>:push:<commit>, <unit>:pr, <unit>:merge:<commit>."},
-          "effect_class": {"type": "string", "enum": ["none", "model_call", "local_write", "local_commit", "local_merge", "push", "pull_request", "pull_request_merge", "ci_query"]},
+          "effect_class": {"type": "string", "enum": ["none", "model_call", "local_write", "local_commit", "local_merge", "push", "pull_request", "pull_request_merge", "ci_query", "ci_rerun"]},
           "input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the canonical intent; a prior ok result is reused only when it matches."},
           "runtime_stamp": {"type": "string", "description": "<runtime version>:<config digest>. An open intent with another stamp stops the batch (stale_workflow_version) until accepted."},
           "tree_before": {"type": "string", "description": "git tree of the working directory before the effect (mutating classes only)."}

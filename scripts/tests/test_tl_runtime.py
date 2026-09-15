@@ -103,7 +103,7 @@ class Fixture:
             "gates": {"always": gates if gates is not None else [{"id": "compile", "argv": [sys.executable, "-c", "import pkg"]}], "by_flag": {}, "canonical": []},
             "limits": base_limits, "base_branch": "main", "gh_executable": [sys.executable, str(FAKE_GH)],
             "ci": {"enabled": ci, "poll_seconds": 0, "timeout_seconds": 5, "flaky_reruns": 1},
-            "sensitive_paths": ["secrets/"], "env_allowlist": ["TL_FAKE_GH_STATE"],
+            "sensitive_paths": ["secrets/"], "env_allowlist": ["TL_FAKE_GH_STATE"], "accept_unisolated_worker": True,
         }
         self.config_path = root / "runtime.json"
         self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
@@ -283,6 +283,103 @@ class RuntimeTest(unittest.TestCase):
         # A parked-then-retried unit resumes in a fresh runtime only when the batch is still open;
         # here the batch closed, so a new authorization is the documented path. Prove the fold says so.
         self.assertIn("a new authorization is needed", fx.run_cli("report").stdout)
+
+    def test_pending_verification_matching_a_green_gate_is_resolved_by_runtime(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", [{"verdict": "changes_requested", "action_items": [
+            {"id": "R1", "target": "human", "category": "intent_gap", "summary": "verificacao_pendente: run " + sys.executable + " -c import pkg; proves the package imports.", "paths": ["pkg/"]}]}])
+        self.assertEqual(fx.runtime().run(), "done")
+        fold = fx.fold()
+        self.assertEqual(fold.units["T001"].state, "completed")
+        self.assertTrue(any("resolved by runtime evidence" in n.get("text", "") for n in fold.notes))
+        pack = (fx.scenario / "checker-0.pack.md").read_text(encoding="utf-8")
+        self.assertIn("## runtime_verification", pack)
+        self.assertIn("compile: pass", pack)
+
+    def test_gate_artifacts_never_reach_the_commit(self) -> None:
+        fx = Fixture(self.root, units=1, gates=[{"id": "dirty-gate", "argv": [sys.executable, "-c", "open('pkg/artifact.tmp', 'w').write('x')"]}])
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "done")
+        self.assertNotIn("artifact.tmp", git(fx.repo, "ls-tree", "-r", "--name-only", "main"))
+        self.assertTrue(any("changed the tree" in n.get("text", "") for n in fx.fold().notes))
+
+    def test_unisolated_adapter_needs_explicit_acceptance(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.config.pop("accept_unisolated_worker")
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        with self.assertRaises(tl_runtime.Refusal) as ctx:
+            fx.runtime()
+        self.assertIn("accept_unisolated_worker", str(ctx.exception))
+
+    def test_worker_that_moves_head_stops_the_batch(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", [{"files": {"pkg/greet.py": "x = 1" + chr(10)}, "argv": ["git", "commit", "-q", "--allow-empty", "-m", "worker commits by itself"]}])
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "stopped")
+        self.assertEqual(fx.fold().stop_reason, "unexpected_tree_state")
+
+    def test_journal_hash_chain_detects_tampering(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        fx.run_cli("run", fault="after_intent:maker")
+        lines = (fx.state_dir / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        edited = json.loads(lines[1])
+        edited["state"] = "completed"
+        lines[1] = json.dumps(edited, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        (fx.state_dir / "journal.jsonl").write_text(chr(10).join(lines) + chr(10), encoding="utf-8")
+        result = fx.run_cli("run")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid line", result.stderr)
+
+    def test_discarded_tree_is_kept_under_a_ref(self) -> None:
+        fx = Fixture(self.root, units=1, max_rework=4)
+        fx.script("maker", [{"files": {"pkg/greet.py": "x = 1" + chr(10), "other.txt": "outside"}}, {"files": {"pkg/greet.py": "x = 2" + chr(10)}}])
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "done")
+        refs = git(fx.repo, "for-each-ref", "--format=%(refname)", "refs/tl/discarded/")
+        self.assertTrue(refs, "the scope-violating tree was snapshotted before being discarded")
+        self.assertEqual(git(fx.repo, "show", refs.splitlines()[0] + ":other.txt"), "outside")
+
+    def test_linked_worktree_is_supported(self) -> None:
+        fx = Fixture(self.root, units=1)
+        linked = self.root / "linked"
+        git(fx.repo, "worktree", "add", "-q", str(linked), "-b", "linked-main", "main")
+        fx.config["base_branch"] = "linked-main"
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        runtime = tl_runtime.Runtime(fx.batch_path, fx.config_path, linked, fx.state_dir, sleep=lambda s: None)
+        self.assertEqual(runtime.run(), "done")
+        self.assertIn("T001", git(linked, "log", "--oneline", "linked-main"))
+
+    def test_resume_after_commit_with_changed_pack_does_not_redispatch(self) -> None:
+        fx = Fixture(self.root, units=1)
+        # The Maker adds a test file, so the round-1 pack (related_tests) differs on resume.
+        fx.script("maker", [{"files": {"pkg/greet.py": "x = 1" + chr(10), "pkg/test_greet.py": "import unittest" + chr(10)}}])
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_effect:commit").returncode, 70)
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        fold = fx.fold()
+        self.assertEqual(fold.units["T001"].state, "completed")
+        self.assertEqual(fold.model_calls_done, 2, "no Maker or Checker call is repeated after the commit was reconciled")
+
+    def test_gate_placeholders_and_script_name_matching(self) -> None:
+        audit = self.root / "audit.py"
+        audit.write_text("import subprocess, sys; base = sys.argv[1]; out = subprocess.run(['git', 'diff', '--name-only', base], capture_output=True, text=True).stdout; sys.exit(0 if out.strip() else 3)", encoding="utf-8")
+        fx = Fixture(self.root, units=1, gates=[{"id": "audit", "argv": [sys.executable, str(audit), "{base_commit}"]}])
+        fx.script("maker", [{"files": {"pkg/__init__.py": "VERSION = 1" + chr(10)}}])
+        fx.script("checker", [{"verdict": "changes_requested", "action_items": [
+            {"id": "R1", "target": "human", "category": "intent_gap", "summary": "verificacao_pendente: executar audit.py sobre pkg/__init__.py para confirmar higiene do diff.", "paths": ["pkg/"]}]}])
+        self.assertEqual(fx.runtime().run(), "done")
+        fold = fx.fold()
+        gate = next(v for k, v in fold.steps.items() if k.startswith("gate:audit:"))
+        self.assertEqual(gate["result"]["argv"][2], fold.units["T001"].base_commit)
+        self.assertTrue(gate["result"]["passed"])
+        self.assertTrue(any("resolved by runtime evidence" in n.get("text", "") for n in fold.notes))
 
     # ---- policy -----------------------------------------------------------------------------
 
@@ -562,7 +659,7 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(git(fx.repo, "rev-list", "--count", "main"), "1", "remote merge, no local merge")
 
     def test_ci_infrastructure_failure_reruns_once_then_parks(self) -> None:
-        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True, "ci_rerun": True}, ci=True)
         fx.gh_state.write_text(json.dumps({"checks_sequence": ["failure", "failure", "failure"],
                                            "failed_log": "job\tstep\t##[error]The hosted runner encountered an error while running your job. lost communication with the server"}), encoding="utf-8")
         fx.script("maker", MAKER_OK)
@@ -573,6 +670,17 @@ class RuntimeTest(unittest.TestCase):
         self.assertIn("ci_external_infrastructure", record.reason)
         self.assertEqual(json.loads(fx.gh_state.read_text(encoding="utf-8"))["reruns"], 1)
         self.assertFalse(record.merged)
+        self.assertIn("T001:ci_rerun:" + record.commit + ":1", fx.fold().steps)
+
+    def test_ci_rerun_without_permission_parks_without_touching_ci(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["failure"], "failed_log": "job\tstep\t##[error]lost communication with the server"}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "blocked")
+        record = fx.fold().units["T001"]
+        self.assertIn("rerun not permitted", record.reason)
+        self.assertNotIn("reruns", json.loads(fx.gh_state.read_text(encoding="utf-8")))
 
     def test_crash_after_pr_creation_is_reconciled(self) -> None:
         fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True})

@@ -54,7 +54,7 @@ FAILURE_CLASSES = (
 STOP_CLASSES = {"authorization", "budget", "security", "state_integrity"}
 EFFECT_CLASSES = (
     "none", "model_call", "local_write", "local_commit", "local_merge", "push",
-    "pull_request", "pull_request_merge", "ci_query",
+    "pull_request", "pull_request_merge", "ci_query", "ci_rerun",
 )
 NO_DISPATCH_STATES = {"start_failed", "invalid_input", "conflict"}  # transport proved nothing ran: not charged
 PHASES = ("prepare", "implement", "contain", "gates", "review", "commit", "push", "pull_request", "ci", "merge", "complete")
@@ -286,11 +286,13 @@ class Journal:
     def __init__(self, path: Path):
         self.path = path
         self._seq = 0
+        self._prev = ""
 
     def append(self, kind: str, **payload) -> dict:
         self._seq += 1
-        event = {"format_version": JOURNAL_FORMAT, "seq": self._seq, "at": now_iso(), "kind": kind, **payload}
+        event = {"format_version": JOURNAL_FORMAT, "seq": self._seq, "at": now_iso(), "kind": kind, "prev": self._prev, **payload}
         line = canonical(event)
+        self._prev = sha256_text(line)[:16]
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "a", encoding="utf-8", newline="\n") as handle:
             handle.write(line + "\n")
@@ -301,6 +303,7 @@ class Journal:
     def read(self) -> tuple[list[dict], int]:
         events: list[dict] = []
         invalid = 0
+        prev = ""
         if not self.path.is_file():
             return events, invalid
         with open(self.path, "r", encoding="utf-8", errors="replace") as handle:
@@ -316,7 +319,12 @@ class Journal:
                 if not isinstance(event, dict) or event.get("format_version") != JOURNAL_FORMAT or "kind" not in event:
                     invalid += 1
                     continue
+                # Hash chain: a line edited, removed or inserted after the fact breaks every later link.
+                if event.get("prev") != prev:
+                    invalid += 1
+                prev = sha256_text(raw)[:16]
                 events.append(event)
+        self._prev = prev
         return events, invalid
 
     def fold(self) -> Fold:
@@ -378,6 +386,15 @@ class Git:
     def __init__(self, repo: Path, executable: str = "git"):
         self.repo = repo
         self.exe = executable
+        self._git_dir: Path | None = None
+
+    def git_path(self, name: str) -> Path:
+        """Path inside the repository's git dir, correct for linked worktrees where .git is a file."""
+        record = run_argv([self.exe, "rev-parse", "--git-path", name], self.repo, 60)
+        if record["exit_code"] != 0:
+            raise Refusal(f"not a git repository: {self.repo.as_posix()}")
+        path = Path(record["stdout"].strip())
+        return path if path.is_absolute() else self.repo / path
 
     def run(self, *args: str, check: bool = True, timeout: float = 600) -> str:
         record = run_argv([self.exe, *args], self.repo, timeout)
@@ -414,12 +431,13 @@ class Git:
 
     def worktree_tree(self) -> str:
         """Tree of the working directory (tracked + untracked, respecting ignores) without touching the index."""
-        temp_index = self.repo / ".git" / f"tl-runtime-index-{os.getpid()}"
+        index = self.git_path("index")
+        temp_index = index.with_name(f"tl-runtime-index-{os.getpid()}")
         env = dict(os.environ)
         env["GIT_INDEX_FILE"] = str(temp_index)
         try:
-            if (self.repo / ".git" / "index").is_file():
-                shutil.copyfile(self.repo / ".git" / "index", temp_index)
+            if index.is_file():
+                shutil.copyfile(index, temp_index)
             record = run_argv([self.exe, "add", "-A", "--", "."], self.repo, 300, env)
             if record["exit_code"] != 0:
                 raise Refusal(f"git add for tree checkpoint failed: {record['stderr'][:300]}")
@@ -437,10 +455,16 @@ class Git:
         self.run("update-ref", ref, commit)
         return commit
 
-    def restore_tree(self, tree: str) -> None:
-        """Make the working directory equal to `tree` (keeps runtime-owned directories)."""
+    def restore_tree(self, tree: str, keep_ref: str = "") -> str:
+        """Make the working directory equal to `tree`. Whatever is discarded is first kept under `keep_ref`."""
+        kept = ""
+        current = self.worktree_tree()
+        if current != tree and keep_ref:
+            kept = self.run("commit-tree", current, "-p", self.head(), "-m", f"tl-runtime discarded tree before restoring {tree[:12]}")
+            self.run("update-ref", keep_ref, kept)
         self.run("read-tree", "--reset", "-u", tree)
         self.run("clean", "-fd", "--", ".")
+        return kept
 
     def diff_text(self, base: str, limit: int, tree: str | None = None) -> tuple[str, bool]:
         """Diff from `base` to the working tree, untracked files included (via the tree object)."""
@@ -453,7 +477,7 @@ class Git:
         return self.run("diff", "--name-only", base, tree or self.worktree_tree())
 
     def ensure_exclude(self) -> None:
-        exclude = self.repo / ".git" / "info" / "exclude"
+        exclude = self.git_path("info/exclude")
         exclude.parent.mkdir(parents=True, exist_ok=True)
         current = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
         lines = [f"/{RESULT_DIR_NAME}/", f"/{STATE_DIR_NAME}/"]
@@ -494,6 +518,11 @@ def load_runtime_config(path: Path) -> dict:
         role["family"] = adapters[role["adapter"]]["family"]
     if roles["maker"]["family"] == roles["checker"]["family"] and not config.get("allow_same_family_review", False):
         raise Refusal("required_checker_independence_unavailable: maker and checker share a family", 2)
+    unisolated = [name for name, adapter in adapters.items()
+                  if not adapter["capabilities"].get("tools_allowlist") and not adapter["capabilities"].get("network_sandbox")]
+    if unisolated and not config.get("accept_unisolated_worker", False):
+        raise Refusal("adapter(s) " + ", ".join(unisolated) + " declare neither tools_allowlist nor network_sandbox; "
+                      "set accept_unisolated_worker: true to run them knowingly", 2)
     limits = dict(DEFAULT_LIMITS)
     limits.update(config.get("limits") or {})
     config["limits"] = limits
@@ -540,6 +569,7 @@ def load_batch(path: Path) -> dict:
         if not isinstance(effects.get(key), bool):
             raise Refusal(f"permitted_effects.{key} must be boolean")
     effects.setdefault("pull_request_merge", False)
+    effects.setdefault("ci_rerun", False)
     scope = batch["frozen_scope"]
     units = scope.get("units")
     if not isinstance(units, list) or not units:
@@ -688,7 +718,7 @@ class ContextCompiler:
 
     def build(self, role: str, unit: Unit, phase: str, *, result_path: str, findings: list | None = None,
               ci_slice: dict | None = None, diff_base: str | None = None, checkpoint_note: str = "",
-              gate_failures: list | None = None) -> tuple[str, dict]:
+              gate_failures: list | None = None, gate_results: list | None = None) -> tuple[str, dict]:
         contract, contract_digest = self._prompt(role)
         spec_text = unit.spec_path.read_text(encoding="utf-8")
         sections: list[tuple[str, str]] = []
@@ -728,6 +758,9 @@ class ContextCompiler:
             add("ci_failure", json.dumps(head, ensure_ascii=False, indent=1) + "\n" + ci_slice.get("excerpt", ""), ci_slice.get("raw_ref") or "", cap=6_000)
         if checkpoint_note:
             add("checkpoint", checkpoint_note)
+        if gate_results:
+            rows = [f"- {g['id']}: {'pass' if g.get('passed') else 'FAIL'} (exit {g.get('exit_code')}) `{' '.join(g.get('argv', []))}`" for g in gate_results]
+            add("runtime_verification", "The runtime already executed these gates on the tree under review; do not report them as pending verification:" + chr(10) + chr(10).join(rows))
         if diff_base:
             limit = int(self.config["limits"]["max_diff_bytes"])
             diff, truncated = self.git.diff_text(diff_base, limit)
@@ -835,11 +868,15 @@ class Harness:
         argv[0] = resolve_executable(argv[0])
         return argv
 
-    def dispatch(self, role: str, step_id: str, pack_path: Path, pack_text: str, result_rel: str, authorization: str) -> dict:
+    @staticmethod
+    def job_name(step_id: str, input_digest: str) -> str:
+        return (re.sub(r"[^A-Za-z0-9._-]", "-", step_id)[:52] + "-" + input_digest[:8])[:64]
+
+    def dispatch(self, role: str, step_id: str, pack_path: Path, pack_text: str, result_rel: str, authorization: str, input_digest: str = "") -> dict:
         role_cfg = self.config["roles"][role]
         adapter = self.config["adapters"][role_cfg["adapter"]]
         argv = self.render(role, pack_path, pack_text, result_rel)
-        unit_name = re.sub(r"[^A-Za-z0-9._-]", "-", step_id)[:64]
+        unit_name = self.job_name(step_id, input_digest)
         state_dir = self.jobs_dir / unit_name
         timeout = str(int(role_cfg.get("timeout_seconds", 1800)))
         start = run_argv(
@@ -868,9 +905,9 @@ class Harness:
             stderr_tail = (state_dir / "jobs" / unit_name / "stderr.log").read_text(encoding="utf-8", errors="replace")[-2000:]
         return {"state": final.get("state", wait["state"]), "receipt": final, "usage": usage, "stderr": stderr_tail, "job_dir": state_dir.as_posix(), "model": role_cfg.get("model"), "effort": role_cfg.get("effort"), "family": role_cfg.get("family")}
 
-    def inspect(self, step_id: str) -> dict:
+    def inspect(self, step_id: str, input_digest: str = "") -> dict:
         """Used by recovery: what does the transport say about a call whose result was never journaled?"""
-        unit_name = re.sub(r"[^A-Za-z0-9._-]", "-", step_id)[:64]
+        unit_name = self.job_name(step_id, input_digest)
         state_dir = self.jobs_dir / unit_name
         if not state_dir.is_dir():
             return {"state": "not_started"}
@@ -964,13 +1001,19 @@ def gates_for(config: dict, unit: Unit) -> list[dict]:
     return ordered
 
 
-def run_gate(gate: dict, repo: Path, env: dict, output_cap: int) -> dict:
-    argv = [str(a) for a in gate["argv"]]
+def run_gate(gate: dict, repo: Path, env: dict, output_cap: int, values: dict | None = None) -> dict:
+    """Run one gate. argv placeholders: {repo}, {unit}, {branch}, {base_commit}, {tree}."""
+    argv = []
+    for item in gate["argv"]:
+        item = str(item)
+        for key, value in (values or {}).items():
+            item = item.replace("{" + key + "}", str(value))
+        argv.append(item)
     argv[0] = resolve_executable(argv[0])
     record = run_argv(argv, repo, float(gate.get("timeout_seconds", 900)), env=env, cap=output_cap)
     passed = record["state"] == "exited" and record["exit_code"] == 0
     tail = (record["stderr"] or record["stdout"])[-output_cap:]
-    return {"id": gate["id"], "passed": passed, "state": record["state"], "exit_code": record["exit_code"], "seconds": record["seconds"], "tail": tail, "signature": "" if passed else normalize_signature("gate", gate["id"], tail[-600:])}
+    return {"id": gate["id"], "argv": argv, "passed": passed, "state": record["state"], "exit_code": record["exit_code"], "seconds": record["seconds"], "tail": tail, "signature": "" if passed else normalize_signature("gate", gate["id"], tail[-600:])}
 
 
 class CI:
@@ -1168,7 +1211,7 @@ class Runtime:
         record.state, record.reason = state, reason
 
     def note(self, text: str, **data) -> None:
-        self.journal.append("note", text=text, **data)
+        self.fold.notes.append(self.journal.append("note", text=text, **data))
 
     def artifact(self, name: str, content: str) -> str:
         digest = sha256_text(content)
@@ -1188,6 +1231,7 @@ class Runtime:
         if cacheable and prior and prior.get("status") == "ok" and prior.get("input_digest") == input_digest:
             return prior["result"]
         tree_before = self.git.worktree_tree() if effect_class in {"model_call", "local_write", "local_commit", "local_merge"} else ""
+        head_before = (self.git.head(), self.git.current_branch()) if effect_class == "model_call" else None
         self.journal.append("step_intent", step_id=step_id, batch=self.batch_id, unit=unit, phase=phase, type=intent.get("type", phase),
                             effect_class=effect_class, input_digest=input_digest, runtime_stamp=self.stamp, intent=intent, tree_before=tree_before)
         self._fault_point(f"after_intent:{intent.get('type', phase)}")
@@ -1196,6 +1240,8 @@ class Runtime:
         status = result.pop("_status", "ok")
         evidence = result.pop("_evidence", [])
         tree_after = self.git.worktree_tree() if tree_before else ""
+        if head_before is not None and (self.git.head(), self.git.current_branch()) != head_before:
+            result["class"], result["detail"] = "state_integrity", f"worker moved HEAD or branch during {step_id} ({head_before[1]}@{head_before[0][:12]} -> {self.git.current_branch()}@{self.git.head()[:12]})"
         self.journal.append("step_result", step_id=step_id, unit=unit, phase=phase, effect_class=effect_class, status=status,
                             input_digest=input_digest, result=result, tree_after=tree_after, evidence=evidence)
         self.fold.steps[step_id] = {"step_id": step_id, "status": status, "input_digest": input_digest, "result": result, "effect_class": effect_class}
@@ -1279,7 +1325,7 @@ class Runtime:
             for gate in self.config["gates"]["canonical"]:
                 tree = self.git.worktree_tree()
                 outcome = self.step(f"gate:canonical:{gate['id']}:{tree}", "none", "", "close", {"type": "gate", "gate": gate["id"], "tree": tree},
-                                    lambda intent, g=gate: run_gate(g, self.repo, self.policy.worker_env(), int(self.limits["gate_output_bytes"])))
+                                    lambda intent, g=gate: run_gate(g, self.repo, self.policy.worker_env(), int(self.limits["gate_output_bytes"]), {"repo": self.repo.as_posix(), "tree": tree}))
                 if not outcome.get("passed"):
                     failures.append(outcome["id"])
             if failures:
@@ -1327,12 +1373,20 @@ class Runtime:
         finally:
             self._leave_branch()
 
+    def restore(self, tree: str, why: str, uid: str = "") -> None:
+        """Restore the working tree; anything that would be lost is kept at refs/tl/discarded/... and noted."""
+        n = sum(1 for e in self.fold.notes if str(e.get("text", "")).startswith("discarded tree kept")) + 1
+        ref = f"refs/tl/discarded/{self.batch_id}/{n}"
+        kept = self.git.restore_tree(tree, keep_ref=ref)
+        if kept:
+            self.note(f"discarded tree kept at {ref} ({kept[:12]}): {why}", unit=uid, ref=ref, commit=kept)
+
     def _park_cleanup(self, uid: str) -> None:
         """Keep a parked unit's uncommitted work as a checkpoint ref, then clean the tree for the next unit."""
         if not self.git.dirty_paths():
             return
         self._checkpoint_dirty(uid, {"step_id": "park"})
-        self.git.restore_tree(self.git.run("rev-parse", "HEAD^{tree}"))
+        self.restore(self.git.run("rev-parse", "HEAD^{tree}"), f"{uid} parked; work is in its checkpoint", uid)
 
     def _leave_branch(self) -> None:
         """Return to the base branch with a clean tree so the next unit starts from a known state."""
@@ -1353,7 +1407,8 @@ class Runtime:
         record = self.fold.units[uid]
         branch = record.branch or f"{self.config['branch_prefix']}{self.batch_id}/{uid}"
         base = record.base or self.base_ref(unit)
-        self.unit_state(uid, "running", "", phase="prepare", branch=branch, base=base)
+        if record.phase == "prepare":
+            self.unit_state(uid, "running", "", phase="prepare", branch=branch, base=base)
         dirty = self.git.dirty_paths()
         if dirty and self.git.current_branch() != branch:
             raise StopBatch("unexpected_tree_state", f"dirty tree before {uid}: {', '.join(dirty[:8])}")
@@ -1445,7 +1500,7 @@ class Runtime:
             (self.repo / result_rel).unlink()
 
         def do(intent: dict) -> dict:
-            dispatch = self.harness.dispatch("maker", step_id, pack_path, pack_text, result_rel, self.batch["authorization"]["proposal_digest"])
+            dispatch = self.harness.dispatch("maker", step_id, pack_path, pack_text, result_rel, self.batch["authorization"]["proposal_digest"], digest_of(intent))
             result = load_result(self.repo / result_rel, "unit_result")
             klass, signature, detail = classify_dispatch(dispatch, result, "unit_result")
             return {"_status": "released" if dispatch.get("state") in NO_DISPATCH_STATES else "ok","dispatch": {k: v for k, v in dispatch.items() if k != "receipt"} | {"receipt_state": (dispatch.get("receipt") or {}).get("state")},
@@ -1453,6 +1508,8 @@ class Runtime:
                     "_evidence": [self.artifact(f"{step_id}.pack.manifest.json", canonical(manifest))]}
 
         outcome = self.step(step_id, "model_call", uid, "implement", {"type": "maker", "round": round_no, "pack_digest": manifest["digest"], "step": step_id}, do)
+        if outcome.get("class") == "state_integrity":
+            raise StopBatch("unexpected_tree_state", outcome["detail"])
         if not outcome.get("class"):
             return None
         move = self.failure(unit, outcome["class"], outcome["signature"], outcome["detail"], phase="implement", step_id=step_id)
@@ -1482,7 +1539,7 @@ class Runtime:
             raise StopBatch("external_effect_not_authorized" if "sensitive" in detail else "secret_detected", detail)
         # scope: restore the tree to the round start so the widening never reaches a commit.
         if intent_tree:
-            self.git.restore_tree(intent_tree)
+            self.restore(intent_tree, f"{uid} scope violation: {detail[:80]}", uid)
         move = self.failure(unit, "scope", normalize_signature("scope", detail), detail, phase="contain")
         if move == "retry":
             return {}
@@ -1492,9 +1549,17 @@ class Runtime:
         uid = unit.id
         failures = []
         tree = self.git.worktree_tree()
+        record = self.fold.units[uid]
+        values = {"repo": self.repo.as_posix(), "unit": uid, "branch": record.branch, "base_commit": record.base_commit, "tree": tree}
         for gate in gates_for(self.config, unit):
-            outcome = self.step(f"gate:{gate['id']}:{tree}", "none", uid, "gates", {"type": "gate", "gate": gate["id"], "tree": tree},
-                                lambda intent, g=gate: run_gate(g, self.repo, self.policy.worker_env(), int(self.limits["gate_output_bytes"])))
+            outcome = self.step(f"gate:{gate['id']}:{tree}", "none", uid, "gates", {"type": "gate", "gate": gate["id"], "tree": tree, "base_commit": record.base_commit},
+                                lambda intent, g=gate: run_gate(g, self.repo, self.policy.worker_env(), int(self.limits["gate_output_bytes"]), values))
+            after = self.git.worktree_tree()
+            if after != tree:
+                # A verification gate that leaves files behind (caches, build output, auto-fixes) must not
+                # smuggle them into the delivery: the tree under review is the Maker's, not the gate's.
+                self.restore(tree, f"gate {gate['id']} artifacts", uid)
+                self.note(f"{uid}: gate {gate['id']} changed the tree; discarded its artifacts (add them to .gitignore or make the gate read-only)")
             if not outcome.get("passed"):
                 failures.append({"id": outcome["id"], "exit_code": outcome.get("exit_code"), "state": outcome.get("state"), "tail": outcome.get("tail", "")[-1500:], "signature": outcome.get("signature", "")})
         return failures
@@ -1509,20 +1574,25 @@ class Runtime:
             step_id = f"{uid}:r{round_no}:checker:a{attempt}"
         result_rel = f"{RESULT_DIR_NAME}/{uid}/r{round_no}-checker.json"
         base_commit = record.base_commit or self.git.head()
-        pack_text, manifest = self.compiler.build("checker", unit, "review", result_path=result_rel, diff_base=base_commit)
+        tree = self.git.worktree_tree()
+        gate_results = []
+        for gate in gates_for(self.config, unit):
+            prior = self.fold.steps.get(f"gate:{gate['id']}:{tree}")
+            if prior and prior.get("status") == "ok":
+                gate_results.append({**(prior.get("result") or {}), "argv": (prior.get("result") or {}).get("argv") or [str(a) for a in gate["argv"]]})
+        pack_text, manifest = self.compiler.build("checker", unit, "review", result_path=result_rel, diff_base=base_commit, gate_results=gate_results)
         pack_path = self.state_dir / "packs" / f"{re.sub(r'[^A-Za-z0-9._-]', '_', step_id)}.md"
         pack_path.write_text(pack_text, encoding="utf-8")
         with contextlib.suppress(OSError):
             (self.repo / result_rel).unlink()
-        tree = self.git.worktree_tree()
 
         def do(intent: dict) -> dict:
-            dispatch = self.harness.dispatch("checker", step_id, pack_path, pack_text, result_rel, self.batch["authorization"]["proposal_digest"])
+            dispatch = self.harness.dispatch("checker", step_id, pack_path, pack_text, result_rel, self.batch["authorization"]["proposal_digest"], digest_of(intent))
             result = load_result(self.repo / result_rel, "review_result")
             klass, signature, detail = classify_dispatch(dispatch, result, "review_result")
             after = self.git.worktree_tree()
             if after != tree:
-                self.git.restore_tree(tree)
+                self.restore(tree, f"{uid} checker modified the tree", uid)
                 klass, detail = "state_integrity", "checker modified the tree; restored"
             return {"_status": "released" if dispatch.get("state") in NO_DISPATCH_STATES else "ok",
                     "dispatch": {k: v for k, v in dispatch.items() if k != "receipt"} | {"receipt_state": (dispatch.get("receipt") or {}).get("state")},
@@ -1536,6 +1606,12 @@ class Runtime:
         if outcome["class"] == "state_integrity":
             raise StopBatch("unexpected_tree_state", outcome["detail"])
         items = (outcome.get("result") or {}).get("action_items") or []
+        resolved, items = self._resolve_pending_verification(items, gate_results)
+        for item in resolved:
+            self.note(f"{uid}: Checker item {item.get('id')} resolved by runtime evidence (gate already passed): {str(item.get('summary', ''))[:120]}")
+        if resolved and not items:
+            self.unit_state(uid, "running", "", phase="commit", findings=[], tree=tree)
+            return None
         human = [i for i in items if i.get("target") == "human" and i.get("category") != "deferred"]
         if human:
             raise UnitPark("awaiting_operator", "intent_gap: " + "; ".join(str(i.get("summary", ""))[:120] for i in human[:3]),
@@ -1547,6 +1623,26 @@ class Runtime:
             return {}
         self.unit_state(uid, "running", "", phase="implement", findings=items)
         return {"findings": [i for i in items if i.get("target") == "maker" or i.get("category") == "patch"] or items}
+
+    @staticmethod
+    def _resolve_pending_verification(items: list, gate_results: list) -> tuple[list, list]:
+        """A `verificacao_pendente` the Checker could not run is satisfied when the runtime ran that gate green."""
+        resolved, remaining = [], []
+        for item in items:
+            summary = str(item.get("summary", ""))
+            matched = False
+            if item.get("target") == "human" and "verificacao_pendente" in summary.lower().replace("ç", "c").replace("ã", "a"):
+                for gate in gate_results:
+                    if not gate.get("passed"):
+                        continue
+                    argv = [str(a) for a in gate.get("argv", [])]
+                    tokens = {" ".join(argv), str(gate.get("id", ""))}
+                    tokens |= {Path(a).name for a in argv if Path(a).suffix in {".py", ".sh", ".ps1", ".js", ".ts"}}
+                    if any(token and token in summary for token in tokens):
+                        matched = True
+                        break
+            (resolved if matched else remaining).append(item)
+        return resolved, remaining
 
     # ---- failure handling -----------------------------------------------------------------
 
@@ -1730,10 +1826,14 @@ class Runtime:
             slice_ = tl_ci_slice.slice_log(log, raw_ref=raw_ref) if log else {"classification": "unknown", "signature": normalize_signature("ci", "nolog"), "excerpt": "", "failed_tests": []}
             self.journal.append("note", text=f"{uid}: CI failure {slice_['classification']}", ci_slice={k: v for k, v in slice_.items() if k != "excerpt"})
             if slice_["classification"] in {"external_infrastructure", "unknown"} and not slice_.get("failed_tests") and reruns < int(self.limits["flaky_reruns"]):
+                if not self.policy.effect_allowed("ci_rerun"):
+                    raise UnitPark("parked", f"ci_{slice_['classification']}: rerun not permitted (permitted_effects.ci_rerun)")
                 reruns += 1
                 self.journal.append("attempt", unit=uid, phase="ci", round=record.round, **{"class": "ci_rerun"}, signature=slice_["signature"], detail=slice_["classification"], tree=record.tree, findings_digest="", move="rerun", step_id="")
                 record.attempts.append({"class": "ci_rerun", "phase": "ci", "signature": slice_["signature"]})
-                if not self.ci.rerun_failed(record.branch):
+                rerun = self.step(f"{uid}:ci_rerun:{record.commit}:{reruns}", "ci_rerun", uid, "ci", {"type": "ci_rerun", "commit": record.commit, "n": reruns},
+                                  lambda intent: {"rerun": self.ci.rerun_failed(record.branch)})
+                if not rerun.get("rerun"):
                     raise UnitPark("parked", "ci_rerun_failed: " + slice_["classification"])
                 self.sleep(float(self.config["ci"]["poll_seconds"]))
                 continue
@@ -1794,14 +1894,14 @@ class Runtime:
         payload = intent.get("intent") or {}
         step_id = intent["step_id"]
         if effect == "model_call":
-            status = self.harness.inspect(step_id)
+            status = self.harness.inspect(step_id, str(intent.get("input_digest", "")))
             state = status.get("state")
             if state == "not_started":
                 return "released", {"detail": "harness never started; call not consumed"}
             if state in {"starting", "running"}:
                 # Attach to the still-running supervisor instead of dispatching a second call.
                 role = "maker" if "maker" in step_id else "checker"
-                unit_name = re.sub(r"[^A-Za-z0-9._-]", "-", step_id)[:64]
+                unit_name = self.harness.job_name(step_id, str(intent.get("input_digest", "")))
                 wait = run_argv([sys.executable, str(self.harness.tl_job), "wait", "--state-dir", str(self.harness.jobs_dir / unit_name), "--unit", unit_name,
                                  "--timeout", str(int(self.config["roles"][role]["timeout_seconds"]) + 60)], self.repo, int(self.config["roles"][role]["timeout_seconds"]) + 120)
                 status = _receipt_json(wait)
@@ -1850,6 +1950,8 @@ class Runtime:
             if str(view.get("state", "")).upper() == "MERGED" or view.get("mergedAt"):
                 return "ok", {"merged": True, "detail": "pull request already merged"}
             return "released", {"detail": "pull request open; merge will run"}
+        if effect == "ci_rerun":
+            return "ambiguous", {"rerun": True, "detail": "rerun may have been requested; counted, not repeated"}
         if effect == "local_merge":
             base, branch = payload.get("base", ""), payload.get("branch", "")
             check = run_argv([self.git.exe, "merge-base", "--is-ancestor", branch, base], self.repo, 60)
@@ -1917,13 +2019,14 @@ def project_batch(runtime: "Runtime") -> None:
     budget["pending_call"] = None
     for intent in fold.open_intents:
         if intent.get("effect_class") == "model_call":
-            budget["pending_call"] = {"call_id": intent["step_id"], "role": intent.get("intent", {}).get("type"), "phase": intent.get("phase"),
+            phase = {"implement": "implementation", "review": "review"}.get(str(intent.get("phase")), "implementation")
+            budget["pending_call"] = {"call_id": intent["step_id"], "role": intent.get("intent", {}).get("type"), "phase": phase,
                                       "payload_digest": intent.get("input_digest"), "dispatched_at": intent.get("at")}
     execution = batch.setdefault("execution", {})
     running = [uid for uid, r in fold.units.items() if r.state == "running"]
     execution["current_unit"] = running[0] if running else None
     execution["current_phase"] = fold.units[running[0]].phase if running else None
-    execution["current_round"] = fold.units[running[0]].round if running else None
+    execution["current_round"] = fold.units[running[0]].round if running else 0
     execution["completed_units"] = sorted(uid for uid, r in fold.units.items() if r.state == "completed")
     execution["stop_reason"] = fold.stop_reason or None
     execution.setdefault("runtime_refs", {})

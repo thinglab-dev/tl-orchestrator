@@ -52,4 +52,4 @@ open_discussions: []
 | T028 | gov | none | draft | [T027] | [] | 1 | - |
 | T029 | feat | none | done | [T026] | [] | 12 | evidence/T029-r11.md |
 | T030 | gov | none | done | [T029] | [] | 2 | evidence/T030-r01.md |
-| T031 | feat | package | in_progress | [T019, T027] | [] | 1 | - |
+| T031 | feat | package | done | [T019, T027] | [] | 2 | evidence/T031-r01.md |

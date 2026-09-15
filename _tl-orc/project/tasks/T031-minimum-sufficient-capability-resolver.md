@@ -4,15 +4,15 @@ type: feat
 deliverable: package
 standalone: true
 method: native
-status: in_progress
-state_revision: 1
+status: done
+state_revision: 2
 depends_on: [T019, T027]
 blocked_by: []
 origin: instrução normativa do mantenedor em 2026-09-15 após auditoria pós-fechamento do lote Canary B005 (Story connector:2-9)
 decisions: []
 spec_author: orchestrator
 spec_revision: 1
-rework_round: 0
+rework_round: 2
 affects_context: []
 effective_authors: [google]
 checker_independence: required

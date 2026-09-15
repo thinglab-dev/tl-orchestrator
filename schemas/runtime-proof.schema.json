@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Recoverable Runtime Proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scope", "code_identity", "fixture_identity", "expires_at", "criteria"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "scope": {"enum": ["offline", "interface"]},
+    "code_identity": {"$ref": "#/$defs/identity"},
+    "fixture_identity": {"$ref": "#/$defs/identity"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "source": {"type": "string"},
+    "criteria": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/criterion"}}
+  },
+  "$defs": {
+    "identity": {"type": "object", "additionalProperties": false, "required": ["id"], "properties": {"id": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}},
+    "criterion": {"type": "object", "additionalProperties": false, "required": ["id", "required", "applicability", "status", "expected", "observed", "evidence"], "properties": {"id": {"type": "string", "minLength": 1}, "required": {"type": "boolean"}, "applicability": {"enum": ["applicable", "not_applicable"]}, "status": {"enum": ["pass", "fail", "inconclusive"]}, "expected": {}, "observed": {}, "evidence": {"type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": {"path": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}}}
+  }
+}
+

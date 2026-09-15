@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Paired Skill Evaluation Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "arm", "task_id", "task_revision", "input_digest", "model", "effort", "repetitions"],
+  "properties": {
+    "schema_version": {"const": 1}, "arm": {"enum": ["baseline", "candidate"]},
+    "task_id": {"type": "string", "minLength": 1}, "task_revision": {"type": "string", "minLength": 1}, "input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "model": {"type": "string", "minLength": 1}, "effort": {"type": "string", "minLength": 1},
+    "expected_activated_skills": {"type": "array", "items": {"type": "string", "minLength": 1}}, "activated_skills": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "repetitions": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["pair_id", "receipt_id", "quality"], "properties": {"pair_id": {"type": "string", "minLength": 1}, "receipt_id": {"type": "string", "minLength": 1}, "quality": {"enum": ["pass", "fail", "inconclusive"]}, "rework": {"type": "number", "minimum": 0}, "duration_seconds": {"type": "number", "minimum": 0}, "input_tokens": {"type": "integer", "minimum": 0}, "cache_read_tokens": {"type": "integer", "minimum": 0}, "output_tokens": {"type": "integer", "minimum": 0}, "cost_observed": {"type": "number", "minimum": 0}, "coverage": {"type": "number", "minimum": 0, "maximum": 1}}}}
+  }
+}

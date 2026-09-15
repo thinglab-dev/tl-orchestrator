@@ -63,9 +63,40 @@ O envelope de despacho declara, em texto ou em arquivo:
 | `scope_paths` | caminhos que o papel pode escrever |
 | `references` | leituras obrigatórias por caminho e hash, não por transcrição |
 | `result_file` | caminho relativo do JSON final que o papel escreve ao terminar; não existe antes da unidade começar |
+| `workflow_quality` | objeto opcional que ativa os contratos de qualidade descritos abaixo |
 
 Referência é por caminho e hash. Não cole conteúdo de arquivo, log ou transcrição no envelope
 quando o destinatário puder abrir o caminho; o hash é o que prende o parecer ao conteúdo revisado.
+
+`workflow_quality` ausente desativa essa camada. Quando presente, ele é um objeto com os caminhos
+relativos obrigatórios `profile`, `register`, `spec` e `acceptance`. `proof`, se declarado, é um
+objeto com `path`, `code_id` e `fixture_id` correntes. `gate_reuse`, se declarado, é um objeto com
+`prior_proof`, `current_identity`, `receipt` e `expected_receipt_sha256`; este último é o digest
+SHA-256 de 64 hexadecimais minúsculos que o condutor fornece, não um valor calculado pelo papel.
+Parâmetro obrigatório ausente, caminho fora da raiz declarada, identidade vazia ou digest inválido
+bloqueiam o despacho afetado.
+
+```json
+{
+  "workflow_quality": {
+    "profile": "evidence/ui-profile.json",
+    "register": "evidence/ambiguities.json",
+    "spec": "specs/story.md",
+    "acceptance": "evidence/acceptance.json",
+    "proof": {
+      "path": "evidence/runtime-proof.json",
+      "code_id": "commit-abc123",
+      "fixture_id": "checkout-flow-r3"
+    },
+    "gate_reuse": {
+      "prior_proof": "evidence/prior-gate.json",
+      "current_identity": "evidence/current-gate.json",
+      "receipt": "evidence/gate-receipt.json",
+      "expected_receipt_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  }
+}
+```
 
 ## Resultado da unidade
 
@@ -106,6 +137,23 @@ escrito, o que falta, provas já executadas — validado contra a árvore atual 
 escrita. Resumo de conversa não é fonte de estado por padrão: ele descreve o que foi dito, não o que
 existe no disco. Divergência entre checkpoint e árvore é ponto de parada, não detalhe a conciliar em
 silêncio.
+
+Quando o envelope ativa `workflow_quality` explicitamente, antes do despacho rode os contratos opt-in abaixo. Sem essa ativação eles não são inferidos. Qualquer falha para o despacho afetado bloqueia fechado, sem declarar entrega.
+
+Use somente estes vínculos do envelope: `$profile` = `workflow_quality.profile`, `$register` =
+`workflow_quality.register`, `$spec` = `workflow_quality.spec`, `$acceptance` =
+`workflow_quality.acceptance`; se houver prova, `$proof`, `$current_code_id` e
+`$current_fixture_id` vêm respectivamente de `workflow_quality.proof.path`, `.code_id` e
+`.fixture_id`. Para reuso, `$prior_proof`, `$current_identity`, `$receipt` e
+`$trusted_receipt_sha256` vêm de `workflow_quality.gate_reuse`; o digest permanece fornecido pelo
+condutor.
+
+```sh
+python3 scripts/preflight_workflow.py --profile "$profile"
+python3 scripts/validate_ambiguities.py --register "$register" --spec "$spec" --acceptance "$acceptance"
+```
+
+O segundo comando roda antes do Maker. Se o envelope declarar uma prova de runtime, o condutor também roda, antes da entrega, `python3 scripts/validate_runtime_proof.py --proof "$proof" --code-id "$current_code_id" --fixture-id "$current_fixture_id"`; `--allow-interface` é necessário somente para a prova de interface declarada. Critério obrigatório não pode ser marcado `deferred` nem aprovado sem runner atual e evidência recuperável corrente. Para reuso opt-in de gate, rode `python3 scripts/validate_gate_reuse.py --proof "$prior_proof" --current "$current_identity" --receipt "$receipt" --receipt-sha256 "$trusted_receipt_sha256"`; falta de recibo, versão ou fingerprint força nova execução.
 
 ## Cadeia de execução
 

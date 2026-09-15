@@ -5,7 +5,7 @@ description: Planeja, debate decisões e conduz mudanças por mecanismo com Orqu
 
 # Ativação do método
 
-Versão atual do pacote: **0.14.0**.
+Versão atual do pacote: **0.15.0**.
 
 ## Regra do dono: o Orquestrador não trabalha manualmente no consumidor
 
@@ -44,6 +44,8 @@ grave um handoff curto em arquivo e recomende continuar em sessão nova.
 4. Preserve o papel designado pelo usuário. Se ele designou Classificador, Searcher, Advisor, Planner, Maker ou Checker, leia somente o [contrato desse papel](#contratos) e o contexto necessário; esta skill não transforma outro papel em Orquestrador. Classificador, Searcher e Advisor não fazem descoberta de atualizações. Quando o papel designado chega com briefing e spec já ratificados pela autoridade do consumidor, comece pelo trabalho dele: as etapas 2 e 3 servem apenas para localizar as regras, portões e evidências que esse papel precisa cumprir, e nenhum papel designado reabre onboarding, triagem de tarefa, planejamento ou Classificador do fluxo pai. O bypass é de ativação, não de regra: as regras aplicáveis do consumidor e a revisão independente prevista para a entrega continuam valendo.
 5. Para conduzir como Orquestrador, leia o [contrato](prompts/orchestrator.md) e o [playbook](prompts/orchestrator-playbook.md). Antes de qualquer despacho de papel classificado, consulte os [perfis](prompts/orchestrator-perfis.md): uma sessão econômica do [Classificador](prompts/classifier.md) dimensiona a fase e seleciona modelo e effort. Sob Schema v3 (`classification_schema_version: 3`), elege dinamicamente o `primary_candidate` por mérito técnico e custo entre todos os pares cross-harness autorizados no catálogo, desacoplando ranking de qualidade da cadeia de fallback de infraestrutura; sob Schema v2 legado, preserva a resolução estática por harness. Valide o resultado com `scripts/validate_classification.py` antes de despachar, mesmo quando houver pins; a regra sobre quem escolhe modelo e effort e sobre o que vira pin está no [contrato](prompts/orchestrator.md#perfil-padrão-de-despacho). O Orquestrador mantém a seleção do usuário no harness.
 6. Declare brevemente objetivo, raiz consumidora, limites e próximo passo. Execute apenas o modo pedido: análise ou planejamento não inicia implementação, fila de stories, despacho de Maker para implementar, instalação ou efeito externo. Um pedido genérico de análise também não inicia o painel de debate. A fila só começa pela escolha explícita **Executar fila sequencial** ou pela tarefa agendada que a repita, conforme o [playbook](prompts/orchestrator-playbook.md#fila-sequencial-de-stories).
+
+Quando o envelope selecionar `workflow_quality`, siga também o [contrato opt-in](docs/WORKFLOW_QUALITY.md): preflight antes do despacho, `validate_ambiguities.py` antes do Maker e `validate_runtime_proof.py` antes da entrega somente se houver prova declarada. Use identidades correntes; nenhum desses comandos autoriza execução, aceite ou reuso por si.
 
 Quando a ativação para conduzir como Orquestrador não trouxer uma tarefa discernível nem um papel
 designado, faça uma triagem somente leitura limitada à raiz consumidora já identificada. Leia

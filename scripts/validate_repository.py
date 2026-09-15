@@ -196,6 +196,17 @@ def validate_readme_manifest(files: list[str]) -> None:
         fail(f"README hash commands omit manifest paths: {', '.join(missing)}")
 
 
+def validate_project_configuration_counts(files: list[str]) -> None:
+    doc = ROOT / "docs" / "PROJECT_CONFIGURATION.md"
+    text = doc.read_text(encoding="utf-8")
+    current = str(len(files))
+    stale = sorted(set(re.findall(r"(\d+) arquivos\b", text)) - {current})
+    if stale:
+        fail(f"docs/PROJECT_CONFIGURATION.md cites stale file count(s) {stale}; manifest has {current}")
+    if f"{current} arquivos" not in text:
+        fail("docs/PROJECT_CONFIGURATION.md does not cite the current manifest file count")
+
+
 def main() -> None:
     files = load_manifest()
     validate_json()
@@ -203,6 +214,7 @@ def main() -> None:
     validate_links(files)
     validate_export(files)
     validate_readme_manifest(files)
+    validate_project_configuration_counts(files)
     print(f"OK: {len(files)} package files; JSON, frontmatter, links, export and hashes validated")
     print("NOTE: structural checks do not prove method behavior")
 

@@ -8,3 +8,8 @@
 __pycache__/
 *.pyc
 /.tmp/
+
+# Cache local do acelerador de contexto Graft (scripts/tl_graft.py): regenerável, nunca
+# distribuído nem usado como evidência de revisão. Num consumidor o cache se auto-exclui
+# (ignore próprio dentro dele) e nenhum ignore do projeto é alterado; veja docs/GRAFT.md.
+/.tl-orc-graft-cache/

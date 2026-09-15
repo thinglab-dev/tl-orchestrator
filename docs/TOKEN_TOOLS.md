@@ -7,6 +7,10 @@ por isso valem em qualquer projeto sem instalação por consumidor e sem que alg
 lembrar delas. O pacote traz apenas a política (este documento) e o script opcional
 `scripts/tl_tools.py`, de biblioteca padrão, que instala, verifica e mantém tudo ligado.
 
+Estas quatro ferramentas são globais, de usuário. [Graft](GRAFT.md) é outro acelerador, distinto
+e opcional: um mapa local e por projeto do próprio código, ativado sob pedido explícito como
+"prepare o mapa de código deste projeto" ou "ative o Graft".
+
 ## Política
 
 | Ferramenta | O que reduz | Padrão | Onde age | Origem |

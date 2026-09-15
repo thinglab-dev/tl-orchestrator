@@ -5,7 +5,7 @@ description: Planeja, debate decisões e conduz mudanças por mecanismo com Orqu
 
 # Ativação do método
 
-Versão atual do pacote: **0.15.0**.
+Versão atual do pacote: **0.16.0**.
 
 ## Regra do dono: o Orquestrador não trabalha manualmente no consumidor
 
@@ -131,5 +131,8 @@ Não ofereça ao papel designado despachos, escrita ou revisão pertencentes ao 
   Modo Automático (execução de lote finito autorizado), Import Context e adapter BMAD.
 - [Protocolo de execução](docs/EXECUTION_PROTOCOL.md): despachar uma unidade sem conversa de
   acompanhamento, resultado sob lista fechada e o supervisor opcional de biblioteca padrão.
+- [Graft](docs/GRAFT.md): acelerador opcional e local de contexto (`scripts/tl_graft.py`), sem IA
+  na ativação padrão, sem pré-requisito para o método e sem substituir leitura direta/`rg` quando
+  indisponível ou desatualizado.
 
 A skill é a entrada; cada contrato possui suas regras. Não duplique mecânica ou configurações pessoais aqui. BMAD não é requisito de ativação: se existir no consumidor, siga suas políticas locais e sua instalação oficial separada.

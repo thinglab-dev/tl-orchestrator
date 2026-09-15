@@ -1,7 +1,7 @@
 {
   "format_version": 1,
-  "package_version": "0.15.0",
-  "package_file_count": 42,
+  "package_version": "0.16.0",
+  "package_file_count": 44,
   "package_files": [
     "README.md",
     "SKILL.md",
@@ -29,11 +29,13 @@
     "docs/EVOLUTION.md",
     "docs/WORK_MODEL.md",
     "docs/EXECUTION_PROTOCOL.md",
+    "docs/GRAFT.md",
     "docs/TOKEN_TOOLS.md",
     "docs/WORKFLOW_QUALITY.md",
     "scripts/tl_job.py",
     "scripts/tl_tools.py",
     "scripts/validate_classification.py",
+    "scripts/tl_graft.py",
     "scripts/workflow_quality.py",
     "scripts/validate_runtime_proof.py",
     "scripts/import_browser_proof.py",

@@ -102,7 +102,7 @@ autorizado para um harness, mantenha sua posição e devolva `model: null` e `ef
 Não reordene cadeias nem selecione o primário: o Orquestrador despacha `candidates[0]` conforme a cadeia física.
 
 #### 2. Modo Schema v3 (seleção dinâmica de primário / `classification_schema_version: 3`)
-Desacople a avaliação semântica de mérito técnico da cadeia física de fallback:
+Desacople a avaliação semântica de mérito técnico da cadeia física de fallback, aplicando o princípio normativo de **Minimum Sufficient Capability (MSC)**:
 - **`evaluations[]` granular por par (R12):** Avalie individualmente cada par (harness, modelo, effort)
   autorizado no catálogo para o papel, registrando `catalog_eligible`, `technical_adequacy` (`sufficient`,
   `insufficient` ou `uncertain`), `dispatchable`, `evidence_ids`, `uncertainty` e `reason`. Pares sem modelo
@@ -111,10 +111,29 @@ Desacople a avaliação semântica de mérito técnico da cadeia física de fall
   recebem `dispatchable: true` e são admitidos em `candidates[]`. Pares com adequação `insufficient` ou
   `uncertain` permanecem restritos a `evaluations[]` com `dispatchable: false` e NUNCA entram em `candidates[]`
   nem são promovidos a fallback de infraestrutura.
+- **Princípio de Capacidade Mínima Suficiente (Minimum Sufficient Capability - MSC):**
+  * Dimensione o trabalho para satisfazer o piso de qualidade (*quality floor*) da fase com o menor esforço e custo operacional.
+  * A adequação técnica é um piso qualitativo: uma vez que um candidato atinge o status `sufficient`, ele é plenamente qualificado para execução.
+  * **Proibição de over-selection:** É terminantemente proibido justificar a escolha de um modelo ou a preterição de outro com base em clichês subjetivos desprovidos de evidência factual de insuficiência, tais como: `"frontier model"`, `"modelo mais forte"`, `"maior capacidade de raciocínio"`, `"maior densidade arquitetural"` ou `"tier heavy exige modelo máximo"`.
+  * **Tier != Modelo:** O tier (`simple`, `normal`, `heavy`) quantifica a complexidade e o quality floor da tarefa, NÃO pré-fixa a família do modelo. Um modelo eficiente avaliado como `sufficient` para uma tarefa `heavy` DEVE ser eleito primário por capacidade mínima suficiente.
+  * **Reasoning Effort Mínimo Suficiente:** Dentro do mesmo modelo (ex.: Codex), se `high` e `xhigh` forem ambos tecnicamente `sufficient`, a opção de menor esforço (`high`) DEVE ser escolhida por padrão sob o princípio de menor esforço suficiente, a menos que haja necessidade técnica concreta comprovada exigindo `xhigh`.
+- **Preferência Determinística de Eficiência (Efficiency Preference Policy - R23):**
+  * Entre os candidatos com `technical_adequacy: "sufficient"` e `dispatchable: true`, a seleção do primário (`candidates[0]`) segue a política de preferência de eficiência do perfil (`efficiency_preference`).
+  * No perfil padrão, a classe de alta eficiência (ex.: Agy `gemini-3.8-flash-high`) tem precedência sobre modelos padrão/pesados (ex.: Codex `gpt-5.6-terra`, Claude `sonnet`/`opus`).
+  * Se o candidato de alta eficiência for `sufficient` e elegível, ele DEVE ser o primário, com `selection_basis: "minimum_sufficient"`.
+- **Escalada Requer Causa Factual Obrigatória:**
+  * A eleição de um modelo de menor eficiência (mais pesado ou mais caro) só é permitida mediante causa factual comprovada, registrando `selection_basis: "escalation"` e o respectivo `escalation_reason`:
+    1. `efficient_candidate_insufficient`: o candidato eficiente foi tecnicamente avaliado como `insufficient` para os requisitos da tarefa.
+    2. `efficient_candidate_uncertain`: incerteza material documentada sobre a adequação do candidato eficiente.
+    3. `checker_family_independence`: o candidato eficiente pertence à mesma família da autoria efetiva e a independência é obrigatória (`checker_independence: required`).
+    4. `operator_pinned`: o operador fixou explicitamente outro modelo via pin no lote (`pins`).
+    5. `pre_dispatch_unavailable`: indisponibilidade factual no runtime antes do despacho.
+    6. `proven_empirical_failure`: falha empírica prévia comprovada na mesma tarefa/rodada.
+  * Qualquer escalada sem uma dessas causas factuais constitui sobre-seleção indevida e violação de contrato.
 - **`candidates[]` como única autoridade de ranking (R6):** Ordene os candidatos suficientes em `candidates[]`
-  por mérito técnico e custo comprovado. Em estados resolvíveis, `candidates[0]` é o `recommended_primary`.
+  por capacidade mínima suficiente e política de eficiência. Em estados resolvíveis, `candidates[0]` é o `recommended_primary`.
 - **Matriz fechada de 4 estados (R18):**
-  * `conclusive`: seleção unívoca por mérito técnico ou custo comprovado (`tie_break_applied: null`),
+  * `conclusive`: seleção unívoca por capacidade mínima suficiente ou escalada factual comprovada (`tie_break_applied: null`),
     com exatamente 1 primário (`candidates[0]`, `dispatch_role: "primary"`), zero unassigned.
   * `underdetermined`: empate semântico onde o custo é incomparável (`unknown`) ou idêntico, resolvido
     por política do projeto com vencedor único (`tie_break_applied != null`), definindo exatamente 1 primário
@@ -126,7 +145,7 @@ Desacople a avaliação semântica de mérito técnico da cadeia física de fall
 - **Regras de desempate e economia (R1, R2, R8, R13, R16, R20):**
   * R1: `cost_basis: unknown` nunca perde um desempate econômico; a comparação com custo conhecido é
     estritamente `economic comparison unavailable`.
-  * R2: Menor effort (`medium < high`) só desempata dentro do mesmo modelo ou com equivalência catalogada.
+  * R2: Menor effort (`medium < high < xhigh`) só desempata dentro do mesmo modelo ou com equivalência catalogada.
   * R16: `token_price_only` suporta apenas `unit_token_price`; é proibido inferir menor custo da tarefa
     (`expected_task_cost`) sem proxy oficial ou medição empírica observada.
   * R20: O matcher de `project_priority` testa seletores em ordem: 0 matches -> ignora; 1 match -> vencedor único;
@@ -152,7 +171,9 @@ Conforme [schemas/classification-result.schema.json](../schemas/classification-r
 Conforme [schemas/classification-result-v3.schema.json](../schemas/classification-result-v3.schema.json):
 - Use `schema_version: 3`. Copie `story_id`, `phase`, `context_revision` e `catalog_revision` sem alterá-los.
 - Em `roles`, para cada papel solicitado: informe `tier`, `selection_status` (`conclusive`, `underdetermined`,
-  `awaiting_operator`, `infeasible`), `tie_break_applied` (`null` ou identificador da regra aplicada),
+  `awaiting_operator`, `infeasible`), `selection_basis` (`minimum_sufficient`, `escalation`, `pinned` ou `only_available`),
+  `escalation_reason` (`null` ou justificativa formal quando `selection_basis == "escalation"`),
+  `tie_break_applied` (`null` ou identificador da regra aplicada),
   `evaluations` (avaliação exaustiva de cada par do catálogo) e `candidates` (apenas os pares suficientes,
   ordenados por ranking).
 - Em cada candidato de `candidates`: informe `harness`, `model`, `effort`, `dispatch_role` (`primary`, `fallback`

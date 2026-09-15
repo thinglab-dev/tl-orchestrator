@@ -50,9 +50,18 @@ Essas cadeias publicadas constituem a política global padrão do pacote quando 
 - **Searcher**: Agy `gemini-3.8-flash-medium` (`medium`) → Claude → Codex.
 - **Advisor**: Cross-family preferido em sessão limpa (`fresh_session: required`), subordinado a `advisor_independence` (preferred vs required) e contra-família da proposta desafiada.
 
-Sob Schema v3 (`classification_schema_version: 3`), o Classificador elege o primário (`candidates[0]`)
-dinamicamente entre todos os pares autorizados cross-harness com base em mérito técnico e evidência
-econômica comprovada; as cadeias acima atuam como catálogo de elegibilidade e ordem de recuperação de infraestrutura.
+Sob Schema v3 (`classification_schema_version: 3`), a seleção do primário (`candidates[0]`) é governada
+pelo princípio normativo de **Minimum Sufficient Capability (MSC)** e pela **Política de Preferência de Eficiência (`efficiency_preference`)**:
+- O Classificador avalia a adequação funcional de cada par em `evaluations[]` (`sufficient`, `uncertain`, `insufficient`).
+- A seleção primária entre candidatos `sufficient` e `dispatchable` resolve deterministicamente pela política de preferência de eficiência configurada no perfil:
+  * **Maker (perfil padrão)**:
+    1. Classe de alta eficiência: `agy / gemini-3.8-flash-high` (`high`).
+    2. Classe padrão / fronteira: `codex / gpt-5.6-terra` (`high`), `claude / sonnet` (`high`).
+    3. Escalada estendida: `codex / gpt-5.6-terra` (`xhigh`).
+  * Quando o candidato de alta eficiência for avaliado como `sufficient` e estiver elegível, ele DEVE ser selecionado como primário (`dispatch_role: "primary"`), registrando `selection_basis: "minimum_sufficient"`.
+  * A escalada para um modelo de menor eficiência ou maior custo é uma exceção factual, exigindo `selection_basis: "escalation"` e registro obrigatório de `escalation_reason` (`efficient_candidate_insufficient`, `efficient_candidate_uncertain`, `checker_family_independence`, `operator_pinned`, `pre_dispatch_unavailable`, `proven_empirical_failure`).
+  * Argumentos de over-selection desprovidos de insuficiência factual comprovada são terminantemente proibidos e rejeitados.
+  * O princípio de menor esforço suficiente aplica-se igualmente ao reasoning effort: dentro do mesmo modelo, `high` tem precedência sobre `xhigh` a menos que haja necessidade técnica concreta comprovada.
 Sob Schema v2 legado, preserva-se o mapeamento posicional da cadeia física.
 
 A cadeia nominal do Checker (`Codex → Claude → Agy`) permanece **estritamente subordinada a `checker_independence` e à autoria efetiva completa** (incluindo Maker inicial, reworks e correções do Orquestrador): se OpenAI participou da autoria, Codex é inelegível; se Google participou, Agy é inelegível; se Anthropic participou, Claude é inelegível; se Google e OpenAI participaram, Claude é o único elegível.

@@ -146,6 +146,20 @@
           "items": {
             "$ref": "#/$defs/candidate_v3"
           }
+        },
+        "selection_basis": {
+          "enum": [
+            "minimum_sufficient",
+            "escalation",
+            "pinned",
+            "only_available"
+          ]
+        },
+        "escalation_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "allOf": [

@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Any
 
 from scripts.validate_classification import (
+    DEFAULT_EFFICIENCY_ORDER,
     match_project_priority,
+    resolve_minimum_sufficient,
     validate_classification_data,
     validate_classification_file,
 )
@@ -980,6 +982,214 @@ console.log('AJV_PARITY_OK');
 
         self.assertEqual(proc.returncode, 0, f"AJV parity test failed: {proc.stderr}\n{proc.stdout}")
         self.assertIn("AJV_PARITY_OK", proc.stdout)
+
+
+class MinimumSufficientCapabilityTest(unittest.TestCase):
+    """Mandatory contractual and behavior tests for T031: Minimum Sufficient Capability & Efficiency Preference Policy."""
+
+    def _make_eval(
+        self,
+        harness: str,
+        model: str,
+        effort: str,
+        adequacy: str = "sufficient",
+        dispatchable: bool = True,
+        eligible: bool = True,
+    ) -> dict[str, Any]:
+        return {
+            "harness": harness,
+            "model": model,
+            "effort": effort,
+            "catalog_eligible": eligible,
+            "technical_adequacy": adequacy,
+            "dispatchable": dispatchable,
+            "evidence_ids": ["price-flash" if harness == "agy" else "price-terra"],
+            "uncertainty": None if adequacy != "uncertain" else "Material uncertainty regarding complex edge cases",
+            "reason": f"Evaluation for {harness}/{model}/{effort}",
+        }
+
+    def test_case_1_all_sufficient_prefers_efficient_agy_flash_high(self) -> None:
+        """Caso 1: Agy, Codex high, Codex xhigh e Claude todos sufficient -> Agy Flash High primário, selection_basis: minimum_sufficient."""
+        evals = [
+            self._make_eval("agy", "gemini-3.8-flash-high", "high"),
+            self._make_eval("codex", "gpt-5.6-terra", "high"),
+            self._make_eval("codex", "gpt-5.6-terra", "xhigh"),
+            self._make_eval("claude", "sonnet", "high"),
+        ]
+        winner, basis, esc_reason = resolve_minimum_sufficient(evals)
+        self.assertEqual(winner, ("agy", "gemini-3.8-flash-high", "high"))
+        self.assertEqual(basis, "minimum_sufficient")
+        self.assertIsNone(esc_reason)
+
+    def test_case_2_efficient_insufficient_escalates_to_codex_high_not_xhigh(self) -> None:
+        """Caso 2: Agy Flash High insufficient, Codex high e xhigh sufficient -> Codex high primário (NÃO xhigh), escalation_reason: efficient_candidate_insufficient."""
+        evals = [
+            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="insufficient", dispatchable=False),
+            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="sufficient"),
+            self._make_eval("codex", "gpt-5.6-terra", "xhigh", adequacy="sufficient"),
+        ]
+        winner, basis, esc_reason = resolve_minimum_sufficient(evals)
+        self.assertEqual(winner, ("codex", "gpt-5.6-terra", "high"))
+        self.assertEqual(basis, "escalation")
+        self.assertEqual(esc_reason, "efficient_candidate_insufficient")
+
+    def test_case_3_same_model_effort_high_vs_xhigh_selects_high(self) -> None:
+        """Caso 3: Dentro do mesmo modelo (Codex), high e xhigh ambos sufficient -> high vence por minimum-sufficient effort."""
+        evals = [
+            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="sufficient"),
+            self._make_eval("codex", "gpt-5.6-terra", "xhigh", adequacy="sufficient"),
+        ]
+        winner, basis, esc_reason = resolve_minimum_sufficient(evals)
+        self.assertEqual(winner, ("codex", "gpt-5.6-terra", "high"))
+        self.assertEqual(basis, "minimum_sufficient")
+        self.assertIsNone(esc_reason)
+
+    def test_case_4_concrete_technical_necessity_allows_escalation(self) -> None:
+        """Caso 4: Necessidade técnica concreta comprovada (require_xhigh=True) autoriza escalada com xhigh."""
+        evals = [
+            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="sufficient"),
+            self._make_eval("codex", "gpt-5.6-terra", "xhigh", adequacy="sufficient"),
+        ]
+        winner, basis, esc_reason = resolve_minimum_sufficient(evals, require_xhigh=True)
+        self.assertEqual(winner, ("codex", "gpt-5.6-terra", "xhigh"))
+        self.assertEqual(basis, "escalation")
+        self.assertEqual(esc_reason, "concrete_technical_necessity")
+
+    def test_case_5_efficient_uncertain_escalates_with_reason(self) -> None:
+        """Caso 5: Agy Flash High uncertain, Codex high sufficient -> Primário Codex high, escalation_reason: efficient_candidate_uncertain."""
+        evals = [
+            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="uncertain", dispatchable=False),
+            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="sufficient"),
+            self._make_eval("claude", "sonnet", "high", adequacy="sufficient"),
+        ]
+        winner, basis, esc_reason = resolve_minimum_sufficient(evals)
+        self.assertEqual(winner, ("codex", "gpt-5.6-terra", "high"))
+        self.assertEqual(basis, "escalation")
+        self.assertEqual(esc_reason, "efficient_candidate_uncertain")
+
+    def test_case_6_pre_dispatch_unavailable_falls_back_deterministically(self) -> None:
+        """Caso 6: Indisponibilidade runtime (pre_dispatch_unavailable) do candidato eficiente -> fallback determinístico com escalation_reason: pre_dispatch_unavailable."""
+        evals = [
+            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="sufficient"),
+            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="sufficient"),
+        ]
+        winner, basis, esc_reason = resolve_minimum_sufficient(
+            evals,
+            pre_dispatch_unavailable={("agy", "gemini-3.8-flash-high", "high")},
+        )
+        self.assertEqual(winner, ("codex", "gpt-5.6-terra", "high"))
+        self.assertEqual(basis, "escalation")
+        self.assertEqual(esc_reason, "pre_dispatch_unavailable")
+
+    def test_case_7_tier_heavy_with_sufficient_efficient_selects_agy_minimum_sufficient(self) -> None:
+        """Caso 7: Tarefa tier heavy, mas Agy Flash High é sufficient -> Agy Flash High primário, provando que tier != modelo."""
+        evals = [
+            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="sufficient"),
+            self._make_eval("codex", "gpt-5.6-terra", "xhigh", adequacy="sufficient"),
+        ]
+        winner, basis, esc_reason = resolve_minimum_sufficient(evals)
+        self.assertEqual(winner, ("agy", "gemini-3.8-flash-high", "high"))
+        self.assertEqual(basis, "minimum_sufficient")
+
+        # Validar payload completo com tier heavy e selection_basis minimum_sufficient
+        data = {
+            "schema_version": 3,
+            "story_id": "T031-canary-heavy",
+            "phase": "implementation",
+            "context_revision": "ctx-heavy",
+            "catalog_revision": "cat-heavy",
+            "confidence": "high",
+            "facts": ["Tier heavy task where efficient candidate is technically sufficient"],
+            "uncertainties": [],
+            "reclassify_when": ["Scope changes"],
+            "roles": {
+                "maker": {
+                    "tier": "heavy",
+                    "selection_status": "conclusive",
+                    "selection_basis": "minimum_sufficient",
+                    "escalation_reason": None,
+                    "reason": "Maker classificado com base em capacidade minima suficiente.",
+                    "tie_break_applied": None,
+                    "evaluations": evals,
+                    "candidates": [
+                        {
+                            "harness": "agy",
+                            "model": "gemini-3.8-flash-high",
+                            "effort": "high",
+                            "dispatch_role": "primary",
+                            "evidence_ids": ["price-flash"],
+                            "cost_basis": "token_price_only",
+                            "reason": "Adequado tecnicamente ao escopo delimitado da fase.",
+                        },
+                        {
+                            "harness": "codex",
+                            "model": "gpt-5.6-terra",
+                            "effort": "xhigh",
+                            "dispatch_role": "fallback",
+                            "evidence_ids": ["price-terra"],
+                            "cost_basis": "token_price_only",
+                            "reason": "Fallback disponivel.",
+                        },
+                    ],
+                }
+            },
+        }
+        ok, errors = validate_classification_data(data)
+        self.assertTrue(ok, f"Validation failed: {errors}")
+
+    def test_case_8_rejection_of_forbidden_overselection_phrases(self) -> None:
+        """Caso 8: Rejeição estrita de argumentos vazios de over-selection ('frontier model', 'mais forte', 'tier heavy exige modelo máximo')."""
+        forbidden_samples = [
+            "Optamos pelo Codex por ser um frontier model de maior capacidade.",
+            "Modelo mais forte selecionado para garantir precisão.",
+            "Tier heavy exige modelo maximo para o papel Maker.",
+            "Maior capacidade de raciocinio para codigo complexo.",
+            "Maior densidade arquitetural observada no modelo.",
+        ]
+        evals = [
+            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="sufficient"),
+            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="sufficient"),
+        ]
+        for phrase in forbidden_samples:
+            data = {
+                "schema_version": 3,
+                "story_id": "T031-overselection-rejection",
+                "phase": "implementation",
+                "context_revision": "ctx-test",
+                "catalog_revision": "cat-test",
+                "confidence": "high",
+                "facts": ["Testing rejection of buzzwords"],
+                "uncertainties": [],
+                "reclassify_when": ["Scope changes"],
+                "roles": {
+                    "maker": {
+                        "tier": "heavy",
+                        "selection_status": "conclusive",
+                        "selection_basis": "escalation",
+                        "escalation_reason": phrase,
+                        "reason": f"Justificativa: {phrase}",
+                        "tie_break_applied": None,
+                        "evaluations": evals,
+                        "candidates": [
+                            {
+                                "harness": "codex",
+                                "model": "gpt-5.6-terra",
+                                "effort": "high",
+                                "dispatch_role": "primary",
+                                "evidence_ids": ["price-terra"],
+                                "cost_basis": "token_price_only",
+                                "reason": phrase,
+                            }
+                        ],
+                    }
+                },
+            }
+            ok, errors = validate_classification_data(data)
+            self.assertFalse(ok, f"Expected validation to fail for phrase: '{phrase}'")
+            self.assertTrue(
+                any("forbidden over-selection phrase" in e for e in errors),
+                f"Expected forbidden phrase error for '{phrase}', got: {errors}",
+            )
 
 
 if __name__ == "__main__":

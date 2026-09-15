@@ -21,7 +21,7 @@ class ReleaseGuardrailsTest(unittest.TestCase):
     def test_package_version_is_consistent(self) -> None:
         manifest = json.loads(self.read("distribution-manifest.json"))
         marker = f"Versão atual do pacote: **{manifest['package_version']}**."
-        self.assertEqual(manifest["package_version"], "0.17.0")
+        self.assertEqual(manifest["package_version"], "0.18.0")
         self.assertIn(marker, self.read("README.md"))
         self.assertIn(marker, self.read("SKILL.md"))
 

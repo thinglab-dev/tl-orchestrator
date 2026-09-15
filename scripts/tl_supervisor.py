@@ -363,11 +363,14 @@ def enqueue_merge(story_id, pr_number, queue_file):
         return {"state": "unavailable"}
 
 
-def _merge_succeeded(result: object) -> tuple[bool, str]:
+def _merge_succeeded(result: object, dispatch_item: dict | None = None) -> tuple[bool, str]:
     """Inspect merge runner outcome and enforce valid AuthorityReceipt presentation (Rule B)."""
+    receipt = None
+    outcome = None
     if AuthorityReceipt is not None and isinstance(result, AuthorityReceipt):
-        return result.is_confirmed, result.reason
-    if isinstance(result, tuple) and len(result) == 2:
+        receipt = result
+        outcome = True
+    elif isinstance(result, tuple) and len(result) == 2:
         receipt, outcome = (
             (result[0], result[1])
             if AuthorityReceipt is not None and isinstance(result[0], AuthorityReceipt)
@@ -375,29 +378,37 @@ def _merge_succeeded(result: object) -> tuple[bool, str]:
             if AuthorityReceipt is not None and isinstance(result[1], AuthorityReceipt)
             else (None, None)
         )
-        if receipt is not None:
-            if not receipt.is_confirmed:
-                return False, f"authority_not_confirmed: {receipt.reason}"
-            if isinstance(outcome, bool):
-                return outcome, receipt.reason if outcome else f"merge_failed: {receipt.reason}"
-            if isinstance(outcome, int):
-                return outcome == 0, f"exit code {outcome}"
-            returncode = getattr(outcome, "returncode", None)
-            if isinstance(returncode, int):
-                detail = getattr(outcome, "stderr", "") or getattr(outcome, "stdout", "") or ""
-                return returncode == 0, str(detail).strip()
-            if isinstance(outcome, str) and outcome in {"merged", "failed"}:
-                return outcome == "merged", ""
-            raise ValueError(f"unsupported outcome type in merge result tuple: {type(outcome)}")
-    if isinstance(result, dict) and "receipt" in result:
-        receipt = result["receipt"]
-        if AuthorityReceipt is not None and isinstance(receipt, AuthorityReceipt):
-            if not receipt.is_confirmed:
-                return False, f"authority_not_confirmed: {receipt.reason}"
-            if "merged" in result:
-                return bool(result["merged"]), str(result.get("detail", receipt.reason))
-            return True, receipt.reason
-    raise ValueError("merge runner must present a valid AuthorityReceipt; uninspected merge callbacks are rejected (Rule B)")
+    elif isinstance(result, dict) and "receipt" in result:
+        receipt = result["receipt"] if (AuthorityReceipt is not None and isinstance(result["receipt"], AuthorityReceipt)) else None
+        outcome = result.get("merged", True)
+
+    if receipt is None or not isinstance(receipt, AuthorityReceipt):
+        raise ValueError("merge runner must present a valid AuthorityReceipt; uninspected merge callbacks are rejected (Rule B)")
+
+    if not receipt.is_confirmed:
+        return False, f"authority_not_confirmed: {receipt.reason}"
+
+    # Scope binding validation against dispatch_item
+    if dispatch_item is not None:
+        expected_pr = int(dispatch_item.get("pr_number", 0))
+        if expected_pr and int(receipt.target_pr) != expected_pr:
+            return False, f"cross_pr_receipt_mismatch: receipt target_pr={receipt.target_pr} != item pr_number={expected_pr}"
+        if "candidate_commit" in dispatch_item and dispatch_item["candidate_commit"] != receipt.candidate_commit:
+            return False, f"candidate_commit_mismatch: receipt candidate_commit={receipt.candidate_commit} != item candidate_commit={dispatch_item['candidate_commit']}"
+        if "base_sha" in dispatch_item and dispatch_item["base_sha"] != receipt.base_sha:
+            return False, f"base_sha_mismatch: receipt base_sha={receipt.base_sha} != item base_sha={dispatch_item['base_sha']}"
+
+    if isinstance(outcome, bool):
+        return outcome, receipt.reason if outcome else f"merge_failed: {receipt.reason}"
+    if isinstance(outcome, int):
+        return outcome == 0, f"exit code {outcome}"
+    returncode = getattr(outcome, "returncode", None)
+    if isinstance(returncode, int):
+        detail = getattr(outcome, "stderr", "") or getattr(outcome, "stdout", "") or ""
+        return returncode == 0, str(detail).strip()
+    if isinstance(outcome, str) and outcome in {"merged", "failed"}:
+        return outcome == "merged", ""
+    raise ValueError(f"unsupported outcome type in merge result tuple: {type(outcome)}")
 
 
 
@@ -456,7 +467,7 @@ def advance_merge_queue(
                 _atomic_write_json(target, {"items": items})
 
             try:
-                succeeded, detail = _merge_succeeded(merge_runner(dispatch_item))
+                succeeded, detail = _merge_succeeded(merge_runner(dispatch_item), dispatch_item)
             except Exception as exc:
                 succeeded, detail = False, f"{type(exc).__name__}: {exc}"
 

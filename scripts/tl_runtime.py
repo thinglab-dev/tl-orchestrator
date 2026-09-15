@@ -2011,27 +2011,17 @@ class Runtime:
                         self.authority_store = store
 
                     trust_root = getattr(self, "trust_root", None)
+                    gh_cmd = list(self.config.get("gh_argv", ["gh"]))
                     if trust_root is None and TrustRoot is not None:
                         if "TL_FAKE_GH_STATE" in os.environ:
                             try:
                                 try:
-                                    from scripts.fixtures.runtime.fake_gh import (
-                                        TEST_FIXTURE_APP_ID,
-                                        TEST_FIXTURE_APP_SLUG,
-                                        TEST_FIXTURE_KEY_ID,
-                                        TEST_FIXTURE_PUBLIC_KEY,
-                                    )
+                                    from scripts.fixtures.runtime.fake_gh import TEST_FIXTURE_APP_SLUG
                                 except ImportError:
-                                    from fixtures.runtime.fake_gh import (  # type: ignore[no-redef]
-                                        TEST_FIXTURE_APP_ID,
-                                        TEST_FIXTURE_APP_SLUG,
-                                        TEST_FIXTURE_KEY_ID,
-                                        TEST_FIXTURE_PUBLIC_KEY,
-                                    )
-                                trust_root = TrustRoot.from_external_platform(
-                                    trusted_app_id=TEST_FIXTURE_APP_ID,
-                                    trusted_app_slug=TEST_FIXTURE_APP_SLUG,
-                                    trusted_public_keys={TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
+                                    from fixtures.runtime.fake_gh import TEST_FIXTURE_APP_SLUG  # type: ignore[no-redef]
+                                trust_root = TrustRoot.from_platform(
+                                    app_slug=TEST_FIXTURE_APP_SLUG,
+                                    gh_executable=gh_cmd,
                                 )
                             except Exception:
                                 pass
@@ -2051,6 +2041,7 @@ class Runtime:
                             comments=comments,
                             enforce_mode=authority_mode,
                             trust_root=trust_root,
+                            gh_executable=gh_cmd,
                         )
                         if not receipt.is_confirmed:
                             if receipt.degraded_mode:

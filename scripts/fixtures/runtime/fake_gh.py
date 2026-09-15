@@ -174,6 +174,20 @@ def main(argv: list[str]) -> int:
         out = state["failed_log"]
     elif argv[:2] == ["run", "rerun"]:
         state["reruns"] = state.get("reruns", 0) + 1
+    elif len(argv) > 0 and argv[0] == "api":
+        endpoint = argv[1] if len(argv) > 1 else ""
+        clean_endpoint = endpoint.lstrip("/")
+        if clean_endpoint in {f"apps/{TEST_FIXTURE_APP_SLUG}", "app"}:
+            out = json.dumps({
+                "id": TEST_FIXTURE_APP_ID,
+                "slug": TEST_FIXTURE_APP_SLUG,
+                "name": "ThingLab Merge Authority",
+                "public_keys": {TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
+            })
+            code = 0
+        else:
+            out = json.dumps({"message": "Not Found", "status": "404"})
+            code = 1
     else:
         code = 2
         sys.stderr.write("unsupported fake gh call\n")

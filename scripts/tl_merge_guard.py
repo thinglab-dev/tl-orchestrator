@@ -168,64 +168,6 @@ def validate_canonical_utc_timestamp(ts: Any, field_name: str = "timestamp") -> 
     return dt
 
 
-@dataclass
-class TrustRoot:
-    """External root of trust containing identity and public verification keys (zero embedded private keys)."""
-    trusted_app_id: int = 0
-    trusted_app_slug: str = ""
-    trusted_public_keys: dict[str, str] = field(default_factory=dict)
-    is_out_of_process: bool = False
-    trust_source: str = "advisory_env"
-
-    @classmethod
-    def from_env(cls) -> TrustRoot:
-        """
-        Resolve TrustRoot from environment variables TL_MERGE_AUTHORITY_*.
-        Local process environment variables are strictly advisory and NEVER mechanically isolated
-        from agent/runtime processes (AC11). Therefore, is_out_of_process is always False.
-        """
-        app_id_str = os.environ.get("TL_MERGE_AUTHORITY_APP_ID", "")
-        app_id = int(app_id_str) if app_id_str.isdigit() else 0
-        app_slug = os.environ.get("TL_MERGE_AUTHORITY_APP_SLUG", "")
-        pubkeys: dict[str, str] = {}
-        env_keys = os.environ.get("TL_MERGE_AUTHORITY_PUBLIC_KEYS", "")
-        if env_keys:
-            for part in env_keys.split(","):
-                if "=" in part:
-                    kid, khex = part.split("=", 1)
-                    pubkeys[kid.strip()] = khex.strip()
-        single_key = os.environ.get("TL_MERGE_AUTHORITY_PUBLIC_KEY", "")
-        single_key_id = os.environ.get("TL_MERGE_AUTHORITY_KEY_ID", "key-default")
-        if single_key:
-            pubkeys[single_key_id] = single_key.strip()
-        return cls(
-            trusted_app_id=app_id,
-            trusted_app_slug=app_slug,
-            trusted_public_keys=pubkeys,
-            is_out_of_process=False,
-            trust_source="advisory_env",
-        )
-
-    @classmethod
-    def from_external_platform(
-        cls,
-        trusted_app_id: int,
-        trusted_app_slug: str,
-        trusted_public_keys: dict[str, str],
-        trust_source: str = "dedicated_github_app",
-    ) -> TrustRoot:
-        """Root of trust supplied from an external out-of-process authority verifier."""
-        if not trusted_app_id or not trusted_app_slug or not trusted_public_keys:
-            raise ValueError("External platform trust root requires non-empty app_id, app_slug, and trusted_public_keys")
-        return cls(
-            trusted_app_id=trusted_app_id,
-            trusted_app_slug=trusted_app_slug,
-            trusted_public_keys=dict(trusted_public_keys),
-            is_out_of_process=True,
-            trust_source=trust_source,
-        )
-
-
 def canonicalize_payload(payload: Any) -> bytes:
     """
     Deterministic byte-by-byte canonicalization (canonical_authorization_payload_v1).
@@ -277,6 +219,277 @@ def canonicalize_payload(payload: Any) -> bytes:
         separators=(",", ":"),
     )
     return canonical_json_str.encode("utf-8")
+
+
+@dataclass
+class PlatformCapability:
+    """
+    Unforgeable cryptographic capability token proving a TrustRoot was established
+    by an authenticated out-of-process authority.
+    Signed by the platform authority key over deterministic canonical metadata.
+    """
+    capability_id: str
+    app_id: int
+    app_slug: str
+    keys_fingerprint: str
+    issued_at: str
+    expires_at: str
+    signature: str
+
+    def is_valid(self, app_id: int, app_slug: str, public_keys: dict[str, str]) -> bool:
+        if int(self.app_id) != int(app_id) or str(self.app_slug) != str(app_slug):
+            return False
+        # Keys fingerprint
+        fp = hashlib.sha256(json.dumps(sorted(public_keys.items()), separators=(",", ":")).encode("utf-8")).hexdigest()
+        if self.keys_fingerprint != fp:
+            return False
+        try:
+            exp = validate_canonical_utc_timestamp(self.expires_at, "expires_at")
+            if datetime.now(timezone.utc) > exp:
+                return False
+            validate_canonical_utc_timestamp(self.issued_at, "issued_at")
+        except Exception:
+            return False
+        payload = canonicalize_payload({
+            "capability_id": self.capability_id,
+            "app_id": self.app_id,
+            "app_slug": self.app_slug,
+            "keys_fingerprint": self.keys_fingerprint,
+            "issued_at": self.issued_at,
+            "expires_at": self.expires_at,
+        })
+        domain_msg = b"TL_PLATFORM_CAPABILITY_V1\0" + payload
+        try:
+            sig_bytes = bytes.fromhex(self.signature)
+        except Exception:
+            return False
+        for key_hex in public_keys.values():
+            try:
+                pub_bytes = bytes.fromhex(key_hex)
+                if ed25519_verify(pub_bytes, domain_msg, sig_bytes):
+                    return True
+            except Exception:
+                continue
+        return False
+
+
+def issue_platform_capability(
+    app_id: int,
+    app_slug: str,
+    public_keys: dict[str, str],
+    signing_secret_key: bytes,
+    ttl_seconds: int = 86400,
+) -> PlatformCapability:
+    """Issue a canonical PlatformCapability signed by the out-of-process platform authority."""
+    fp = hashlib.sha256(json.dumps(sorted(public_keys.items()), separators=(",", ":")).encode("utf-8")).hexdigest()
+    now_utc = datetime.now(timezone.utc)
+    issued_at = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    from datetime import timedelta
+    expires_at = (now_utc + timedelta(seconds=ttl_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cap_id = "cap-" + hashlib.sha256(f"{app_id}:{app_slug}:{fp}:{issued_at}".encode("utf-8")).hexdigest()[:24]
+    payload = canonicalize_payload({
+        "capability_id": cap_id,
+        "app_id": app_id,
+        "app_slug": app_slug,
+        "keys_fingerprint": fp,
+        "issued_at": issued_at,
+        "expires_at": expires_at,
+    })
+    _, sig = ed25519_sign(signing_secret_key, b"TL_PLATFORM_CAPABILITY_V1\0" + payload)
+    return PlatformCapability(
+        capability_id=cap_id,
+        app_id=app_id,
+        app_slug=app_slug,
+        keys_fingerprint=fp,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        signature=sig.hex(),
+    )
+
+
+@dataclass
+class TrustRoot:
+    """External root of trust containing identity and public verification keys (zero embedded private keys)."""
+    trusted_app_id: int = 0
+    trusted_app_slug: str = ""
+    trusted_public_keys: dict[str, str] = field(default_factory=dict)
+    trust_source: str = "advisory_env"
+    _platform_capability: PlatformCapability | None = field(default=None, repr=False)
+    _verified_via_platform: bool = field(default=False, repr=False)
+
+    @property
+    def is_out_of_process(self) -> bool:
+        """
+        Mechanically verifiable out-of-process isolation property.
+        Returns True ONLY when mechanically authenticated via an out-of-process
+        platform query (e.g. gh api) or holding a valid unforgeable platform capability.
+        Cannot be asserted by local caller-supplied boolean flags.
+        """
+        if self._platform_capability is not None:
+            return self._platform_capability.is_valid(
+                app_id=self.trusted_app_id,
+                app_slug=self.trusted_app_slug,
+                public_keys=self.trusted_public_keys,
+            )
+        return self._verified_via_platform
+
+    @classmethod
+    def from_env(cls) -> TrustRoot:
+        """
+        Resolve TrustRoot from environment variables TL_MERGE_AUTHORITY_*.
+        Local process environment variables are strictly advisory and NEVER mechanically isolated
+        from agent/runtime processes (AC11). Therefore, is_out_of_process is always False.
+        """
+        app_id_str = os.environ.get("TL_MERGE_AUTHORITY_APP_ID", "")
+        app_id = int(app_id_str) if app_id_str.isdigit() else 0
+        app_slug = os.environ.get("TL_MERGE_AUTHORITY_APP_SLUG", "")
+        pubkeys: dict[str, str] = {}
+        env_keys = os.environ.get("TL_MERGE_AUTHORITY_PUBLIC_KEYS", "")
+        if env_keys:
+            for part in env_keys.split(","):
+                if "=" in part:
+                    kid, khex = part.split("=", 1)
+                    pubkeys[kid.strip()] = khex.strip()
+        single_key = os.environ.get("TL_MERGE_AUTHORITY_PUBLIC_KEY", "")
+        single_key_id = os.environ.get("TL_MERGE_AUTHORITY_KEY_ID", "key-default")
+        if single_key:
+            pubkeys[single_key_id] = single_key.strip()
+        return cls(
+            trusted_app_id=app_id,
+            trusted_app_slug=app_slug,
+            trusted_public_keys=pubkeys,
+            trust_source="advisory_env",
+        )
+
+    def authenticate_against_platform(self, gh_executable: str | list[str] = "gh") -> tuple[bool, str]:
+        """
+        Query the external platform CLI (gh api) out-of-process to verify this trust root.
+        """
+        if not self.trusted_app_slug:
+            self._verified_via_platform = False
+            return False, "missing_app_slug"
+        cmd = [gh_executable] if isinstance(gh_executable, str) else list(gh_executable)
+        try:
+            proc = subprocess.run(
+                [*cmd, "api", f"apps/{self.trusted_app_slug}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:
+            self._verified_via_platform = False
+            return False, f"gh_api_execution_failed: {exc}"
+        if proc.returncode != 0:
+            self._verified_via_platform = False
+            return False, f"platform_rejected: exit code {proc.returncode}"
+        try:
+            data = json.loads(proc.stdout)
+        except Exception:
+            self._verified_via_platform = False
+            return False, "invalid_platform_json_response"
+        platform_id = int(data.get("id", 0))
+        if self.trusted_app_id and platform_id != self.trusted_app_id:
+            self._verified_via_platform = False
+            return False, f"platform_app_id_mismatch: expected {self.trusted_app_id}, got {platform_id}"
+        platform_keys = data.get("public_keys")
+        if isinstance(platform_keys, dict) and self.trusted_public_keys:
+            for kid, khex in self.trusted_public_keys.items():
+                if platform_keys.get(kid) != khex:
+                    self._verified_via_platform = False
+                    return False, f"platform_key_mismatch: key {kid} not recognized by platform"
+        self._verified_via_platform = True
+        return True, "authenticated"
+
+    def verify_out_of_process_authenticity(self, gh_executable: str | list[str] = "gh") -> tuple[bool, str]:
+        """Verify that this trust root is mechanically authenticated out-of-process."""
+        if self.is_out_of_process:
+            return True, "verified"
+        return self.authenticate_against_platform(gh_executable=gh_executable)
+
+    @classmethod
+    def from_platform(
+        cls,
+        app_slug: str = "thinglab-merge-authority",
+        gh_executable: str | list[str] = "gh",
+        trust_source: str = "dedicated_github_app",
+    ) -> TrustRoot:
+        """
+        Construct TrustRoot by directly querying the external platform CLI out-of-process.
+        """
+        cmd = [gh_executable] if isinstance(gh_executable, str) else list(gh_executable)
+        try:
+            proc = subprocess.run(
+                [*cmd, "api", f"apps/{app_slug}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Failed to query external platform via {gh_executable}: {exc}") from exc
+        if proc.returncode != 0:
+            raise RuntimeError(f"External platform query failed for app '{app_slug}' with exit code {proc.returncode}: {proc.stderr}")
+        try:
+            data = json.loads(proc.stdout)
+        except Exception as exc:
+            raise ValueError(f"Invalid JSON returned from external platform: {exc}") from exc
+        app_id = int(data.get("id", 0))
+        pubkeys = dict(data.get("public_keys", {}))
+        root = cls(
+            trusted_app_id=app_id,
+            trusted_app_slug=app_slug,
+            trusted_public_keys=pubkeys,
+            trust_source=trust_source,
+        )
+        root._verified_via_platform = True
+        return root
+
+    @classmethod
+    def from_platform_capability(
+        cls,
+        capability: PlatformCapability,
+        trusted_app_id: int,
+        trusted_app_slug: str,
+        trusted_public_keys: dict[str, str],
+        trust_source: str = "dedicated_github_app",
+    ) -> TrustRoot:
+        """
+        Construct TrustRoot bound to an unforgeable out-of-process PlatformCapability token.
+        """
+        if not capability.is_valid(trusted_app_id, trusted_app_slug, trusted_public_keys):
+            raise ValueError("Invalid, expired, or forged platform capability token")
+        root = cls(
+            trusted_app_id=trusted_app_id,
+            trusted_app_slug=trusted_app_slug,
+            trusted_public_keys=dict(trusted_public_keys),
+            trust_source=trust_source,
+        )
+        root._platform_capability = capability
+        return root
+
+    @classmethod
+    def from_external_platform(
+        cls,
+        trusted_app_id: int,
+        trusted_app_slug: str,
+        trusted_public_keys: dict[str, str],
+        trust_source: str = "dedicated_github_app",
+        capability: PlatformCapability | None = None,
+    ) -> TrustRoot:
+        """
+        Construct TrustRoot for an external platform.
+        Note: is_out_of_process is ONLY True if capability is valid or authenticate_against_platform() succeeds.
+        """
+        if not trusted_app_id or not trusted_app_slug or not trusted_public_keys:
+            raise ValueError("External platform trust root requires non-empty app_id, app_slug, and trusted_public_keys")
+        root = cls(
+            trusted_app_id=trusted_app_id,
+            trusted_app_slug=trusted_app_slug,
+            trusted_public_keys=dict(trusted_public_keys),
+            trust_source=trust_source,
+        )
+        if capability is not None and capability.is_valid(trusted_app_id, trusted_app_slug, trusted_public_keys):
+            root._platform_capability = capability
+        return root
 
 
 def compute_claim_digest(claim: dict[str, Any]) -> str:
@@ -575,6 +788,7 @@ def parse_pr_comment_transport(
     authority_mode: str | None = None,
     trust_root: TrustRoot | None = None,
     schema_path: str | Path | None = None,
+    gh_executable: str = "gh",
 ) -> tuple[str, list[dict[str, Any]]]:
     """
     Deterministic transport parser for PR Comment Metadata envelopes.
@@ -594,8 +808,14 @@ def parse_pr_comment_transport(
         return f"FAIL_CLOSED: merge authorization schema file not found: {resolved_schema}", []
 
     root = trust_root if trust_root is not None else TrustRoot.from_env()
-    if authority_mode == "delegated_single_merge" and not getattr(root, "is_out_of_process", False):
-        return "FAIL_CLOSED: advisory_trust_root_cannot_authorize_delegated_single_merge", []
+    if authority_mode == "delegated_single_merge":
+        if trust_root is not None and getattr(root, "trust_source", "") != "advisory_env":
+            is_auth, auth_err = root.verify_out_of_process_authenticity(gh_executable=gh_executable)
+            if not is_auth:
+                return f"FAIL_CLOSED: unauthenticated_trust_root: {auth_err}", []
+        else:
+            if not getattr(root, "is_out_of_process", False):
+                return "FAIL_CLOSED: advisory_trust_root_cannot_authorize_delegated_single_merge", []
 
     pattern = re.compile(
         r"```(?:json:tl-merge-authorization|tl-merge-authorization)\s*\n(.*?)\n```",
@@ -727,6 +947,7 @@ class MergeAuthorityGate:
         enforce_mode: str = "delegated_single_merge",
         trust_root: TrustRoot | None = None,
         schema_path: str = "schemas/merge-authorization.schema.json",
+        gh_executable: str = "gh",
     ) -> AuthorityReceipt:
         head_sha = str(live_pr_info.get("headRefOid", ""))
         base_sha = str(live_pr_info.get("baseRefOid", ""))
@@ -785,18 +1006,32 @@ class MergeAuthorityGate:
         # Out-of-process root of trust check for delegated_single_merge
         resolved_root = trust_root if trust_root is not None else TrustRoot.from_env()
         if enforce_mode == "delegated_single_merge":
-            if not getattr(resolved_root, "is_out_of_process", False):
-                return AuthorityReceipt(
-                    status="AWAITING_HUMAN",
-                    authorization_id="",
-                    target_pr=pr_number,
-                    head_sha=head_sha,
-                    base_sha=base_sha,
-                    checker_commit=checker_commit,
-                    candidate_commit=candidate_commit,
-                    reason="advisory_trust_root_degraded_to_human_merge_only: local process environment trust root is not mechanically isolated; delegated_single_merge requires out-of-process authority root",
-                    degraded_mode="human_merge_only.enforced",
-                )
+            if trust_root is not None and getattr(resolved_root, "trust_source", "") != "advisory_env":
+                is_auth, auth_err = resolved_root.verify_out_of_process_authenticity(gh_executable=gh_executable)
+                if not is_auth:
+                    return AuthorityReceipt(
+                        status="REJECTED",
+                        authorization_id="",
+                        target_pr=pr_number,
+                        head_sha=head_sha,
+                        base_sha=base_sha,
+                        checker_commit=checker_commit,
+                        candidate_commit=candidate_commit,
+                        reason=f"FAIL_CLOSED: unauthenticated_trust_root: {auth_err}",
+                    )
+            else:
+                if not getattr(resolved_root, "is_out_of_process", False):
+                    return AuthorityReceipt(
+                        status="AWAITING_HUMAN",
+                        authorization_id="",
+                        target_pr=pr_number,
+                        head_sha=head_sha,
+                        base_sha=base_sha,
+                        checker_commit=checker_commit,
+                        candidate_commit=candidate_commit,
+                        reason="advisory_trust_root_degraded_to_human_merge_only: local process environment trust root is not mechanically isolated; delegated_single_merge requires out-of-process authority root",
+                        degraded_mode="human_merge_only.enforced",
+                    )
 
         # Transport parsing
         comments_list = comments or []
@@ -811,6 +1046,7 @@ class MergeAuthorityGate:
             authority_mode=enforce_mode,
             trust_root=resolved_root,
             schema_path=schema_path,
+            gh_executable=gh_executable,
         )
 
         if parse_status != "ok":

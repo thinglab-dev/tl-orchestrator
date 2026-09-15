@@ -37,12 +37,14 @@ from scripts.tl_merge_guard import (
     InMemoryAuthorityStore,
     LocalLedgerAuthorityStore,
     MergeAuthorityGate,
+    PlatformCapability,
     TrustRoot,
     canonicalize_payload,
     compute_claim_digest,
     derive_authorization_id,
     ed25519_sign,
     ed25519_verify,
+    issue_platform_capability,
     parse_pr_comment_transport,
     sign_authorization_envelope,
     validate_post_review_delta,
@@ -130,7 +132,14 @@ class MergeGuardBaseCase(unittest.TestCase):
         os.environ["TL_MERGE_AUTHORITY_APP_SLUG"] = TEST_FIXTURE_APP_SLUG
         os.environ["TL_MERGE_AUTHORITY_PUBLIC_KEY"] = TEST_FIXTURE_PUBLIC_KEY.hex()
         os.environ["TL_MERGE_AUTHORITY_KEY_ID"] = TEST_FIXTURE_KEY_ID
-        self.trust_root = TrustRoot.from_external_platform(
+        self.platform_capability = issue_platform_capability(
+            app_id=TEST_FIXTURE_APP_ID,
+            app_slug=TEST_FIXTURE_APP_SLUG,
+            public_keys={TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
+            signing_secret_key=TEST_FIXTURE_SECRET_KEY,
+        )
+        self.trust_root = TrustRoot.from_platform_capability(
+            capability=self.platform_capability,
             trusted_app_id=TEST_FIXTURE_APP_ID,
             trusted_app_slug=TEST_FIXTURE_APP_SLUG,
             trusted_public_keys={TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
@@ -1167,6 +1176,45 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
         )
         self.assertFalse(receipt_atk.is_confirmed)
         self.assertIn("FAIL_CLOSED: unknown_key_id", receipt_atk.reason)
+
+        # 23e: Negative probe: Caller constructs a fake local trust root with arbitrary keys.
+        # When injected, MergeAuthorityGate and transport parsing MUST fail closed with FAIL_CLOSED: unauthenticated_trust_root.
+        fake_local_root = TrustRoot(
+            trusted_app_id=666,
+            trusted_app_slug="attacker-app",
+            trusted_public_keys={"key-attacker": attacker_pub.hex()},
+            trust_source="fake_local",
+        )
+        self.assertFalse(fake_local_root.is_out_of_process)
+
+        receipt_fake = MergeAuthorityGate.evaluate(
+            repo_root=self.root,
+            pr_number=claim["target_pr"],
+            live_pr_info=live_pr,
+            checker_commit=self.base_sha,
+            candidate_commit=self.base_sha,
+            authority_store=store,
+            expected_repo=claim["target_repository"],
+            comments=[comment],
+            enforce_mode="delegated_single_merge",
+            trust_root=fake_local_root,
+        )
+        self.assertFalse(receipt_fake.is_confirmed)
+        self.assertEqual(receipt_fake.status, "REJECTED")
+        self.assertIn("FAIL_CLOSED: unauthenticated_trust_root", receipt_fake.reason)
+
+        status_fake_trans, envs_fake_trans = parse_pr_comment_transport(
+            comments=[comment],
+            expected_repo=claim["target_repository"],
+            pr_number=claim["target_pr"],
+            expected_head=claim["expected_head_sha"],
+            expected_base=claim["expected_base_sha"],
+            candidate_commit=claim["integration_candidate_commit"],
+            authority_mode="delegated_single_merge",
+            trust_root=fake_local_root,
+        )
+        self.assertTrue(status_fake_trans.startswith("FAIL_CLOSED: unauthenticated_trust_root"))
+        self.assertEqual(envs_fake_trans, [])
 
 
 if __name__ == "__main__":

@@ -1334,9 +1334,13 @@ class TestAutomaticModeContract(unittest.TestCase):
         batch["budget"]["consumed_model_calls"] = 2
         batch["budget"]["reserved_model_calls"] = 0
 
+        def must_not_execute(*args: Any, **kwargs: Any) -> Any:
+            self.fail("runner must not execute during simulated ambiguous outcome")
+
         ok, reason, res = budgeted_model_dispatch(
             batch, role="maker", phase="implementation",
-            call_id="call-ambiguous-crash", harness_cmd=["codex", "exec"],
+            call_id="call-ambiguous-crash", harness_cmd=["dummy_harness_cmd"],
+            runner_fn=must_not_execute,
             simulate_ambiguous_outcome=True
         )
         self.assertFalse(ok)

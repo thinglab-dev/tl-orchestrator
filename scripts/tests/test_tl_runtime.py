@@ -926,6 +926,20 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual((ignore.read_text(encoding="utf-8") if ignore.exists() else ""), original, ".gitignore restored")
         self.assertTrue((fx.repo / "notes.txt").exists(), "a file ignored only by the discarded rules is never deleted")
 
+    def test_approved_work_without_local_commit_is_handed_to_the_operator(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"local_commit": False, "local_merge": False})
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "blocked")
+        fold = fx.fold()
+        record = fold.units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("uncommitted", record.reason)
+        self.assertEqual(fold.batch_state, "blocked", "never done with approved work still uncommitted")
+        refs = git(fx.repo, "for-each-ref", "refs/tl", "--format=%(refname)").split()
+        self.assertTrue(any("pkg/greet.py" in git(fx.repo, "ls-tree", "-r", "--name-only", ref) for ref in refs), "the approved tree is preserved in a ref")
+        self.assertIn("## DECISION REQUIRED", (fx.state_dir / "report.md").read_text(encoding="utf-8"))
+
     # ---- policy -----------------------------------------------------------------------------
 
     def test_scope_expansion_restores_tree_then_parks_on_repeat(self) -> None:

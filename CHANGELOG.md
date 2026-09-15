@@ -119,12 +119,14 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 - Revisão independente r13: restauração de árvore limpa antes de trocar as regras de ignore
   (arquivo ignorado só pelas regras descartadas nunca é apagado); filtros clean/smudge do
   git config documentados como código do operador (rejeitado como bloqueante).
+- Revisão independente r14: com `local_commit` falso, trabalho aprovado vai para
+  `awaiting_operator` com a árvore preservada em ref, nunca para `completed`/`done`.
 - Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
   `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
 
 ### Validação
 
-- `scripts/tests/test_tl_runtime.py` (92 testes, Git real, harness e `gh` scriptados):
+- `scripts/tests/test_tl_runtime.py` (93 testes, Git real, harness e `gh` scriptados):
   DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
   oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
   segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec

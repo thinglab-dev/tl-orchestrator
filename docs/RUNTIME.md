@@ -129,7 +129,7 @@ write-ahead AC07 do Modo Automático generalizado de "chamada de modelo" para qu
 | :--- | :--- |
 | `none` | `T042:prepare`, `gate:test:<tree>` (cache por árvore: mesmo tree, mesmo resultado) |
 | `model_call` | `T042:r1:maker`, `T042:r2:checker`, `T042:r1:maker:a1` (nova tentativa) |
-| `local_commit` | `T042:commit:<tree>` |
+| `local_commit` | `T042:commit:<tree>` (sem `permitted_effects.local_commit`, trabalho aprovado vai para `awaiting_operator` com a árvore num ref, nunca para `completed`) |
 | `push` | `T042:push:<commit>` |
 | `pull_request` | `T042:pr` |
 | `pull_request_merge` / `local_merge` | `T042:merge:<commit>` |

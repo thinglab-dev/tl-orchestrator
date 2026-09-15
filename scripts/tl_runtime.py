@@ -1817,9 +1817,10 @@ class Runtime:
         if record.phase == "complete":
             return
         if not effects.effect_allowed("local_commit"):
-            self.unit_state(uid, "running", "", phase="complete")
-            self.note(f"{uid}: local_commit not permitted; work left on branch {record.branch} uncommitted")
-            return
+            # Approved work that the runtime may not commit is handed to the operator, never "completed":
+            # the park keeps it in a checkpoint ref and the report lists the decision.
+            raise UnitPark("awaiting_operator", f"approved work left uncommitted on branch {record.branch}: local_commit is not permitted; commit it yourself or authorize local_commit",
+                           decision={"options": ["skip"]})
         # commit
         if record.phase in {"commit", "implement", "review", "gates", "contain"}:
             tree = self.git.worktree_tree()

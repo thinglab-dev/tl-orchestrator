@@ -16,7 +16,7 @@ rework_round: 0
 affects_context: []
 effective_authors: [google]
 checker_independence: required
-content_paths: [prompts/classifier.md, prompts/orchestrator-perfis.md, schemas/classification-result-v3.schema.json, scripts/validate_classification.py, scripts/tests/test_dynamic_primary_selection.py, distribution-manifest.json, CHANGELOG.md, _tl-orc/project/STATUS.md]
+content_paths: [prompts/classifier.md, prompts/orchestrator-perfis.md, schemas/classification-result-v3.schema.json, scripts/validate_classification.py, scripts/tests/test_dynamic_primary_selection.py, distribution-manifest.json, CHANGELOG.md, README.md, SKILL.md, scripts/tests/test_release_guardrails.py, _tl-orc/project/STATUS.md]
 
 ## Finding
 source: auditoria pós-encerramento do lote Canary B005 no ThingLab Platform em 2026-09-15.

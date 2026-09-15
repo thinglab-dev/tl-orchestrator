@@ -159,6 +159,17 @@
           "type": [
             "string",
             "null"
+          ],
+          "enum": [
+            "efficient_candidate_insufficient",
+            "efficient_candidate_uncertain",
+            "checker_family_independence",
+            "operator_pinned",
+            "pre_dispatch_unavailable",
+            "proven_empirical_failure",
+            "concrete_technical_necessity",
+            "catalog_ineligible",
+            null
           ]
         }
       },
@@ -172,6 +183,9 @@
             }
           },
           "then": {
+            "required": [
+              "selection_basis"
+            ],
             "properties": {
               "tie_break_applied": {
                 "type": "null"
@@ -210,6 +224,9 @@
             }
           },
           "then": {
+            "required": [
+              "selection_basis"
+            ],
             "properties": {
               "tie_break_applied": {
                 "type": "string",
@@ -284,6 +301,45 @@
               "candidates": {
                 "type": "array",
                 "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "selection_basis": {
+                "const": "escalation"
+              }
+            },
+            "required": [
+              "selection_basis"
+            ]
+          },
+          "then": {
+            "required": [
+              "escalation_reason"
+            ],
+            "properties": {
+              "escalation_reason": {
+                "type": "string",
+                "enum": [
+                  "efficient_candidate_insufficient",
+                  "efficient_candidate_uncertain",
+                  "checker_family_independence",
+                  "operator_pinned",
+                  "pre_dispatch_unavailable",
+                  "proven_empirical_failure",
+                  "concrete_technical_necessity",
+                  "catalog_ineligible"
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "escalation_reason": {
+                "type": "null"
               }
             }
           }

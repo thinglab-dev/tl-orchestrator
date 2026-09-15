@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thinglab.dev/tl-orchestrator/schemas/step-journal.schema.json",
+  "title": "tl-orchestrator step journal event",
+  "description": "One line of journal.jsonl written by scripts/tl_runtime.py. The journal is append-only, single-writer and fsynced per line. Folding it rebuilds unit states, consumed budget, open intents and attempt history; every other runtime file is a projection.",
+  "type": "object",
+  "required": ["format_version", "seq", "at", "kind"],
+  "properties": {
+    "format_version": {"const": 1},
+    "seq": {"type": "integer", "minimum": 1},
+    "at": {"type": "string", "format": "date-time"},
+    "kind": {"type": "string", "enum": ["batch_open", "step_intent", "step_result", "unit_state", "attempt", "recovery", "decision", "note", "batch_state"]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"kind": {"const": "step_intent"}}},
+      "then": {
+        "required": ["step_id", "batch", "unit", "phase", "type", "effect_class", "input_digest", "runtime_stamp", "intent"],
+        "properties": {
+          "step_id": {"type": "string", "description": "Stable id: <unit>:r<round>:<role>[:a<attempt>], gate:<id>:<tree>, <unit>:commit:<tree>, <unit>:push:<commit>, <unit>:pr, <unit>:merge:<commit>."},
+          "effect_class": {"type": "string", "enum": ["none", "model_call", "local_write", "local_commit", "local_merge", "push", "pull_request", "pull_request_merge", "ci_query"]},
+          "input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the canonical intent; a prior ok result is reused only when it matches."},
+          "runtime_stamp": {"type": "string", "description": "<runtime version>:<config digest>. An open intent with another stamp stops the batch (stale_workflow_version) until accepted."},
+          "tree_before": {"type": "string", "description": "git tree of the working directory before the effect (mutating classes only)."}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "step_result"}}},
+      "then": {
+        "required": ["step_id", "status", "result"],
+        "properties": {
+          "status": {"type": "string", "enum": ["ok", "failed", "released", "ambiguous"], "description": "released: proven not started, not charged. ambiguous: charged, unit continues from a tree checkpoint or waits for the operator."},
+          "tree_after": {"type": "string"},
+          "evidence": {"type": "array", "items": {"type": "string"}},
+          "reconciled": {"type": "boolean"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "unit_state"}}},
+      "then": {
+        "required": ["unit", "state"],
+        "properties": {
+          "state": {"type": "string", "enum": ["ready", "running", "waiting", "retryable", "parked", "blocked", "completed", "failed", "awaiting_operator"]},
+          "reason": {"type": "string"},
+          "data": {"type": "object"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "attempt"}}},
+      "then": {
+        "required": ["unit", "phase", "class", "signature", "move"],
+        "properties": {
+          "class": {"type": "string", "enum": ["transient", "harness", "environment", "semantic", "verification", "authorization", "budget", "scope", "state_integrity", "security", "unknown", "ci_rerun"]},
+          "signature": {"type": "string", "description": "Normalized failure signature (numbers, hashes, paths and timings removed). Loop detection keys on it, independent of the model used."},
+          "move": {"type": "string", "description": "retry | rework | rerun | stop | park:<reason>"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "batch_state"}}},
+      "then": {
+        "required": ["state"],
+        "properties": {"state": {"type": "string", "enum": ["in_progress", "done", "blocked", "stopped"]}, "reason": {"type": "string"}}
+      }
+    }
+  ]
+}

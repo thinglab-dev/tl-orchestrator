@@ -4,6 +4,78 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-15
+
+### Adicionado
+
+- Runtime durável opcional (`scripts/tl_runtime.py`, [`docs/RUNTIME.md`](docs/RUNTIME.md)):
+  executa os estados `EXECUTE` → `CLOSE` de um lote já autorizado e congelado do Modo
+  Automático sem sessão de Orquestrador aberta. Cada ação é um Step com intenção gravada
+  antes do efeito e resultado depois (`journal.jsonl`, append-only, fsync por linha, um
+  escritor por lease); retomar é dobrar o journal, e um crash vira pausa. Intenções abertas
+  são reconciliadas com evidência (estado do `tl_job.py`, árvore de `HEAD`, `git ls-remote`,
+  `gh pr list/view`): efeito comprovado é reutilizado, não iniciado é liberado sem cobrança,
+  ambíguo é cobrado e continua de um checkpoint de árvore ou espera o operador. Nunca repete
+  push, PR ou merge às cegas.
+- Scheduler determinístico sobre o DAG do lote (estados `ready`, `running`, `waiting`,
+  `retryable`, `parked`, `blocked`, `completed`, `failed`, `awaiting_operator`), com
+  reserva de verificação antes de cada Maker, `continue_independent_after_block` honrado e
+  concorrência 1.
+- Classificação determinística de falhas (`transient`, `harness`, `environment`,
+  `semantic`, `verification`, `authorization`, `budget`, `scope`, `state_integrity`,
+  `security`, `unknown`) com movimentos limitados (`retry` com backoff, `rework`, `park`,
+  `stop`) e detector de progresso persistido: mesma assinatura normalizada `loop_threshold`
+  vezes, oscilação de árvore A→B→A e achados idênticos do Checker em rodadas consecutivas
+  param a unidade; troca de modelo não zera o contador.
+- Fronteira de política fora do prompt: ambiente do worker filtrado por allowlist, contenção
+  `dirty_paths ⊆ scope_paths` e `do_not_touch`, caminhos sensíveis, varredura de padrões de
+  segredo no diff antes de qualquer commit, efeitos externos (commit, push, PR, merge)
+  somente sob `permitted_effects`, Checker de família diferente obrigatório e Checker que
+  altera a árvore tratado como `unexpected_tree_state`. Capacidades de cada adapter
+  (allowlist de ferramentas, sandbox de rede, telemetria de uso, resume) são declaradas e as
+  ausentes aparecem como limitação no relatório.
+- Context Compiler por papel e fase: pack com ordem estável (contrato, política, spec,
+  aceite, comandos de verificação, testes relacionados, achados/portões/fatia de CI da
+  rodada, checkpoint, diff), tetos por seção e manifesto com digests gravado como evidência
+  do step. Nada de histórico, log bruto ou journal no pack.
+- Laço de CI: `gh pr checks` sem modelo; em falha, só o log dos jobs vermelhos é buscado e
+  fatiado por `scripts/tl_ci_slice.py` (job, step, testes falhos, assinatura normalizada,
+  classificação `code_failure`/`external_infrastructure`/`configuration`/`unknown`, trecho
+  limitado, ponteiro para o bruto). Falha de código vira rodada de rework; infraestrutura sem
+  teste falho ganha reexecução limitada; nada é chamado de flaky para avançar.
+- Orçamentos: despachos do lote, relógio de parede, retries por classe, rodadas de rework,
+  unidades paradas e teto em dólar aplicado apenas sobre custo observado (`claude_json`,
+  `codex_jsonl`); uso não observado permanece `unknown` e nunca é estimado.
+- Relatório da manhã determinístico (`report.md`: Completed, Changed, Commits / PRs,
+  Verification, Automatically Resolved, FYI, REVIEW, DECISION REQUIRED, BLOCKED, Cost /
+  Usage, Models, Recovery Events, What Happens Next), `status.json` para o operador,
+  `journal` diagnóstico, `decide --option retry|skip` e `notify_argv` opcional.
+- Schemas `runtime-config.schema.json` e `step-journal.schema.json`; `batch.schema.json`
+  ganha a chave opcional `permitted_effects.pull_request_merge` (ausente = `false`).
+- Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
+  `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
+
+### Validação
+
+- `scripts/tests/test_tl_runtime.py` (40 testes, Git real, harness e `gh` scriptados):
+  DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
+  oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
+  segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec
+  e de `frozen_scope`, mesma família recusada, reserva de orçamento, árvore suja, lease
+  exclusivo, crash do harness com retry limitado, transitória com backoff, bloqueio por
+  autorização, injeção de falha via `TL_RUNTIME_FAULT` (crash antes e depois do efeito do
+  Maker, depois do commit, do push e do PR, remoto divergente → `awaiting_operator`, journal
+  corrompido, versão obsoleta → `--accept-stale-version`), laço de CI com fatia e rework,
+  rerun de infraestrutura, e o fatiador de log (Go, pytest, unittest, infra, configuração,
+  CLI).
+
+### Migração
+
+- Nada muda para quem não ativa o runtime. Para ativar: criar `_tl-orc/runtime.json`
+  conforme `docs/RUNTIME.md`, manter o lote em JSON validável por `batch.schema.json` e rodar
+  `tl_runtime.py validate` antes de `run`. Reverter é deixar de chamar o script; o journal em
+  `_tl-orc/runtime/` pode ser apagado sem afetar o método documental.
+
 ## [0.16.0] - 2026-09-15
 
 ### Adicionado

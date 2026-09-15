@@ -94,6 +94,10 @@
             },
             "release": {
               "type": "boolean"
+            },
+            "pull_request_merge": {
+              "type": "boolean",
+              "description": "Optional since v0.17.0: the durable runtime may merge the unit pull request after green CI. Absent means false."
             }
           }
         },

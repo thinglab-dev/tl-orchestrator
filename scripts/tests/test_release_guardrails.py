@@ -21,7 +21,7 @@ class ReleaseGuardrailsTest(unittest.TestCase):
     def test_package_version_is_consistent(self) -> None:
         manifest = json.loads(self.read("distribution-manifest.json"))
         marker = f"Versão atual do pacote: **{manifest['package_version']}**."
-        self.assertEqual(manifest["package_version"], "0.16.0")
+        self.assertEqual(manifest["package_version"], "0.17.0")
         self.assertIn(marker, self.read("README.md"))
         self.assertIn(marker, self.read("SKILL.md"))
 
@@ -128,7 +128,7 @@ class ReleaseGuardrailsTest(unittest.TestCase):
         manifest = json.loads(self.read("distribution-manifest.json"))
         self.assertIn("docs/TOKEN_TOOLS.md", manifest["package_files"])
         self.assertIn("scripts/tl_tools.py", manifest["package_files"])
-        self.assertEqual(manifest["package_file_count"], 44)
+        self.assertEqual(manifest["package_file_count"], 49)
         self.assertIn("tl_tools.py doctor --fix", self.read("SKILL.md"))
         self.assertIn("rtk proxy <comando>", self.read("prompts/maker.md"))
         self.assertIn("`<<ccr:...>>`", self.read("prompts/checker-report-only.md"))

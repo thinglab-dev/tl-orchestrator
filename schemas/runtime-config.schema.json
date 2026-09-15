@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thinglab.dev/tl-orchestrator/schemas/runtime-config.schema.json",
+  "title": "tl-orchestrator runtime config",
+  "description": "Consumer-owned configuration for scripts/tl_runtime.py. It names harness adapters, roles, deterministic gates, limits and the policy inputs the runtime enforces. It grants no authority: effects come from the frozen batch's permitted_effects.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "adapters", "roles"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "adapters": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["argv"],
+        "properties": {
+          "argv": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"},
+            "description": "Command line for one dispatch. Placeholders: {pack_path}, {pack_text}, {result_path}, {model}, {effort}, {tools}, {role}. Must reference {pack_path} or {pack_text}."
+          },
+          "family": {"type": "string", "description": "Model family used for the Maker/Checker independence rule; defaults to the adapter name."},
+          "usage_parser": {"type": "string", "enum": ["none", "claude_json", "codex_jsonl"], "default": "none"},
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "tools_allowlist": {"type": "boolean", "default": false},
+              "network_sandbox": {"type": "boolean", "default": false},
+              "usage_telemetry": {"type": "boolean", "default": false},
+              "native_resume": {"type": "boolean", "default": false}
+            },
+            "description": "Declared, not inferred. A capability set to false is reported as a limitation in the morning report."
+          }
+        }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "required": ["maker", "checker"],
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["adapter"],
+        "properties": {
+          "adapter": {"type": "string"},
+          "model": {"type": "string"},
+          "effort": {"type": "string"},
+          "tools": {"type": "array", "items": {"type": "string"}},
+          "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 1800}
+        }
+      }
+    },
+    "allow_same_family_review": {"type": "boolean", "default": false, "description": "Only for offline fixtures. In real use the Checker must come from another family."},
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "always": {"$ref": "#/$defs/gates"},
+        "by_flag": {"type": "object", "additionalProperties": {"$ref": "#/$defs/gates"}, "description": "Extra gates activated by the unit's frontmatter flags (ui, migration, security, ...)."},
+        "canonical": {"$ref": "#/$defs/gates", "description": "Full gate run at CLOSE when every unit completed."}
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "transient_retries": {"type": "integer", "minimum": 0, "default": 3},
+        "harness_retries": {"type": "integer", "minimum": 0, "default": 1},
+        "loop_threshold": {"type": "integer", "minimum": 2, "default": 3, "description": "Same failure signature this many times parks the unit; a model switch does not reset it."},
+        "stagnation_rounds": {"type": "integer", "minimum": 2, "default": 2, "description": "Identical Checker findings for this many consecutive rounds parks the unit."},
+        "max_parked_units": {"type": "integer", "minimum": 1, "default": 3},
+        "flaky_reruns": {"type": "integer", "minimum": 0, "default": 1},
+        "backoff_seconds": {"type": "number", "minimum": 0, "default": 5},
+        "max_wall_clock_seconds": {"type": "integer", "minimum": 1, "default": 50400},
+        "max_cost_usd": {"type": ["number", "null"], "minimum": 0, "default": null, "description": "Enforced only over calls whose adapter reported cost; otherwise reported as unenforceable."},
+        "max_diff_bytes": {"type": "integer", "minimum": 1000, "default": 200000},
+        "max_pack_bytes": {"type": "integer", "minimum": 1000, "default": 60000},
+        "gate_output_bytes": {"type": "integer", "minimum": 200, "default": 4000}
+      }
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean", "default": false},
+        "poll_seconds": {"type": "number", "minimum": 0, "default": 60},
+        "timeout_seconds": {"type": "number", "minimum": 0, "default": 1800}
+      }
+    },
+    "git_executable": {"type": "string", "default": "git"},
+    "gh_executable": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1}], "default": "gh"},
+    "base_branch": {"type": "string", "description": "Integration branch; defaults to the branch checked out when the batch opens."},
+    "branch_prefix": {"type": "string", "default": "tl/"},
+    "tasks_dir": {"type": "string", "default": "_tl-orc/project/tasks", "description": "Where a work_ref like T042 resolves to T042*.md when it is not a path."},
+    "sensitive_paths": {"type": "array", "items": {"type": "string"}, "description": "Touching any of these stops the batch (external_effect_not_authorized)."},
+    "env_allowlist": {"type": "array", "items": {"type": "string"}, "description": "Extra environment variable names passed to workers and gates, on top of the built-in base allowlist."},
+    "env_set": {"type": "object", "additionalProperties": {"type": "string"}},
+    "prompts_dir": {"type": "string", "description": "Directory holding maker.md / checker-report-only.md; defaults to the package prompts."},
+    "notify_argv": {"type": "array", "items": {"type": "string"}, "description": "Command run with one JSON argument on unit and batch state changes."},
+    "price_table": {"type": "object", "description": "Reserved for cost estimation; the runtime never reports estimated cost as observed cost."}
+  },
+  "$defs": {
+    "gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "argv"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "argv": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "timeout_seconds": {"type": "integer", "minimum": 1, "default": 900}
+        }
+      }
+    }
+  }
+}

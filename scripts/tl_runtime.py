@@ -570,6 +570,8 @@ def load_batch(path: Path) -> dict:
             raise Refusal(f"permitted_effects.{key} must be boolean")
     effects.setdefault("pull_request_merge", False)
     effects.setdefault("ci_rerun", False)
+    if not effects.get("local_write"):
+        raise Refusal("external_effect_not_authorized: permitted_effects.local_write is false; the runtime cannot run a Maker without it", 2)
     scope = batch["frozen_scope"]
     units = scope.get("units")
     if not isinstance(units, list) or not units:
@@ -578,7 +580,9 @@ def load_batch(path: Path) -> dict:
         raise Refusal("this runtime executes batch_concurrency = 1 only", 2)
     expected = frozen_scope_digest(scope)
     declared = scope.get("immutable_digest")
-    if declared and declared != expected:
+    if not declared:
+        raise Refusal(f"authority_missing_or_ambiguous: frozen_scope.immutable_digest is required (expected {expected})", 2)
+    if declared != expected:
         raise Refusal(f"unexpected_revision_drift: frozen_scope digest {declared} != {expected}", 2)
     ids = [u["work_ref"] for u in units]
     if len(ids) != len(set(ids)):
@@ -1522,7 +1526,11 @@ class Runtime:
         record = self.fold.units[uid]
         dirty = self.git.dirty_paths()
         base_commit = record.base_commit or self.git.head()
-        diff, _ = self.git.diff_text(base_commit, int(self.limits["max_diff_bytes"]))
+        # The secret scan must see every byte that could be committed, so this diff is uncapped;
+        # only the Checker's pack is bounded by max_diff_bytes.
+        diff, truncated = self.git.diff_text(base_commit, 1 << 31)
+        if truncated:
+            raise StopBatch("unexpected_tree_state", "diff too large to scan for secrets")
         klass, detail = self.policy.check_containment(unit, dirty, diff)
         intent_tree = ""
         for event in self.journal.read()[0]:
@@ -1714,12 +1722,13 @@ class Runtime:
 
             def commit(intent: dict) -> dict:
                 self.git.run("add", "-A", "--", ".")
-                if not self.git.run("diff", "--cached", "--name-only"):
-                    return {"commit": self.git.head(), "empty": True}
+                files = self.git.run("diff", "--cached", "--name-only")
+                if not files:
+                    return {"commit": self.git.head(), "empty": True, "files": []}
                 self.git.run("commit", "--quiet", "-m", message)
-                return {"commit": self.git.head(), "empty": False}
+                return {"commit": self.git.head(), "empty": False, "files": files.splitlines()}
 
-            result = self.step(f"{uid}:commit:{tree}", "local_commit", uid, "commit", {"type": "commit", "tree": tree, "message": message}, commit)
+            result = self.step(f"{uid}:commit:{tree}", "local_commit", uid, "commit", {"type": "commit", "tree": tree, "message": message, "parent": self.git.head()}, commit)
             self.unit_state(uid, "running", "", phase="push", commit=result["commit"], tree=tree)
             record = self.fold.units[uid]
         # push
@@ -1779,7 +1788,7 @@ class Runtime:
                     self.note(f"{uid}: merge skipped, CI state {record.ci.get('state') or 'unknown'}")
                 else:
                     def merge(intent: dict) -> dict:
-                        out = run_argv([*self.config["gh_argv"], "pr", "merge", str(record.pr["number"]), "--merge", "--delete-branch=false"], self.repo, 300)
+                        out = run_argv([*self.config["gh_argv"], "pr", "merge", str(record.pr["number"]), "--merge", "--delete-branch=false", "--match-head-commit", record.commit], self.repo, 300)
                         if out["exit_code"] != 0:
                             return {"_status": "failed", "detail": out["stderr"][-400:]}
                         return {"merged": True}
@@ -1792,8 +1801,11 @@ class Runtime:
                 base = self.base_branch
 
                 def local_merge(intent: dict) -> dict:
+                    tip = self.git.rev(record.branch)
+                    if tip != record.commit:
+                        return {"_status": "failed", "detail": f"branch {record.branch} moved to {str(tip)[:12]} after review of {record.commit[:12]}"}
                     self.git.run("checkout", "--quiet", base)
-                    out = run_argv([self.git.exe, "merge", "--no-ff", "--no-edit", record.branch], self.repo, 300)
+                    out = run_argv([self.git.exe, "merge", "--no-ff", "--no-edit", record.commit], self.repo, 300)
                     if out["exit_code"] != 0:
                         run_argv([self.git.exe, "merge", "--abort"], self.repo, 60)
                         return {"_status": "failed", "detail": out["stderr"][-400:] or out["stdout"][-400:]}
@@ -1864,8 +1876,8 @@ class Runtime:
                                 input_digest=intent.get("input_digest"), result=result, tree_after=self.git.worktree_tree() if intent.get("tree_before") else "", evidence=[], reconciled=True)
             if verdict == "ambiguous" and uid and uid in self.fold.units:
                 self._checkpoint_dirty(uid, intent)
-            if verdict == "ambiguous" and effect in {"push", "pull_request_merge"}:
-                self.unit_state(uid, "awaiting_operator", f"ambiguous external effect after crash: {step_id}", decision={"options": ["retry", "skip"]})
+            if verdict == "ambiguous" and effect in {"local_commit", "push", "pull_request", "pull_request_merge"}:
+                self.unit_state(uid, "awaiting_operator", f"ambiguous effect after crash: {step_id}: {str(result.get('detail', ''))[:160]}", decision={"options": ["retry", "skip"]})
         self.refold()
         for uid, record in self.fold.units.items():
             if record.state == "running":
@@ -1910,9 +1922,16 @@ class Runtime:
                 return "ambiguous", {"detail": f"harness ended ({state}) before the result was journaled; call consumed, unit continues from checkpoint"}
             return "ambiguous", {"detail": f"harness state {state}; call consumed conservatively"}
         if effect == "local_commit":
+            head = self.git.head()
             head_tree = self.git.run("rev-parse", "HEAD^{tree}")
-            if head_tree == payload.get("tree"):
-                return "ok", {"commit": self.git.head(), "empty": False, "detail": "commit found on HEAD"}
+            parent = payload.get("parent")
+            head_parent = self.git.rev("HEAD^") or ""
+            if head_tree == payload.get("tree") and (not parent or head_parent == parent):
+                files = self.git.run("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+                return "ok", {"commit": head, "empty": False, "files": files.splitlines(), "detail": "commit found on HEAD"}
+            if parent and head != parent and run_argv([self.git.exe, "merge-base", "--is-ancestor", parent, "HEAD"], self.repo, 60)["exit_code"] == 0:
+                # Something committed after the journaled parent, but HEAD is not exactly our commit: never adopt it.
+                return "ambiguous", {"detail": f"HEAD moved to {head[:12]} past the journaled parent {parent[:12]}; commit not adopted"}
             return "released", {"detail": "commit not present; will redo"}
         if effect == "push":
             branch, commit = payload.get("branch", ""), payload.get("commit", "")
@@ -1929,7 +1948,7 @@ class Runtime:
                 return "released", {"detail": "remote behind local; fast-forward push will run"}
             return "ambiguous", {"detail": f"remote {remote_sha[:12]} diverged from local {commit[:12]}"}
         if effect == "pull_request":
-            out = run_argv([*self.config["gh_argv"], "pr", "list", "--head", payload.get("branch", ""), "--state", "all", "--json", "number,url", "--limit", "1"], self.repo, 120)
+            out = run_argv([*self.config["gh_argv"], "pr", "list", "--head", payload.get("branch", ""), "--state", "all", "--json", "number,url,baseRefName,headRefOid,state", "--limit", "1"], self.repo, 120)
             try:
                 rows = json.loads(out["stdout"] or "[]") if out["exit_code"] == 0 else None
             except ValueError:
@@ -1937,7 +1956,11 @@ class Runtime:
             if rows is None:
                 return "ambiguous", {"detail": "gh pr list failed: " + out["stderr"][-200:]}
             if rows:
-                return "ok", {"url": rows[0].get("url"), "number": rows[0].get("number"), "detail": "pull request already exists"}
+                row = rows[0]
+                expected_head = self.git.rev(payload.get("branch", "")) or ""
+                if row.get("baseRefName") != payload.get("base") or (row.get("headRefOid") and row.get("headRefOid") != expected_head):
+                    return "ambiguous", {"detail": f"pull request {row.get('number')} exists but base/head differ from the journaled intent"}
+                return "ok", {"url": row.get("url"), "number": row.get("number"), "detail": "pull request already exists"}
             return "released", {"detail": "no pull request for branch; create will run"}
         if effect == "pull_request_merge":
             out = run_argv([*self.config["gh_argv"], "pr", "view", str(payload.get("pr", "")), "--json", "state,mergedAt"], self.repo, 120)
@@ -2053,13 +2076,13 @@ def render_report(runtime: "Runtime") -> str:
 
     section("Completed", [f"- {uid}: {runtime.units[uid].title}" + (" (merged)" if r.merged else "") for uid, r in records.items() if r.state == "completed"])
     changed = []
-    for uid, r in records.items():
-        if r.commit and r.base_commit:
-            base_commit = r.base_commit
-            if base_commit != r.commit:
-                files = runtime.git.run("diff", "--name-only", f"{base_commit}..{r.commit}", check=False)
-                if files:
-                    changed.append(f"- {uid}: " + ", ".join(files.splitlines()[:12]) + (" …" if len(files.splitlines()) > 12 else ""))
+    for uid in order:
+        files: list[str] = []
+        for step_id, step in fold.steps.items():
+            if step_id.startswith(f"{uid}:commit:") and step.get("status") == "ok":
+                files.extend((step.get("result") or {}).get("files") or [])
+        if files:
+            changed.append(f"- {uid}: " + ", ".join(files[:12]) + (" …" if len(files) > 12 else ""))
     section("Changed", changed)
     section("Commits / PRs", [f"- {uid}: branch `{r.branch}` commit `{r.commit[:12]}`" + (f" PR {r.pr.get('url') or r.pr.get('number')}" if r.pr else "") for uid, r in records.items() if r.commit])
     verification = []

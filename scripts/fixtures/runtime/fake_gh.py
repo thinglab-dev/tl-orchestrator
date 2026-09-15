@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -27,12 +28,14 @@ def main(argv: list[str]) -> int:
     if argv[:2] == ["pr", "create"]:
         head = argv[argv.index("--head") + 1]
         number = len(state["prs"]) + 100
-        state["prs"][head] = {"number": number, "url": f"https://example.invalid/pr/{number}", "state": "OPEN", "mergedAt": None}
+        base = argv[argv.index("--base") + 1]
+        head_oid = subprocess.run(["git", "rev-parse", head], capture_output=True, text=True).stdout.strip()
+        state["prs"][head] = {"number": number, "url": f"https://example.invalid/pr/{number}", "state": "OPEN", "mergedAt": None, "base": base, "head_oid": head_oid}
         out = state["prs"][head]["url"]
     elif argv[:2] == ["pr", "list"]:
         head = argv[argv.index("--head") + 1]
         pr = state["prs"].get(head)
-        out = json.dumps([{"number": pr["number"], "url": pr["url"]}] if pr else [])
+        out = json.dumps([{"number": pr["number"], "url": pr["url"], "baseRefName": pr.get("base"), "headRefOid": pr.get("head_oid"), "state": pr["state"]}] if pr else [])
     elif argv[:2] == ["pr", "view"]:
         number = int(argv[2])
         pr = next((p for p in state["prs"].values() if p["number"] == number), None)
@@ -41,9 +44,11 @@ def main(argv: list[str]) -> int:
     elif argv[:2] == ["pr", "merge"]:
         number = int(argv[2])
         pr = next((p for p in state["prs"].values() if p["number"] == number), None)
-        if pr is None or state.get("merge_fails"):
+        expected = argv[argv.index("--match-head-commit") + 1] if "--match-head-commit" in argv else None
+        head_now = subprocess.run(["git", "rev-parse", next(h for h, p in state["prs"].items() if p is pr)], capture_output=True, text=True).stdout.strip() if pr else ""
+        if pr is None or state.get("merge_fails") or (expected and expected != head_now):
             code = 1
-            sys.stderr.write("merge refused\n")
+            sys.stderr.write("merge refused" + chr(10))
         else:
             pr["state"], pr["mergedAt"] = "MERGED", "2026-01-01T00:00:00Z"
     elif argv[:2] == ["pr", "checks"]:

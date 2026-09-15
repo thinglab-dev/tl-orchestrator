@@ -169,6 +169,7 @@ class RuntimeTest(unittest.TestCase):
                         "## REVIEW", "## DECISION REQUIRED", "## BLOCKED", "## Cost / Usage", "## Models", "## Recovery Events", "## What Happens Next"):
             self.assertIn(heading, report)
         self.assertIn("- T001: Add greeting module (merged)", report)
+        self.assertIn("## Changed" + chr(10) + chr(10) + "- T001: pkg/greet.py", report)
         self.assertIn("tokens: unknown", report)
         status = json.loads((fx.state_dir / "status.json").read_text(encoding="utf-8"))
         self.assertEqual(status["progress"], {"completed": 2, "total": 2})
@@ -380,6 +381,56 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(gate["result"]["argv"][2], fold.units["T001"].base_commit)
         self.assertTrue(gate["result"]["passed"])
         self.assertTrue(any("resolved by runtime evidence" in n.get("text", "") for n in fold.notes))
+
+    def test_local_write_false_is_refused_before_any_dispatch(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"local_write": False})
+        with self.assertRaises(tl_runtime.Refusal) as ctx:
+            fx.runtime()
+        self.assertIn("local_write", str(ctx.exception))
+
+    def test_missing_immutable_digest_is_refused(self) -> None:
+        fx = Fixture(self.root, units=1)
+        del fx.batch["frozen_scope"]["immutable_digest"]
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        with self.assertRaises(tl_runtime.Refusal) as ctx:
+            fx.runtime()
+        self.assertIn("immutable_digest", str(ctx.exception))
+
+    def test_secret_beyond_the_pack_diff_cap_is_still_caught(self) -> None:
+        fx = Fixture(self.root, units=1, limits={"max_diff_bytes": 1000})
+        filler = "# filler" + chr(10)
+        fx.script("maker", [{"files": {"pkg/greet.py": filler * 400 + "TOKEN = 'AKIA" + "Q" * 16 + "'" + chr(10)}}])
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "stopped")
+        self.assertEqual(fx.fold().stop_reason, "secret_detected")
+
+    def test_local_merge_refuses_a_branch_that_moved_after_review(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_effect:commit").returncode, 70)
+        git(fx.repo, "commit", "-q", "--allow-empty", "-m", "someone else pushed to the unit branch")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("moved", record.reason)
+        self.assertNotIn("T001", git(fx.repo, "log", "--oneline", "main"))
+
+    def test_pr_merge_is_pinned_to_the_reviewed_commit(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_effect:pull_request").returncode, 70)
+        git(fx.repo, "commit", "-q", "--allow-empty", "-m", "foreign commit on the unit branch")
+        git(fx.repo, "push", "-q", "origin", "tl/B001/T001")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertEqual(sum(1 for c in calls if c[:2] == ["pr", "merge"]), 0)
 
     # ---- policy -----------------------------------------------------------------------------
 

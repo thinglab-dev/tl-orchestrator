@@ -59,12 +59,18 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   allowlist de ferramentas nem sandbox só roda com `accept_unisolated_worker: true`, e
   `verificacao_pendente` do Checker que corresponde a um portão já verde é resolvida pelo
   runtime com a evidência do próprio portão.
+- Revisão independente r2: `local_write` falso e `immutable_digest` ausente são recusas antes de
+  qualquer despacho; a varredura de segredos lê o diff integral (o teto `max_diff_bytes` só
+  limita o pack do Checker); merge remoto usa `--match-head-commit` e merge local exige que a
+  branch ainda aponte para o commit revisado; PR reconciliado só com a mesma base e o mesmo
+  head; a seção Changed do relatório vem dos arquivos gravados no step de commit, não de
+  `git diff` ao vivo.
 - Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
   `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
 
 ### Validação
 
-- `scripts/tests/test_tl_runtime.py` (49 testes, Git real, harness e `gh` scriptados):
+- `scripts/tests/test_tl_runtime.py` (55 testes, Git real, harness e `gh` scriptados):
   DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
   oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
   segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec

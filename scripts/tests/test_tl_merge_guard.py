@@ -130,6 +130,11 @@ class MergeGuardBaseCase(unittest.TestCase):
         os.environ["TL_MERGE_AUTHORITY_APP_SLUG"] = TEST_FIXTURE_APP_SLUG
         os.environ["TL_MERGE_AUTHORITY_PUBLIC_KEY"] = TEST_FIXTURE_PUBLIC_KEY.hex()
         os.environ["TL_MERGE_AUTHORITY_KEY_ID"] = TEST_FIXTURE_KEY_ID
+        self.trust_root = TrustRoot.from_external_platform(
+            trusted_app_id=TEST_FIXTURE_APP_ID,
+            trusted_app_slug=TEST_FIXTURE_APP_SLUG,
+            trusted_public_keys={TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
+        )
 
         # Initialize a real Git repository in temp directory
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(self.root), check=True)
@@ -181,6 +186,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             expected_repo="thinglab-dev/tl-orchestrator",
             comments=[],  # Zero out-of-band authority
             enforce_mode="delegated_single_merge",
+            trust_root=self.trust_root,
         )
 
         self.assertFalse(receipt.is_confirmed)
@@ -235,6 +241,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             expected_head=claim1["expected_head_sha"],
             expected_base=claim1["expected_base_sha"],
             candidate_commit=claim1["integration_candidate_commit"],
+            trust_root=self.trust_root,
         )
         self.assertEqual(status, "FAIL_CLOSED: ambiguous_merge_authorization")
         self.assertEqual(len(envelopes), 0)
@@ -254,6 +261,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             authority_store=InMemoryAuthorityStore(),
             expected_repo=claim1["target_repository"],
             comments=comments,
+            trust_root=self.trust_root,
         )
         self.assertFalse(receipt.is_confirmed)
         self.assertEqual(receipt.reason, "FAIL_CLOSED: ambiguous_merge_authorization")
@@ -283,6 +291,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             authority_store=InMemoryAuthorityStore(),
             expected_repo=claim["target_repository"],
             comments=[comment_bad_mech],
+            trust_root=self.trust_root,
         )
         self.assertFalse(receipt.is_confirmed)
         self.assertIn("FAIL_CLOSED: invalid_envelope_schema", receipt.reason)
@@ -300,6 +309,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             authority_store=InMemoryAuthorityStore(),
             expected_repo=claim["target_repository"],
             comments=[comment_forged_sig],
+            trust_root=self.trust_root,
         )
         self.assertFalse(receipt2.is_confirmed)
         self.assertIn("FAIL_CLOSED: invalid_signature_for_key", receipt2.reason)
@@ -316,6 +326,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             authority_store=InMemoryAuthorityStore(),
             expected_repo=claim["target_repository"],
             comments=[comment_bad_id],
+            trust_root=self.trust_root,
         )
         self.assertFalse(receipt3.is_confirmed)
         self.assertIn("FAIL_CLOSED: untrusted_app_id", receipt3.reason)
@@ -332,6 +343,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             authority_store=InMemoryAuthorityStore(),
             expected_repo=claim["target_repository"],
             comments=[comment_human],
+            trust_root=self.trust_root,
         )
         self.assertFalse(receipt4.is_confirmed)
         self.assertIn("FAIL_CLOSED: untrusted_comment_author", receipt4.reason)
@@ -361,6 +373,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             authority_store=InMemoryAuthorityStore(),
             expected_repo=claim["target_repository"],
             comments=[comment],
+            trust_root=self.trust_root,
         )
         self.assertFalse(receipt.is_confirmed)
         self.assertEqual(receipt.reason, "missing_merge_authorization")
@@ -389,6 +402,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             authority_store=InMemoryAuthorityStore(),
             expected_repo=claim["target_repository"],
             comments=[comment],
+            trust_root=self.trust_root,
         )
         self.assertFalse(receipt.is_confirmed)
         self.assertIn("candidate_commit_mismatch", receipt.reason)
@@ -482,6 +496,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
                 authority_store=new_local_store,
                 expected_repo=claim["target_repository"],
                 comments=[comment],
+                trust_root=self.trust_root,
             )
             self.assertFalse(receipt.is_confirmed)
             self.assertEqual(receipt.reason, "authorization_already_consumed")
@@ -501,6 +516,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             authority_store=InMemoryAuthorityStore(),
             expected_repo="thinglab-dev/tl-orchestrator",
             comments=[],
+            trust_root=self.trust_root,
         )
         self.assertFalse(receipt.is_confirmed)
         self.assertEqual(receipt.reason, "missing_merge_authorization")
@@ -530,6 +546,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             authority_store=store,
             expected_repo=claim["target_repository"],
             comments=[comment],
+            trust_root=self.trust_root,
         )
         self.assertTrue(receipt.is_confirmed)
         self.assertEqual(receipt.status, "CONFIRMED")
@@ -739,6 +756,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             candidate_commit=claim["integration_candidate_commit"],
             checker_commit=claim["checker_approved_commit"],
             authority_mode=claim["authority_mode"],
+            trust_root=self.trust_root,
             schema_path=Path(self.temp_dir.name) / "nonexistent.schema.json",
         )
         self.assertTrue(status.startswith("FAIL_CLOSED: merge authorization schema file not found"))
@@ -758,6 +776,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
                 candidate_commit=claim["integration_candidate_commit"],
                 checker_commit=claim["checker_approved_commit"],
                 authority_mode=claim["authority_mode"],
+                trust_root=self.trust_root,
             )
             self.assertTrue(status2.startswith("FAIL_CLOSED: invalid_envelope_schema"))
             self.assertIn("validator unavailable", status2)
@@ -779,6 +798,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             candidate_commit=claim["integration_candidate_commit"],
             checker_commit=claim["checker_approved_commit"],
             authority_mode=claim["authority_mode"],
+            trust_root=self.trust_root,
         )
         self.assertTrue(status3.startswith("FAIL_CLOSED: invalid_envelope_schema"))
         self.assertEqual(envs3, [])
@@ -838,6 +858,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             candidate_commit=claim["integration_candidate_commit"],
             checker_commit="b" * 40,  # Evaluator expects different checker commit
             authority_mode="delegated_single_merge",
+            trust_root=self.trust_root,
         )
         self.assertEqual(status, "missing_merge_authorization")
         self.assertEqual(envs, [])
@@ -852,6 +873,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             expected_repo=claim["target_repository"],
             comments=[comment],
             enforce_mode="delegated_single_merge",
+            trust_root=self.trust_root,
         )
         self.assertFalse(receipt.is_confirmed)
 
@@ -865,6 +887,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             candidate_commit=claim["integration_candidate_commit"],
             checker_commit="a" * 40,
             authority_mode="human_merge_only",  # Evaluator expects human_merge_only
+            trust_root=self.trust_root,
         )
         self.assertEqual(status2, "missing_merge_authorization")
         self.assertEqual(envs2, [])
@@ -879,6 +902,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
             expected_repo=claim["target_repository"],
             comments=[comment],
             enforce_mode="human_merge_only",
+            trust_root=self.trust_root,
         )
         self.assertFalse(receipt2.is_confirmed)
 
@@ -910,6 +934,239 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
                 os.environ["TL_FAKE_GH_STATE"] = old_gh_state
             else:
                 os.environ.pop("TL_FAKE_GH_STATE", None)
+
+    def test_probe_22_strict_iso8601_utc_timestamps_and_temporal_order(self):
+        """
+        Probe 22: R2 Strict Canonical UTC ISO 8601 Timestamp Validation & Temporal Order.
+        Verifies:
+        - Schema rejects non-matching strings (e.g. 'invalid', missing 'T'/'Z', non-UTC offsets).
+        - validate_canonical_utc_timestamp enforces format and strict zero UTC offset.
+        - canonicalize_payload and sign_authorization_envelope enforce timestamp constraints.
+        - Temporal inversion (issued_at > expires_at) fails closed in both derivation and transport.
+        - Canonical formats ending with 'Z' or '+00:00' succeed.
+        """
+        from scripts.tl_merge_guard import validate_canonical_utc_timestamp
+
+        # 22a: Unit validation of timestamp strings
+        valid_z = "2026-09-15T12:00:00Z"
+        valid_offset = "2026-09-15T12:00:00+00:00"
+        valid_frac = "2026-09-15T12:00:00.123456Z"
+        self.assertEqual(validate_canonical_utc_timestamp(valid_z).tzinfo, timezone.utc)
+        self.assertEqual(validate_canonical_utc_timestamp(valid_offset).tzinfo, timezone.utc)
+        self.assertEqual(validate_canonical_utc_timestamp(valid_frac).tzinfo, timezone.utc)
+
+        bad_timestamps = [
+            "invalid",
+            "2026-09-15",
+            "2026-09-15 12:00:00Z",
+            "2026-09-15T12:00:00",
+            "2026-09-15T12:00:00-05:00",
+            "2026-09-15T12:00:00+02:00",
+            "2026-13-45T99:99:99Z",
+            123456789,
+            None,
+        ]
+        for bad_ts in bad_timestamps:
+            with self.assertRaises(ValueError):
+                validate_canonical_utc_timestamp(bad_ts)
+
+        # 22b: Canonicalizer rejects invalid timestamps
+        claim = make_valid_claim()
+        bad_issued = dict(claim, issued_at="invalid")
+        with self.assertRaises(ValueError):
+            canonicalize_payload(bad_issued)
+
+        bad_tz = dict(claim, issued_at="2026-09-15T12:00:00-05:00")
+        with self.assertRaises(ValueError):
+            canonicalize_payload(bad_tz)
+
+        # 22c: Temporal inversion (issued_at > expires_at)
+        inverted = dict(claim, issued_at="2029-01-01T00:00:00Z", expires_at="2026-09-15T00:00:00Z")
+        with self.assertRaises(ValueError):
+            canonicalize_payload(inverted)
+        with self.assertRaises(ValueError):
+            sign_authorization_envelope(inverted, TEST_FIXTURE_SECRET_KEY, TEST_FIXTURE_KEY_ID)
+
+        # 22d: Transport rejects invalid issued_at / expires_at / non-UTC offset
+        # Schema layer rejection
+        raw_env_bad = {
+            "schema_version": 1,
+            "authorization_id": "auth-0123456789abcdef0123456789abcdef",
+            "target_repository": "thinglab-dev/tl-orchestrator",
+            "target_pr": 55,
+            "expected_head_sha": "a" * 40,
+            "expected_base_sha": "b" * 40,
+            "checker_approved_commit": "a" * 40,
+            "integration_candidate_commit": "a" * 40,
+            "authority_mode": "delegated_single_merge",
+            "issued_at": "invalid",
+            "expires_at": "2029-01-01T00:00:00Z",
+            "nonce": "0123456789abcdef0123456789abcdef",
+            "provenance": {
+                "issuer": f"{TEST_FIXTURE_APP_SLUG}[bot]",
+                "mechanism": "dedicated_github_app",
+                "integration_id": TEST_FIXTURE_APP_ID,
+                "key_id": TEST_FIXTURE_KEY_ID,
+                "signature": "00" * 64,
+            },
+        }
+        comment_bad = format_comment(raw_env_bad)
+        status, envs = parse_pr_comment_transport(
+            comments=[comment_bad],
+            expected_repo="thinglab-dev/tl-orchestrator",
+            pr_number=55,
+            expected_head="a" * 40,
+            expected_base="b" * 40,
+            candidate_commit="a" * 40,
+            trust_root=self.trust_root,
+        )
+        self.assertTrue(status.startswith("FAIL_CLOSED: invalid_envelope_schema"))
+        self.assertEqual(envs, [])
+
+        # Non-UTC timezone offset rejection
+        raw_env_tz = dict(raw_env_bad, issued_at="2026-09-15T12:00:00-05:00")
+        comment_tz = format_comment(raw_env_tz)
+        status_tz, envs_tz = parse_pr_comment_transport(
+            comments=[comment_tz],
+            expected_repo="thinglab-dev/tl-orchestrator",
+            pr_number=55,
+            expected_head="a" * 40,
+            expected_base="b" * 40,
+            candidate_commit="a" * 40,
+            trust_root=self.trust_root,
+        )
+        self.assertTrue(status_tz.startswith("FAIL_CLOSED: invalid_envelope_schema"))
+        self.assertEqual(envs_tz, [])
+
+    def test_probe_23_out_of_process_trust_root_isolation_and_env_tampering_resistance(self):
+        """
+        Probe 23: R1 Out-of-Process Trust Root Isolation and Environment Tampering Resistance.
+        Verifies:
+        - TrustRoot.from_env() creates advisory trust root with is_out_of_process == False.
+        - Under delegated_single_merge, advisory trust root safely degrades to human_merge_only.enforced.
+        - Runtime environment tampering (attacker injecting its own Ed25519 public key in os.environ)
+          cannot produce an accepted authority for delegated merge.
+        - operator_ed25519 mechanism is strictly forbidden for delegated_single_merge.
+        """
+        # 23a: TrustRoot.from_env() is strictly advisory
+        env_root = TrustRoot.from_env()
+        self.assertFalse(env_root.is_out_of_process)
+        self.assertEqual(env_root.trust_source, "advisory_env")
+
+        # 23b: Evaluating delegated_single_merge with advisory root degrades to human_merge_only.enforced
+        claim = make_valid_claim(
+            head_sha=self.base_sha,
+            base_sha=self.base_sha,
+            checker_commit=self.base_sha,
+            candidate_commit=self.base_sha,
+            authority_mode="delegated_single_merge",
+        )
+        env = make_envelope(claim)
+        comment = format_comment(env)
+        live_pr = {"state": "OPEN", "headRefOid": self.base_sha, "baseRefOid": self.base_sha}
+        store = InMemoryAuthorityStore()
+
+        receipt = MergeAuthorityGate.evaluate(
+            repo_root=self.root,
+            pr_number=claim["target_pr"],
+            live_pr_info=live_pr,
+            checker_commit=self.base_sha,
+            candidate_commit=self.base_sha,
+            authority_store=store,
+            expected_repo=claim["target_repository"],
+            comments=[comment],
+            enforce_mode="delegated_single_merge",
+            trust_root=env_root,  # Advisory root from env
+        )
+        self.assertFalse(receipt.is_confirmed)
+        self.assertEqual(receipt.status, "AWAITING_HUMAN")
+        self.assertEqual(receipt.degraded_mode, "human_merge_only.enforced")
+        self.assertIn("advisory_trust_root_degraded_to_human_merge_only", receipt.reason)
+
+        # Calling without explicit trust_root defaults to from_env() and also degrades
+        receipt_default = MergeAuthorityGate.evaluate(
+            repo_root=self.root,
+            pr_number=claim["target_pr"],
+            live_pr_info=live_pr,
+            checker_commit=self.base_sha,
+            candidate_commit=self.base_sha,
+            authority_store=store,
+            expected_repo=claim["target_repository"],
+            comments=[comment],
+            enforce_mode="delegated_single_merge",
+            trust_root=None,
+        )
+        self.assertFalse(receipt_default.is_confirmed)
+        self.assertEqual(receipt_default.status, "AWAITING_HUMAN")
+        self.assertEqual(receipt_default.degraded_mode, "human_merge_only.enforced")
+
+        # 23c: Attacker with local env control generates own key and attempts operator_ed25519
+        # Generate arbitrary attacker keypair
+        attacker_seed = b"attacker-host-process-key-seed32"
+        attacker_pub, attacker_priv = ed25519_sign(attacker_seed, b"")
+        attacker_key_id = "key-attacker-1"
+
+        os.environ["TL_MERGE_AUTHORITY_PUBLIC_KEYS"] = f"{attacker_key_id}={attacker_pub.hex()}"
+        env_attacker_root = TrustRoot.from_env()
+
+        # Attacker signs an envelope with its own key using operator_ed25519
+        attacker_claim = make_valid_claim(
+            head_sha=self.base_sha,
+            base_sha=self.base_sha,
+            checker_commit=self.base_sha,
+            candidate_commit=self.base_sha,
+            authority_mode="delegated_single_merge",
+        )
+        attacker_env = sign_authorization_envelope(
+            attacker_claim,
+            secret_key=attacker_priv,
+            key_id=attacker_key_id,
+            mechanism="operator_ed25519",
+            issuer="local-operator",
+        )
+        attacker_comment = format_comment(attacker_env, author_login="attacker")
+
+        # Parser strictly rejects operator_ed25519 for delegated_single_merge
+        status_op, envs_op = parse_pr_comment_transport(
+            comments=[attacker_comment],
+            expected_repo=attacker_claim["target_repository"],
+            pr_number=attacker_claim["target_pr"],
+            expected_head=attacker_claim["expected_head_sha"],
+            expected_base=attacker_claim["expected_base_sha"],
+            candidate_commit=attacker_claim["integration_candidate_commit"],
+            authority_mode="delegated_single_merge",
+            trust_root=self.trust_root,
+        )
+        self.assertTrue(status_op.startswith("FAIL_CLOSED: mechanism_not_permitted_for_delegated_single_merge"))
+        self.assertEqual(envs_op, [])
+
+        # 23d: Attacker attempts to forge dedicated_github_app using env-injected public key
+        attacker_env_app = sign_authorization_envelope(
+            attacker_claim,
+            secret_key=attacker_priv,
+            key_id=attacker_key_id,
+            mechanism="dedicated_github_app",
+            integration_id=TEST_FIXTURE_APP_ID,
+            issuer=f"{TEST_FIXTURE_APP_SLUG}[bot]",
+        )
+        # Even if attacker fakes comment author:
+        attacker_app_comment = format_comment(attacker_env_app, author_login=f"{TEST_FIXTURE_APP_SLUG}[bot]")
+
+        # Verified out-of-process trust root rejects attacker's unknown key
+        receipt_atk = MergeAuthorityGate.evaluate(
+            repo_root=self.root,
+            pr_number=attacker_claim["target_pr"],
+            live_pr_info=live_pr,
+            checker_commit=self.base_sha,
+            candidate_commit=self.base_sha,
+            authority_store=store,
+            expected_repo=attacker_claim["target_repository"],
+            comments=[attacker_app_comment],
+            enforce_mode="delegated_single_merge",
+            trust_root=self.trust_root,  # True out-of-process root does not trust attacker key
+        )
+        self.assertFalse(receipt_atk.is_confirmed)
+        self.assertIn("FAIL_CLOSED: unknown_key_id", receipt_atk.reason)
 
 
 if __name__ == "__main__":

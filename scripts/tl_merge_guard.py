@@ -145,16 +145,45 @@ def ed25519_verify(pubkey: bytes, message: bytes, sig: bytes) -> bool:
         return False
 
 
+ISO_UTC_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$")
+
+
+def validate_canonical_utc_timestamp(ts: Any, field_name: str = "timestamp") -> datetime:
+    """
+    Strictly validate that a timestamp is in canonical UTC ISO 8601 format.
+    Must match ISO_UTC_REGEX and be a valid datetime ending in Z or +00:00 with zero UTC offset.
+    """
+    if not isinstance(ts, str):
+        raise ValueError(f"{field_name} must be a string, got {type(ts).__name__}")
+    if not ISO_UTC_REGEX.match(ts):
+        raise ValueError(
+            f"{field_name} must be a canonical UTC ISO 8601 timestamp ending in 'Z' or '+00:00' (e.g. 'YYYY-MM-DDTHH:MM:SSZ'), got {ts!r}"
+        )
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception as exc:
+        raise ValueError(f"Invalid {field_name} datetime value {ts!r}: {exc}") from exc
+    if dt.tzinfo is None or dt.utcoffset() != timezone.utc.utcoffset(None):
+        raise ValueError(f"{field_name} must have a strict UTC offset of +00:00 or Z, got {dt.utcoffset()}")
+    return dt
+
+
 @dataclass
 class TrustRoot:
     """External root of trust containing identity and public verification keys (zero embedded private keys)."""
     trusted_app_id: int = 0
     trusted_app_slug: str = ""
     trusted_public_keys: dict[str, str] = field(default_factory=dict)
+    is_out_of_process: bool = False
+    trust_source: str = "advisory_env"
 
     @classmethod
     def from_env(cls) -> TrustRoot:
-        """Resolve TrustRoot from environment variables TL_MERGE_AUTHORITY_*."""
+        """
+        Resolve TrustRoot from environment variables TL_MERGE_AUTHORITY_*.
+        Local process environment variables are strictly advisory and NEVER mechanically isolated
+        from agent/runtime processes (AC11). Therefore, is_out_of_process is always False.
+        """
         app_id_str = os.environ.get("TL_MERGE_AUTHORITY_APP_ID", "")
         app_id = int(app_id_str) if app_id_str.isdigit() else 0
         app_slug = os.environ.get("TL_MERGE_AUTHORITY_APP_SLUG", "")
@@ -169,7 +198,32 @@ class TrustRoot:
         single_key_id = os.environ.get("TL_MERGE_AUTHORITY_KEY_ID", "key-default")
         if single_key:
             pubkeys[single_key_id] = single_key.strip()
-        return cls(trusted_app_id=app_id, trusted_app_slug=app_slug, trusted_public_keys=pubkeys)
+        return cls(
+            trusted_app_id=app_id,
+            trusted_app_slug=app_slug,
+            trusted_public_keys=pubkeys,
+            is_out_of_process=False,
+            trust_source="advisory_env",
+        )
+
+    @classmethod
+    def from_external_platform(
+        cls,
+        trusted_app_id: int,
+        trusted_app_slug: str,
+        trusted_public_keys: dict[str, str],
+        trust_source: str = "dedicated_github_app",
+    ) -> TrustRoot:
+        """Root of trust supplied from an external out-of-process authority verifier."""
+        if not trusted_app_id or not trusted_app_slug or not trusted_public_keys:
+            raise ValueError("External platform trust root requires non-empty app_id, app_slug, and trusted_public_keys")
+        return cls(
+            trusted_app_id=trusted_app_id,
+            trusted_app_slug=trusted_app_slug,
+            trusted_public_keys=dict(trusted_public_keys),
+            is_out_of_process=True,
+            trust_source=trust_source,
+        )
 
 
 def canonicalize_payload(payload: Any) -> bytes:
@@ -181,6 +235,7 @@ def canonicalize_payload(payload: Any) -> bytes:
     - No insignificant whitespace (separators=(',', ':')).
     - No float types permitted (integers only).
     - Normalized string escaping.
+    - Strict canonical UTC ISO 8601 validation for issued_at and expires_at.
     """
     def _validate_types(val: Any) -> None:
         if isinstance(val, bool) or val is None:
@@ -202,6 +257,19 @@ def canonicalize_payload(payload: Any) -> bytes:
         raise ValueError(f"Unsupported type {type(val)} in canonical payload")
 
     _validate_types(payload)
+    if isinstance(payload, dict):
+        issued_dt = None
+        expires_dt = None
+        if "issued_at" in payload:
+            issued_dt = validate_canonical_utc_timestamp(payload["issued_at"], "issued_at")
+        if "expires_at" in payload:
+            expires_dt = validate_canonical_utc_timestamp(payload["expires_at"], "expires_at")
+        if issued_dt is not None and expires_dt is not None:
+            if issued_dt > expires_dt:
+                raise ValueError(
+                    f"issued_at ({payload['issued_at']}) cannot be later than expires_at ({payload['expires_at']})"
+                )
+
     canonical_json_str = json.dumps(
         payload,
         sort_keys=True,
@@ -236,6 +304,12 @@ def sign_authorization_envelope(
         raise ValueError("secret_key is required and must be bytes to sign authorization envelope")
     if not key_id or not isinstance(key_id, str):
         raise ValueError("key_id is required and must be a string")
+    if "issued_at" not in claim or "expires_at" not in claim:
+        raise ValueError("claim must contain both 'issued_at' and 'expires_at'")
+    issued_dt = validate_canonical_utc_timestamp(claim["issued_at"], "issued_at")
+    expires_dt = validate_canonical_utc_timestamp(claim["expires_at"], "expires_at")
+    if issued_dt > expires_dt:
+        raise ValueError(f"issued_at ({claim['issued_at']}) cannot be later than expires_at ({claim['expires_at']})")
     auth_id = derive_authorization_id(claim)
     canonical_claim = canonicalize_payload(claim)
     signing_payload = AUTHORIZATION_SIGNING_DOMAIN + canonical_claim
@@ -483,6 +557,7 @@ class AuthorityReceipt:
     candidate_commit: str
     reason: str
     envelope: dict[str, Any] | None = None
+    degraded_mode: str | None = None
 
     @property
     def is_confirmed(self) -> bool:
@@ -519,6 +594,8 @@ def parse_pr_comment_transport(
         return f"FAIL_CLOSED: merge authorization schema file not found: {resolved_schema}", []
 
     root = trust_root if trust_root is not None else TrustRoot.from_env()
+    if authority_mode == "delegated_single_merge" and not getattr(root, "is_out_of_process", False):
+        return "FAIL_CLOSED: advisory_trust_root_cannot_authorize_delegated_single_merge", []
 
     pattern = re.compile(
         r"```(?:json:tl-merge-authorization|tl-merge-authorization)\s*\n(.*?)\n```",
@@ -569,20 +646,30 @@ def parse_pr_comment_transport(
         if env.get("authorization_id") != derived_id:
             return f"FAIL_CLOSED: invalid_authorization_id: declared {env.get('authorization_id')} != derived {derived_id}", []
 
-        # 4. Check temporal validity
+        # 4. Check temporal validity & strict UTC ISO 8601 format
         try:
-            exp_str = env.get("expires_at", "")
-            exp_dt = datetime.fromisoformat(exp_str.replace("Z", "+00:00"))
-            if now_utc > exp_dt:
+            issued_str = env.get("issued_at")
+            expires_str = env.get("expires_at")
+            if not issued_str or not expires_str:
+                return "FAIL_CLOSED: missing_timestamp: both issued_at and expires_at are required", []
+            issued_dt = validate_canonical_utc_timestamp(issued_str, "issued_at")
+            expires_dt = validate_canonical_utc_timestamp(expires_str, "expires_at")
+            if issued_dt > expires_dt:
+                return f"FAIL_CLOSED: temporal_inversion: issued_at ({issued_str}) > expires_at ({expires_str})", []
+            if now_utc > expires_dt:
                 continue
-        except Exception:
-            return "FAIL_CLOSED: invalid_expires_at_timestamp", []
+        except ValueError as exc:
+            return f"FAIL_CLOSED: invalid_timestamp: {exc}", []
 
         # 5. Provenance, comment author identity, and app_id verification
         prov = env.get("provenance", {})
         mech = prov.get("mechanism")
         if mech not in {"dedicated_github_app", "operator_ed25519", "operator_webauthn"}:
             return f"FAIL_CLOSED: unsupported_mechanism: {mech}", []
+
+        is_delegated = (authority_mode == "delegated_single_merge" or env.get("authority_mode") == "delegated_single_merge")
+        if is_delegated and mech != "dedicated_github_app":
+            return f"FAIL_CLOSED: mechanism_not_permitted_for_delegated_single_merge: {mech} (delegated single merge strictly requires dedicated_github_app)", []
 
         if mech == "dedicated_github_app":
             int_id = prov.get("integration_id")
@@ -591,8 +678,10 @@ def parse_pr_comment_transport(
 
             author_login = comment.get("author", {}).get("login", "")
             expected_bot = f"{root.trusted_app_slug}[bot]"
-            if author_login != expected_bot and comment.get("app_id") != root.trusted_app_id:
-                return f"FAIL_CLOSED: untrusted_comment_author: comment author {author_login} is not trusted bot {expected_bot}", []
+            if author_login != expected_bot:
+                return f"FAIL_CLOSED: untrusted_comment_author: comment author {author_login!r} is not trusted bot {expected_bot!r}", []
+            if "app_id" in comment and comment["app_id"] != root.trusted_app_id:
+                return f"FAIL_CLOSED: untrusted_comment_app_id: comment app_id {comment['app_id']} != {root.trusted_app_id}", []
 
         # 6. Cryptographic signature verification
         key_id = prov.get("key_id", "")
@@ -693,6 +782,22 @@ class MergeAuthorityGate:
                 reason=delta_reason,
             )
 
+        # Out-of-process root of trust check for delegated_single_merge
+        resolved_root = trust_root if trust_root is not None else TrustRoot.from_env()
+        if enforce_mode == "delegated_single_merge":
+            if not getattr(resolved_root, "is_out_of_process", False):
+                return AuthorityReceipt(
+                    status="AWAITING_HUMAN",
+                    authorization_id="",
+                    target_pr=pr_number,
+                    head_sha=head_sha,
+                    base_sha=base_sha,
+                    checker_commit=checker_commit,
+                    candidate_commit=candidate_commit,
+                    reason="advisory_trust_root_degraded_to_human_merge_only: local process environment trust root is not mechanically isolated; delegated_single_merge requires out-of-process authority root",
+                    degraded_mode="human_merge_only.enforced",
+                )
+
         # Transport parsing
         comments_list = comments or []
         parse_status, envelopes = parse_pr_comment_transport(
@@ -704,7 +809,7 @@ class MergeAuthorityGate:
             candidate_commit=candidate_commit,
             checker_commit=checker_commit,
             authority_mode=enforce_mode,
-            trust_root=trust_root,
+            trust_root=resolved_root,
             schema_path=schema_path,
         )
 

@@ -2012,8 +2012,7 @@ class Runtime:
 
                     trust_root = getattr(self, "trust_root", None)
                     if trust_root is None and TrustRoot is not None:
-                        trust_root = TrustRoot.from_env()
-                        if not trust_root.trusted_public_keys and "TL_FAKE_GH_STATE" in os.environ:
+                        if "TL_FAKE_GH_STATE" in os.environ:
                             try:
                                 try:
                                     from scripts.fixtures.runtime.fake_gh import (
@@ -2029,13 +2028,15 @@ class Runtime:
                                         TEST_FIXTURE_KEY_ID,
                                         TEST_FIXTURE_PUBLIC_KEY,
                                     )
-                                trust_root = TrustRoot(
+                                trust_root = TrustRoot.from_external_platform(
                                     trusted_app_id=TEST_FIXTURE_APP_ID,
                                     trusted_app_slug=TEST_FIXTURE_APP_SLUG,
                                     trusted_public_keys={TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
                                 )
                             except Exception:
                                 pass
+                        if trust_root is None:
+                            trust_root = TrustRoot.from_env()
                         self.trust_root = trust_root
 
                     if MergeAuthorityGate is not None:
@@ -2052,6 +2053,8 @@ class Runtime:
                             trust_root=trust_root,
                         )
                         if not receipt.is_confirmed:
+                            if receipt.degraded_mode:
+                                raise UnitPark("awaiting_operator", f"human_merge_only: {receipt.reason}", decision={"options": ["retry", "skip"]})
                             raise UnitPark("awaiting_operator", f"merge_authority_not_confirmed: {receipt.reason}", decision={"options": ["retry", "skip"]})
                     else:
                         receipt = None

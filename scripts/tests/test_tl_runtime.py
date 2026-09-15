@@ -836,6 +836,34 @@ class RuntimeTest(unittest.TestCase):
         self.assertIn("not the reviewed", record.reason)
         self.assertEqual(git(fx.repo, "ls-remote", "--heads", "origin", "tl/B001/T001"), "", "nothing reached the remote")
 
+    def test_branch_amended_after_journaled_commit_is_not_delivered(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_result:commit").returncode, 70)
+        journaled = git(fx.repo, "rev-parse", "HEAD")
+        git(fx.repo, "commit", "-q", "--amend", "-m", "same tree, different commit")
+        self.assertNotEqual(git(fx.repo, "rev-parse", "HEAD"), journaled)
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 3, second.stderr)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("journaled commit", record.reason)
+        self.assertEqual(git(fx.repo, "rev-list", "--count", "main"), "1", "nothing merged into main")
+
+    def test_crash_after_journaled_commit_resumes_with_that_commit(self) -> None:
+        fx = Fixture(self.root, units=1)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_result:commit").returncode, 70)
+        journaled = git(fx.repo, "rev-parse", "HEAD")
+        second = fx.run_cli("run")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        fold = fx.fold()
+        self.assertEqual(fold.units["T001"].commit, journaled)
+        self.assertTrue(fold.units["T001"].merged)
+        self.assertEqual(fold.model_calls_done, 2)
+
     # ---- policy -----------------------------------------------------------------------------
 
     def test_scope_expansion_restores_tree_then_parks_on_repeat(self) -> None:

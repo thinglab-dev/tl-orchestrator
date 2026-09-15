@@ -1299,6 +1299,7 @@ class Runtime:
         self.journal.append("step_result", step_id=step_id, unit=unit, phase=phase, effect_class=effect_class, status=status,
                             input_digest=input_digest, result=result, tree_after=tree_after, evidence=evidence)
         self.fold.steps[step_id] = {"step_id": step_id, "status": status, "input_digest": input_digest, "result": result, "effect_class": effect_class}
+        self._fault_point(f"after_result:{intent.get('type', phase)}")
         if effect_class == "model_call" and status != "released":
             self.fold.model_calls_done += 1
             if isinstance(result.get("usage"), dict):
@@ -1814,11 +1815,24 @@ class Runtime:
                 self.git.run("add", "-A", "--", ".")
                 files = self.git.run("diff", "--cached", "--name-only")
                 if not files:
-                    return {"commit": self.git.head(), "empty": True, "files": []}
+                    # HEAD already holds the reviewed tree but no journaled step produced it: never adopt it.
+                    return {"_status": "ambiguous", "empty": True, "files": [], "detail": f"nothing to commit: HEAD {self.git.head()[:12]} already holds the reviewed tree but is not a journaled commit of {uid}"}
                 self.git.run("commit", "--quiet", "-m", message)
                 return {"commit": self.git.head(), "empty": False, "files": files.splitlines()}
 
-            result = self.step(f"{uid}:commit:{tree}", "local_commit", uid, "commit", {"type": "commit", "tree": tree, "message": message, "parent": self.git.head()}, commit)
+            prior = self.fold.steps.get(f"{uid}:commit:{tree}")
+            if prior and prior.get("status") == "ok" and (prior.get("result") or {}).get("commit"):
+                # The commit was journaled but the phase change was not (crash in between): adopt the
+                # journaled commit, never whatever the branch points at now.
+                result = prior["result"]
+                tip = self.git.rev(record.branch)
+                if tip != result["commit"]:
+                    raise UnitPark("awaiting_operator", f"branch {record.branch} points at {str(tip)[:12]} but the journaled commit is {result['commit'][:12]}",
+                                   decision={"options": ["retry", "skip"]})
+            else:
+                result = self.step(f"{uid}:commit:{tree}", "local_commit", uid, "commit", {"type": "commit", "tree": tree, "message": message, "parent": self.git.head()}, commit)
+            if not result.get("commit"):
+                raise UnitPark("awaiting_operator", "commit_ambiguous: " + str(result.get("detail", ""))[:200], decision={"options": ["retry", "skip"]})
             self.unit_state(uid, "running", "", phase="push", commit=result["commit"], tree=tree)
             record = self.fold.units[uid]
         # push

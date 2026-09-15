@@ -4,8 +4,8 @@ type: gov
 deliverable: none
 standalone: true
 method: native
-status: in_progress
-state_revision: 1
+status: done
+state_revision: 2
 depends_on: [T029]
 blocked_by: []
 origin: determinação do mantenedor em 2026-09-15 para reconciliação da branch feat/t029-claude-usage-observation com origin/main@7b25b960 (v0.16.0)

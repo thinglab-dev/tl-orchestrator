@@ -2,7 +2,7 @@ format_version: 1
 work_method: native
 active_work_ref: none
 current_role: none
-next_action: Executar reconciliação T030 da baseline v0.16.0 com tarefas nativas T025–T029 e submeter a Checker independente.
+next_action: Publicar PR de integração e solicitar autorização humana para merge em main conforme CONTRIBUTING.md.
 coordinator:
   harness: claude
   session: claude-code-b5b7f943
@@ -51,4 +51,4 @@ open_discussions: []
 | T027 | feat | package | done | [T018, T026] | [] | 2 | evidence/T027-r01.md |
 | T028 | gov | none | draft | [T027] | [] | 1 | - |
 | T029 | feat | none | done | [T026] | [] | 12 | evidence/T029-r11.md |
-| T030 | gov | none | in_progress | [T029] | [] | 1 | - |
+| T030 | gov | none | done | [T029] | [] | 2 | evidence/T030-r01.md |

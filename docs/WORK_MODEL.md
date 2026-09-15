@@ -845,7 +845,17 @@ Adota-se a arquitetura híbrida de persistência:
 
 ### 4. Contabilidade de chamadas por write-ahead lógico
 
-O controle orçamentário baseia-se em chamadas efetivamente realizadas observadas, operado via write-ahead lógico serializado pelo coordenador da árvore:
+O controle orçamentário baseia-se em chamadas efetivamente realizadas observadas, operado via write-ahead lógico serializado pelo coordenador da árvore.
+
+#### 4.0. Obrigatoriedade universal de write-ahead e retries (T027)
+
+TODA e qualquer invocação real de modelo — sem qualquer exceção — deve passar pelo ciclo de write-ahead lógico serializado. Isso se aplica a todos os papéis: `classifier`, `planner`, `maker`, `checker`, `advisor` e `searcher`. O despachador orçado `budgeted_model_dispatch` em `scripts/tl_job.py` atua como primitive obrigatório que torna estruturalmente impossível disparar um harness sem prévio registro e persistência de `pending_call` em `Bnnn.md`.
+
+**Contabilidade estrita de retries:**
+Cada tentativa real de despacho constitui um evento de consumo individual. Se um Classifier for despachado e emitir uma resposta com JSON inválido ou schema não-conforme, essa tentativa consome 1 chamada (`consumed_model_calls += 1`). Para que uma nova tentativa (retry) ocorra:
+1. Recalcula-se a reserva dinâmica necessária: `required_call_reserve(current_checkpoint)`;
+2. Verifica-se se: `saldo_restante = max_model_calls - consumed_model_calls >= required_call_reserve`;
+3. Se o saldo for insuficiente para cobrir o ciclo completo até o Checker independente, a execução interrompe-se imediatamente com `STOP: insufficient_budget_for_unit_verification`, impedindo tentativas adicionais que deixariam a unidade sem verificação independente.
 
 1. Verificar saldo disponível no lote: `saldo = max_model_calls - consumed_model_calls - reserved_model_calls`;
 2. Reservar slots obrigatórios: `reserved_model_calls += N`;

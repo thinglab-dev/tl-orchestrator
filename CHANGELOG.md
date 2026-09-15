@@ -4,6 +4,18 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+### Adicionado
+
+- Journaling de Chamadas de Modelo Obrigatório e Despachador Orçado no Modo Automático (Task Native T027):
+  - Primitive unificado `budgeted_model_dispatch` em `scripts/tl_job.py` (e subcommand CLI `tl_job.py budgeted-dispatch`) garantindo o ciclo estrito de write-ahead (`reserve -> pending_call persistido -> dispatch -> resultado observado -> consumed += 1 -> reserved -= 1 -> pending_call = null -> persistência em disco`) para todo despacho a modelos.
+  - Abrangência universal cobrindo todos os papéis: `classifier`, `planner`, `maker`, `checker`, `advisor` e `searcher`, vedando bypass de journal para qualquer papel.
+  - Cada tentativa real de despacho constitui consumo individual de quota (incluindo retries decorrentes de respostas com schema inválido).
+  - Recálculo obrigatório de `required_call_reserve` antes de autorizar retry; interrupção imediata com `STOP: insufficient_budget_for_unit_verification` caso o saldo restante não cubra o caminho até o Checker independente.
+  - Liberação de reserva sem débito de chamada para falhas pré-despacho (`PRE_DISPATCH_UNAVAILABLE`).
+  - Débito conservador de chamada e parada imediata (`STOP: unrecoverable_harness_failure`) para despachos com desfecho ambíguo.
+  - Guarda explícita T016 nos contratos e templates do Maker (`prompts/maker.md`, `prompts/orchestrator-playbook.md`) instruindo testes direcionados (*targeted verification*) em etapas intermediárias intragrupo e vedando a invocação de portões canônicos completos do sistema em ambiente sandbox sem permissão de sockets/rede.
+  - Suíte contratual determinística em `scripts/tests/test_automatic_mode.py` cobrindo linha reta (4 chamadas), retry de classificador (5 chamadas), falha pré-despacho (0 chamadas) e despacho ambíguo (1 chamada com STOP conservador).
+
 ## [0.17.0] - 2026-09-15
 
 ### Adicionado

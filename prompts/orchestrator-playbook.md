@@ -314,25 +314,25 @@ Calcule: `required_call_reserve = todas as chamadas obrigatórias ainda não con
 - Se `saldo < required_call_reserve`: interrompa imediatamente com `STOP: insufficient_budget_for_unit_verification`.
 - Rework só inicia se houver saldo para todo o ciclo restante até o re-review independente.
 
-#### C. Execução da unidade e Write-Ahead lógico
-1. Obtenha a classificação da fase em perfil fixo (Classifier econômico). Se apontar `bad_spec_or_intent_gap`
-   ou incerteza material insolúvel, pare a unidade antes de despachar o Maker (`STOP: bad_spec_or_intent_gap`).
-2. **Write-ahead de chamada:**
-   - Verifique saldo disponível;
-   - Reserve slots no batch (`reserved_model_calls += N`);
-   - Grave `pending_call` em `Bnnn.md` com `call_id`, `role`, `phase`, `payload_digest`, `dispatched_at`;
-   - Persista `Bnnn.md` em disco;
-   - Despache o agente;
-   - Observe o receipt;
-   - Converta reserva em consumo (`reserved_model_calls -= 1`, `consumed_model_calls += 1`);
-   - Limpe `pending_call` em `Bnnn.md` (`pending_call: null`);
-   - Persista `Bnnn.md` atualizado.
-3. Maker implementa estritamente dentro dos `content_paths` da spec congelada.
-4. Execute verificação direcionada (*targeted verification*) intragrupo conforme T016.
-5. Classifique a fase de review e despache Checker independente em fresh session report-only.
-6. Se o Checker emitir `changes_requested`:
-   - Se os achados forem de responsabilidade do Maker, dentro da spec/content_paths congelados, respeitarem
-     `max_rework_rounds_per_unit` e houver saldo para todo o ciclo restante de rework: prossiga para rework.
+#### C. Execução da unidade e Write-Ahead lógico (T027)
+1. **Obrigatoriedade Universal de Write-Ahead:**
+   - **TODA e qualquer chamada real a modelo/harness** (`classifier`, `planner`, `maker`, `checker`, `advisor`, `searcher`) DEVE ser executada exclusivamente pelo primitive `budgeted_model_dispatch(...)` (ou comando `python3 tl_job.py budgeted-dispatch ...`). É expressamente proibido invocar CLI de modelo (`agy`, `codex`, `claude`) sem o ciclo formal de journal.
+   - O ciclo estrito é:
+     `saldo disponível` -> `reserve (+1)` -> `pending_call persistido no Bnnn.md` -> `dispatch ao harness` -> `resultado observado` -> `consumed (+1)` -> `reserved (-1)` -> `pending_call: null` -> `persistência em disco`.
+   - **Retries de modelo (ex.: Classifier com schema inválido):** Cada despacho real conta individualmente como 1 chamada consumida (`consumed_model_calls += 1`). Antes de autorizar um retry de chamada, recalcule `required_call_reserve`. Se o saldo restante for insuficiente para cobrir o ciclo restante até o Checker independente, emita imediatamente `STOP: insufficient_budget_for_unit_verification`.
+   - **Falhas pré-despacho (`PRE_DISPATCH_UNAVAILABLE`):** Indisponibilidade detectada em preflight local (binário ausente, etc.) libera a reserva (`reserved -= 1`) e limpa `pending_call` sem consumir quota.
+   - **Despacho ambíguo:** Despacho iniciado cujo encerramento for ambíguo consome a chamada conservadoramente (`consumed += 1`) e interrompe com `STOP: unrecoverable_harness_failure`.
+2. **Classificação da fase:** Obtenha a classificação via `budgeted_model_dispatch` (Classifier econômico). Se apontar `bad_spec_or_intent_gap` ou incerteza material insolúvel, pare a unidade antes de despachar o Maker (`STOP: bad_spec_or_intent_gap`).
+3. **Despacho do Maker e Briefing com Proteção T016:**
+   - Despache o Maker via `budgeted_model_dispatch`. O briefing DEVE instruir testes direcionados (*targeted verification*) do escopo alterado (`go test -race <pacotes>`, `go vet <pacotes>`, `git diff --check`).
+   - O briefing NÃO deve instruir o Maker a executar `make check`, `make dev-check` ou o portão canônico de sistema dentro do sandbox se houver restrições locais de portas ou sockets de rede.
+   - Maker implementa estritamente dentro dos `content_paths` da spec congelada.
+4. **Verificação pós-Maker:** Execute verificação direcionada intragrupo conforme T016.
+5. **Classificação e Revisão pelo Checker:**
+   - Obtenha a classificação de review via `budgeted_model_dispatch`.
+   - Despache o Checker independente via `budgeted_model_dispatch` em fresh session report-only.
+6. **Se o Checker emitir `changes_requested`:**
+   - Se os achados forem de responsabilidade do Maker, dentro da spec/content_paths congelados, respeitarem `max_rework_rounds_per_unit` e houver saldo para todo o ciclo restante de rework: prossiga para rework.
    - Se houver `bad_spec_or_intent_gap`, expansão de escopo ou saldo insuficiente: pare com `STOP`.
 
 #### D. Portões de fronteira T016 dentro do lote

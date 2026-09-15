@@ -1,0 +1,11 @@
+{"timestamp": "2026-06-25T16:00:00.000Z", "ordinal": 0, "type": "session_meta", "payload": {"session_id": "sess-thread-04", "id": "thread-root-04", "parent_thread_id": null, "cli_version": "0.153.0", "originator": "test"}}
+{"timestamp": "2026-06-25T16:00:01.000Z", "ordinal": 1, "type": "turn_context", "payload": {"turn_id": "turn-root-01", "model": "gpt-5.6-terra", "effort": "high"}}
+{"timestamp": "2026-06-25T16:00:05.000Z", "ordinal": 2, "type": "event_msg", "payload": {"type": "item_completed", "thread_id": "thread-root-04", "turn_id": "turn-root-01"}}
+{"timestamp": "2026-06-25T16:00:10.000Z", "ordinal": 3, "type": "session_meta", "payload": {"session_id": "sess-thread-04", "id": "thread-child-01", "parent_thread_id": "thread-root-04", "agent_role": "guardian"}}
+{"timestamp": "2026-06-25T16:00:11.000Z", "ordinal": 4, "type": "turn_context", "payload": {"turn_id": "turn-child-01", "model": "gpt-5.6-terra", "effort": "high"}}
+{"timestamp": "2026-06-25T16:00:15.000Z", "ordinal": 5, "type": "event_msg", "payload": {"type": "item_completed", "thread_id": "thread-child-01", "turn_id": "turn-child-01"}}
+{"timestamp": "2026-06-25T16:00:16.000Z", "ordinal": 6, "type": "session_meta", "payload": {"session_id": "sess-thread-04", "id": "thread-child-02", "parent_thread_id": "thread-root-04", "agent_role": "auto_review"}}
+{"timestamp": "2026-06-25T16:00:17.000Z", "ordinal": 7, "type": "turn_context", "payload": {"turn_id": "turn-child-02", "model": "gpt-5.6-terra", "effort": "high"}}
+{"timestamp": "2026-06-25T16:00:18.000Z", "ordinal": 8, "type": "session_meta", "payload": {"session_id": "sess-thread-04", "id": "thread-child-03", "parent_thread_id": "thread-root-04"}}
+{"timestamp": "2026-06-25T16:00:20.000Z", "ordinal": 9, "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 1200, "cached_input_tokens": 300, "cache_write_input_tokens": 0, "output_tokens": 120, "reasoning_output_tokens": 40, "total_tokens": 1320}, "last_token_usage": {"input_tokens": 1200, "cached_input_tokens": 300, "cache_write_input_tokens": 0, "output_tokens": 120, "reasoning_output_tokens": 40, "total_tokens": 1320}}}}
+{"timestamp": "2026-06-25T16:00:25.000Z", "ordinal": 10, "type": "event_msg", "payload": {"type": "task_complete", "turn_id": "turn-root-01"}}

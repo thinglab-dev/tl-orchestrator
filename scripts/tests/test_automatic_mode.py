@@ -33,6 +33,10 @@ from pathlib import Path
 import re
 from typing import Any
 import unittest
+import sys
+ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+from tl_job import budgeted_model_dispatch, load_batch_frontmatter
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 BATCH_SCHEMA_PATH = ROOT / "schemas" / "batch.schema.json"
@@ -1197,6 +1201,220 @@ class TestAutomaticModeContract(unittest.TestCase):
         self.assertEqual(batch["execution"]["stop_reason"], "unrecoverable_harness_failure")
 
     # --------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # T027: Mandatory Write-Ahead Journaling & Budgeted Dispatch Tests
+    # --------------------------------------------------------------------------
+
+    def test_t027_straight_line_budgeted_dispatch(self) -> None:
+        batch = copy.deepcopy(self.valid_batch_frontmatter)
+        batch["budget"]["max_model_calls"] = 12
+        batch["budget"]["consumed_model_calls"] = 0
+        batch["budget"]["reserved_model_calls"] = 0
+
+        dummy_runner = lambda cmd, cwd: (0, "{'status': 'ok'}", "")
+
+        # 1. Classifier Implementation
+        ok, reason, res1 = budgeted_model_dispatch(
+            batch, role="classifier", phase="implementation",
+            call_id="call-01-classifier-impl", harness_cmd=["agy", "run"],
+            runner_fn=dummy_runner
+        )
+        self.assertTrue(ok)
+        self.assertEqual(reason, "dispatch_complete")
+        self.assertEqual(batch["budget"]["consumed_model_calls"], 1)
+        self.assertEqual(batch["budget"]["reserved_model_calls"], 0)
+        self.assertIsNone(batch["budget"]["pending_call"])
+
+        # 2. Maker Implementation
+        ok, reason, res2 = budgeted_model_dispatch(
+            batch, role="maker", phase="implementation",
+            call_id="call-02-maker-impl", harness_cmd=["codex", "exec"],
+            runner_fn=dummy_runner
+        )
+        self.assertTrue(ok)
+        self.assertEqual(batch["budget"]["consumed_model_calls"], 2)
+        self.assertEqual(batch["budget"]["reserved_model_calls"], 0)
+        self.assertIsNone(batch["budget"]["pending_call"])
+
+        # 3. Classifier Review
+        ok, reason, res3 = budgeted_model_dispatch(
+            batch, role="classifier", phase="review",
+            call_id="call-03-classifier-rev", harness_cmd=["agy", "run"],
+            runner_fn=dummy_runner
+        )
+        self.assertTrue(ok)
+        self.assertEqual(batch["budget"]["consumed_model_calls"], 3)
+        self.assertEqual(batch["budget"]["reserved_model_calls"], 0)
+        self.assertIsNone(batch["budget"]["pending_call"])
+
+        # 4. Checker Review
+        ok, reason, res4 = budgeted_model_dispatch(
+            batch, role="checker", phase="review",
+            call_id="call-04-checker-rev", harness_cmd=["claude", "review"],
+            runner_fn=dummy_runner
+        )
+        self.assertTrue(ok)
+        self.assertEqual(batch["budget"]["consumed_model_calls"], 4)
+        self.assertEqual(batch["budget"]["reserved_model_calls"], 0)
+        self.assertIsNone(batch["budget"]["pending_call"])
+
+    def test_t027_classifier_retry_counts_every_real_dispatch(self) -> None:
+        batch = copy.deepcopy(self.valid_batch_frontmatter)
+        batch["budget"]["max_model_calls"] = 12
+        batch["budget"]["consumed_model_calls"] = 0
+        batch["budget"]["reserved_model_calls"] = 0
+
+        # Attempt 1: schema failure (non-zero exit)
+        fail_runner = lambda cmd, cwd: (1, "", "SchemaValidationError: missing properties")
+        ok1, reason1, res1 = budgeted_model_dispatch(
+            batch, role="classifier", phase="implementation",
+            call_id="call-01-classifier-impl-1", harness_cmd=["agy", "run"],
+            runner_fn=fail_runner
+        )
+        self.assertFalse(ok1)
+        self.assertEqual(reason1, "dispatch_complete")
+        # Attempt 1 MUST be consumed!
+        self.assertEqual(batch["budget"]["consumed_model_calls"], 1)
+        self.assertEqual(batch["budget"]["reserved_model_calls"], 0)
+        self.assertIsNone(batch["budget"]["pending_call"])
+
+        # Attempt 2: valid retry
+        success_runner = lambda cmd, cwd: (0, "{'valid': True}", "")
+        ok2, reason2, res2 = budgeted_model_dispatch(
+            batch, role="classifier", phase="implementation",
+            call_id="call-01-classifier-impl-2", harness_cmd=["agy", "run"],
+            runner_fn=success_runner,
+            calculate_reserve_fn=calculate_dynamic_reserve,
+            unit_ref="T027"
+        )
+        self.assertTrue(ok2)
+        # Attempt 2 consumed second call!
+        self.assertEqual(batch["budget"]["consumed_model_calls"], 2)
+        self.assertEqual(batch["budget"]["reserved_model_calls"], 0)
+        self.assertIsNone(batch["budget"]["pending_call"])
+
+        # Remaining steps: Maker + Classifier Rev + Checker Rev
+        for role, phase, cid in [
+            ("maker", "implementation", "call-02-maker-impl"),
+            ("classifier", "review", "call-03-classifier-rev"),
+            ("checker", "review", "call-04-checker-rev"),
+        ]:
+            ok, reason, res = budgeted_model_dispatch(
+                batch, role=role, phase=phase, call_id=cid,
+                harness_cmd=["harness", "cmd"], runner_fn=success_runner
+            )
+            self.assertTrue(ok)
+
+        # Total factual dispatches = 5 (2 classifiers + 1 maker + 1 classifier + 1 checker)
+        self.assertEqual(batch["budget"]["consumed_model_calls"], 5)
+        self.assertEqual(batch["budget"]["reserved_model_calls"], 0)
+        self.assertIsNone(batch["budget"]["pending_call"])
+
+    def test_t027_pre_dispatch_unavailable_does_not_consume_call(self) -> None:
+        batch = copy.deepcopy(self.valid_batch_frontmatter)
+        batch["budget"]["max_model_calls"] = 12
+        batch["budget"]["consumed_model_calls"] = 0
+        batch["budget"]["reserved_model_calls"] = 0
+
+        ok, reason, res = budgeted_model_dispatch(
+            batch, role="classifier", phase="implementation",
+            call_id="call-pre-fail", harness_cmd=["nonexistent_harness_xyz_999"],
+            simulate_pre_dispatch_failure=True
+        )
+        self.assertFalse(ok)
+        self.assertEqual(reason, "PRE_DISPATCH_UNAVAILABLE")
+        # PRE_DISPATCH_UNAVAILABLE MUST NOT consume call!
+        self.assertEqual(batch["budget"]["consumed_model_calls"], 0)
+        self.assertEqual(batch["budget"]["reserved_model_calls"], 0)
+        self.assertIsNone(batch["budget"]["pending_call"])
+
+    def test_t027_ambiguous_dispatch_consumes_call_and_stops_conservatively(self) -> None:
+        batch = copy.deepcopy(self.valid_batch_frontmatter)
+        batch["budget"]["max_model_calls"] = 12
+        batch["budget"]["consumed_model_calls"] = 2
+        batch["budget"]["reserved_model_calls"] = 0
+
+        def must_not_execute(*args: Any, **kwargs: Any) -> Any:
+            self.fail("runner must not execute during simulated ambiguous outcome")
+
+        ok, reason, res = budgeted_model_dispatch(
+            batch, role="maker", phase="implementation",
+            call_id="call-ambiguous-crash", harness_cmd=["dummy_harness_cmd"],
+            runner_fn=must_not_execute,
+            simulate_ambiguous_outcome=True
+        )
+        self.assertFalse(ok)
+        self.assertEqual(reason, "ambiguous_dispatch_stopped")
+        # Ambiguous dispatch MUST consume 1 call conservatively and STOP
+        self.assertEqual(batch["budget"]["consumed_model_calls"], 3)
+        self.assertEqual(batch["budget"]["reserved_model_calls"], 0)
+        self.assertIsNone(batch["budget"]["pending_call"])
+        self.assertEqual(batch["status"], "stopped")
+        self.assertEqual(batch["execution"]["stop_reason"], "unrecoverable_harness_failure")
+
+    def test_t027_retry_stops_when_budget_insufficient_for_verification(self) -> None:
+        batch = copy.deepcopy(self.valid_batch_frontmatter)
+        # Only 4 total calls allowed
+        batch["budget"]["max_model_calls"] = 4
+        batch["budget"]["consumed_model_calls"] = 0
+        batch["budget"]["reserved_model_calls"] = 0
+
+        fail_runner = lambda cmd, cwd: (1, "", "schema failure")
+        # Attempt 1 consumes 1 call -> consumed = 1, remaining = 3
+        ok1, reason1, _ = budgeted_model_dispatch(
+            batch, role="classifier", phase="implementation",
+            call_id="call-01-classifier-1", harness_cmd=["agy"],
+            runner_fn=fail_runner
+        )
+        self.assertEqual(batch["budget"]["consumed_model_calls"], 1)
+
+        # Before Attempt 2, calculate_dynamic_reserve requires 4 calls:
+        # Classifier impl attempt 2 + Maker + Classifier rev + Checker = 4
+        # But remaining is only 4 - 1 = 3 < 4!
+        ok2, reason2, _ = budgeted_model_dispatch(
+            batch, role="classifier", phase="implementation",
+            call_id="call-01-classifier-2", harness_cmd=["agy"],
+            runner_fn=lambda c, w: (0, "", ""),
+            calculate_reserve_fn=calculate_dynamic_reserve,
+            unit_ref="T027"
+        )
+        self.assertFalse(ok2)
+        self.assertEqual(reason2, "insufficient_budget_for_unit_verification")
+        self.assertEqual(batch["status"], "stopped")
+        self.assertEqual(batch["execution"]["stop_reason"], "insufficient_budget_for_unit_verification")
+
+    def test_t027_budgeted_dispatch_with_batch_file_persistence(self) -> None:
+        import tempfile
+        batch = copy.deepcopy(self.valid_batch_frontmatter)
+        batch["budget"]["max_model_calls"] = 10
+        batch["budget"]["consumed_model_calls"] = 0
+        batch["budget"]["reserved_model_calls"] = 0
+        batch["budget"]["pending_call"] = None
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            batch_path = Path(tmpdir) / "B999.md"
+            import yaml
+            body_text = "# Batch Test Body\n"
+            batch_path.write_text(f"---\n{yaml.safe_dump(batch)}---\n{body_text}", encoding="utf-8")
+
+            success_runner = lambda cmd, cwd: (0, "model output", "")
+            ok, reason, detail = budgeted_model_dispatch(
+                batch_input=batch_path,
+                role="classifier",
+                phase="implementation",
+                call_id="call-01-classifier",
+                harness_cmd=["agy", "--help"],
+                runner_fn=success_runner,
+            )
+            self.assertTrue(ok)
+            self.assertEqual(reason, "dispatch_complete")
+
+            # Check persisted batch on disk
+            persisted, _ = load_batch_frontmatter(batch_path)
+            self.assertEqual(persisted["budget"]["consumed_model_calls"], 1)
+            self.assertEqual(persisted["budget"]["reserved_model_calls"], 0)
+            self.assertIsNone(persisted["budget"]["pending_call"])
+
     # AC09: Admission Gate by Unit
     # --------------------------------------------------------------------------
 

@@ -1,0 +1,2 @@
+{"timestamp": "2026-06-25T16:00:00.000Z", "log_level": "INFO", "msg": "hello alien service"}
+{"timestamp": "2026-06-25T16:00:01.000Z", "metric_name": "cpu_utilization", "value": 42.5}

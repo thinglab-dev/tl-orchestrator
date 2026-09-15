@@ -913,6 +913,19 @@ class RuntimeTest(unittest.TestCase):
         self.assertNotIn("open, not merged", report)
         self.assertIn("(merged)", report)
 
+    def test_restore_keeps_a_file_ignored_only_by_the_discarded_rules(self) -> None:
+        fx = Fixture(self.root, units=1)
+        repo_git = tl_runtime.Git(fx.repo, "git")
+        head_tree = git(fx.repo, "rev-parse", "HEAD^{tree}")
+        ignore = fx.repo / ".gitignore"
+        original = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
+        ignore.write_text(original + "notes.txt" + chr(10), encoding="utf-8")
+        (fx.repo / "notes.txt").write_text("operator notes" + chr(10), encoding="utf-8")
+        repo_git.restore_tree(head_tree, keep_ref="refs/tl/discarded/test/1")
+        self.assertEqual(git(fx.repo, "rev-parse", "HEAD^{tree}"), head_tree)
+        self.assertEqual((ignore.read_text(encoding="utf-8") if ignore.exists() else ""), original, ".gitignore restored")
+        self.assertTrue((fx.repo / "notes.txt").exists(), "a file ignored only by the discarded rules is never deleted")
+
     # ---- policy -----------------------------------------------------------------------------
 
     def test_scope_expansion_restores_tree_then_parks_on_repeat(self) -> None:

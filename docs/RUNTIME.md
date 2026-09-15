@@ -211,7 +211,7 @@ achados do Checker em rodadas consecutivas → `stagnation` (a regra da fila seq
 | :--- | :--- | :--- |
 | Spawn do worker | `tl_job.py` (contenção da árvore de processos, timeout, recibo limitado) com ambiente filtrado: só a allowlist base mais `env_allowlist`; `DO_NOT_TRACK=1` | ferramentas e sandbox de rede dependem do harness: use `{tools}` e sandbox nativos quando existirem; adapter sem nenhuma das duas só roda com `accept_unisolated_worker: true`, e o relatório avisa |
 | Depois de cada chamada de modelo | `HEAD` e branch comparados antes/depois: worker que faz commit, checkout ou merge por conta própria é `unexpected_tree_state` e para o lote | a detecção é a posteriori; o harness sem allowlist ainda consegue executar `git` |
-| Antes de descartar árvore | toda restauração (escopo, artefato de portão, Checker que escreveu, unidade parada) grava antes o estado atual em `refs/tl/discarded/<lote>/<n>` e anota no journal | nada é apagado sem cópia; limpar as refs é tarefa do operador |
+| Antes de descartar árvore | toda restauração (escopo, artefato de portão, Checker que escreveu, unidade parada) grava antes o estado atual em `refs/tl/discarded/<lote>/<n>` e anota no journal; `clean -fd` roda antes do `read-tree`, com as regras de ignore em vigor, para que um arquivo ignorado só pelas regras descartadas fique no disco | nada é apagado sem cópia (arquivos ignorados não entram na cópia, mas também nunca são apagados); limpar as refs é tarefa do operador |
 | Antes de cada unidade | árvore suja antes do `prepare` para o lote (`unexpected_tree_state`), inclusive quando a branch da unidade já está em checkout: edição do operador nunca vira commit do runtime | sujeira produzida pelo próprio runtime (crash no meio do Maker) é reconhecida pelo journal e vira checkpoint |
 | Depois de cada Maker | `sensitive_paths` e varredura de padrões de segredo no diff **integral** e nos bytes de cada arquivo alterado (binário incluso; AWS, chaves privadas, GitHub, Anthropic/OpenAI, Slack, Google) têm precedência e param o lote; depois `dirty_paths ⊆ scope_paths` e `do_not_touch`, com os dois lados de um rename (`secrets/x -> pkg/x` é toque em `secrets/`); só o pack do Checker é limitado por `max_diff_bytes` | varredura por padrão, não prova de ausência de segredo |
 | Em todo comando git do runtime | `core.hooksPath` aponta para um diretório vazio (git ≥ 2.31): hooks do repositório (`post-checkout`, `pre-push`, ...) não rodam dentro de checkout, commit, merge ou push do runtime; a verificação é dos portões | workers e portões não herdam essa variável e podem acionar hooks por conta própria |
@@ -282,6 +282,10 @@ rerun de infraestrutura e reconciliação de merge.
 
 ## Limites conhecidos
 
+- Filtros `clean`/`smudge` (git-lfs, por exemplo) são definidos no git config do operador e
+  rodam dentro dos comandos git do runtime (`add`, `read-tree`); não há chave do git que os
+  desligue sem quebrar o consumidor que depende deles. São código do operador, como
+  `notify_argv`; hooks, ao contrário, são desligados.
 - `gh pr merge` só aceita precondição de head (`--match-head-commit`), não de base, e devolve
   sucesso ao enfileirar num merge queue. O runtime revalida base, head e estado `OPEN`
   imediatamente antes e só conta como mesclado o estado terminal `MERGED` com a mesma base e

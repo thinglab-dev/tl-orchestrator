@@ -116,12 +116,15 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   reutilizado pelo step id mesmo com pack recompilado diferente, e há checagem de orçamento
   imediatamente antes de cada despacho; PR `MERGED` com base e head exatos completa a
   unidade como mesclada, PR `CLOSED` espera o operador.
+- Revisão independente r13: restauração de árvore limpa antes de trocar as regras de ignore
+  (arquivo ignorado só pelas regras descartadas nunca é apagado); filtros clean/smudge do
+  git config documentados como código do operador (rejeitado como bloqueante).
 - Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
   `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
 
 ### Validação
 
-- `scripts/tests/test_tl_runtime.py` (91 testes, Git real, harness e `gh` scriptados):
+- `scripts/tests/test_tl_runtime.py` (92 testes, Git real, harness e `gh` scriptados):
   DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
   oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
   segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec

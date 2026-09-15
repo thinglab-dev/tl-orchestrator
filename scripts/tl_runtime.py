@@ -485,8 +485,10 @@ class Git:
         if current != tree and keep_ref:
             kept = self.run("commit-tree", current, "-p", self.head(), "-m", f"tl-runtime discarded tree before restoring {tree[:12]}")
             self.run("update-ref", keep_ref, kept)
-        self.run("read-tree", "--reset", "-u", tree)
+        # Clean under the ignore rules in force now, then restore: a file ignored by a rule that
+        # only exists in the current tree stays on disk instead of being deleted after the rule is gone.
         self.run("clean", "-fd", "--", ".")
+        self.run("read-tree", "--reset", "-u", tree)
         return kept
 
     def diff_text(self, base: str, limit: int, tree: str | None = None) -> tuple[str, bool]:

@@ -41,6 +41,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -321,9 +322,18 @@ def seed_update_check(paths: dict[str, Path]) -> Path:
 
     This record is written before the CLI ever starts, through `home/.graft/` — a directory no
     install creates. So the whole destination chain is validated here too: `mkdir` succeeds
-    happily on an existing junction and `write_text` would then overwrite a file outside the
+    happily on an existing junction and a direct write would then overwrite a file outside the
     cache. Checked before creating the directory and again after, and raised as `CacheUnsafe`
     so the caller falls back without having run anything.
+
+    Concurrent Graft invocations in the same worktree (e.g. `status` and `query` racing) share
+    this file. A plain `write_text` truncates the target before writing the new bytes, so a
+    reader could observe an empty/partial record and — worse — `maybeRefreshInBackground` could
+    treat a momentarily-empty file as missing and spawn the network check this seeding exists to
+    suppress. Written instead to an exclusive temp file in the same directory, then published
+    with one `os.replace`, so any concurrent reader only ever sees the prior intact record or
+    the new intact one, never a truncated/partial state. The temp file is removed on any failure
+    so a crash never leaves stray siblings next to the record.
     """
     target = paths["update_check"]
     for path in (paths["home"], paths["update_dir"], target):
@@ -332,7 +342,18 @@ def seed_update_check(paths: dict[str, Path]) -> Path:
     for path in (paths["update_dir"], target):
         _assert_not_redirected(path)
     payload = {"latest": None, "checkedAt": int(time.time() * 1000)}
-    target.write_text(json.dumps(payload), encoding="utf-8")
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f"{target.name}.", suffix=".tmp", dir=str(target.parent)
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload))
+        os.replace(tmp_path, target)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+        raise
     return target
 
 

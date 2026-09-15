@@ -307,6 +307,67 @@ class TestSubprocessEnvironment(unittest.TestCase):
         self.assertLess(age_ms, 60_000)
         self.assertTrue(str(written).startswith(str(paths["home"])))
 
+    def test_seed_update_check_publishes_atomically_for_concurrent_readers(self):
+        """R28: a reader racing the update must see the prior record intact or the new
+        record intact, never a truncated/partial file — because the new bytes are staged
+        in a sibling temp file and only ever reach `target` via one atomic `os.replace`."""
+        root = _tmp_root(self)
+        paths = tl_graft.cache_paths(root)
+        tl_graft.ensure_cache_excluded(paths)
+        with mock.patch.object(tl_graft.time, "time", return_value=1_000.0):
+            tl_graft.seed_update_check(paths)
+        target = paths["update_check"]
+        previous = json.loads(target.read_text(encoding="utf-8"))
+
+        observed = {}
+        real_fdopen = os.fdopen
+
+        def spying_fdopen(fd, mode="r", **kwargs):
+            handle = real_fdopen(fd, mode, **kwargs)
+            real_write = handle.write
+
+            def spying_write(data):
+                # Simulates a concurrent reader opening `target` while the new record is
+                # still being written to the not-yet-published temp file.
+                observed["mid_write"] = json.loads(target.read_text(encoding="utf-8"))
+                observed["mid_write_siblings"] = sorted(
+                    p.name for p in target.parent.iterdir()
+                )
+                return real_write(data)
+
+            handle.write = spying_write
+            return handle
+
+        with mock.patch.object(tl_graft.os, "fdopen", side_effect=spying_fdopen), mock.patch.object(
+            tl_graft.time, "time", return_value=2_000.0
+        ):
+            written = tl_graft.seed_update_check(paths)
+
+        self.assertEqual(observed["mid_write"], previous, "leitor viu registro anterior truncado")
+        self.assertIn(target.name, observed["mid_write_siblings"])
+        self.assertEqual(len(observed["mid_write_siblings"]), 2, "temp deveria coexistir com o alvo íntegro")
+
+        new = json.loads(written.read_text(encoding="utf-8"))
+        self.assertNotEqual(new["checkedAt"], previous["checkedAt"])
+        self.assertEqual([p.name for p in target.parent.iterdir()], [target.name], "temp não foi limpo após publicar")
+
+    def test_seed_update_check_failure_does_not_erase_previous_record(self):
+        """A failed publish (e.g. `os.replace` denied) must leave the previous intact record
+        in place and remove its own temp file, per the documented cleanup-on-error fallback."""
+        root = _tmp_root(self)
+        paths = tl_graft.cache_paths(root)
+        tl_graft.ensure_cache_excluded(paths)
+        tl_graft.seed_update_check(paths)
+        target = paths["update_check"]
+        previous_text = target.read_text(encoding="utf-8")
+
+        with mock.patch.object(tl_graft.os, "replace", side_effect=OSError(13, "Access is denied")):
+            with self.assertRaises(OSError):
+                tl_graft.seed_update_check(paths)
+
+        self.assertEqual(target.read_text(encoding="utf-8"), previous_text, "registro anterior foi apagado/corrompido")
+        self.assertEqual([p.name for p in target.parent.iterdir()], [target.name], "temp órfão após falha de publicação")
+
 
 class TestGraphStateInterpretation(unittest.TestCase):
     """R2: the real `check --json` body decides, not the exit code."""

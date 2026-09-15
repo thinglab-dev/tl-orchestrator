@@ -1,7 +1,7 @@
 {
   "format_version": 1,
-  "package_version": "0.14.0",
-  "package_file_count": 26,
+  "package_version": "0.15.0",
+  "package_file_count": 28,
   "package_files": [
     "README.md",
     "SKILL.md",
@@ -26,7 +26,9 @@
     "docs/WORK_MODEL.md",
     "docs/EXECUTION_PROTOCOL.md",
     "docs/GRAFT.md",
+    "docs/TOKEN_TOOLS.md",
     "scripts/tl_job.py",
+    "scripts/tl_tools.py",
     "scripts/validate_classification.py",
     "scripts/tl_graft.py"
   ]

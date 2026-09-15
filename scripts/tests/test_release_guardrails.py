@@ -1,4 +1,4 @@
-"""Contract checks for the v0.13.0 operational guardrails (kept current through v0.14.0)."""
+"""Contract checks for the v0.13.0 operational guardrails (kept current through v0.15.0)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class ReleaseGuardrailsTest(unittest.TestCase):
     def test_package_version_is_consistent(self) -> None:
         manifest = json.loads(self.read("distribution-manifest.json"))
         marker = f"Versão atual do pacote: **{manifest['package_version']}**."
-        self.assertEqual(manifest["package_version"], "0.14.0")
+        self.assertEqual(manifest["package_version"], "0.15.0")
         self.assertIn(marker, self.read("README.md"))
         self.assertIn(marker, self.read("SKILL.md"))
 
@@ -71,6 +71,21 @@ class ReleaseGuardrailsTest(unittest.TestCase):
         self.assertIn("execute `stop` e rode a story novamente", protocol)
         self.assertIn("git rev-parse --absolute-git-dir", protocol)
         self.assertIn("consultam o common-dir", protocol)
+
+
+    def test_token_tools_are_wired_into_the_method(self) -> None:
+        manifest = json.loads(self.read("distribution-manifest.json"))
+        self.assertIn("docs/TOKEN_TOOLS.md", manifest["package_files"])
+        self.assertIn("scripts/tl_tools.py", manifest["package_files"])
+        self.assertEqual(manifest["package_file_count"], 28)
+        self.assertIn("tl_tools.py doctor --fix", self.read("SKILL.md"))
+        self.assertIn("rtk proxy <comando>", self.read("prompts/maker.md"))
+        self.assertIn("`<<ccr:...>>`", self.read("prompts/checker-report-only.md"))
+        self.assertIn("tl-tools: ...", self.read("prompts/orchestrator-playbook.md"))
+        policy = self.read("docs/TOKEN_TOOLS.md")
+        for phrase in ("## Política", "## Limites conhecidos", "## Medições", "disable"):
+            self.assertIn(phrase, policy)
+        self.assertIn("nunca falha nem bloqueia", self.read("scripts/tl_tools.py"))
 
 
 if __name__ == "__main__":

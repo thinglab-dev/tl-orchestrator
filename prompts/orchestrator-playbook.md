@@ -57,6 +57,15 @@ uma unidade de manutenção ou uma sessão nova, não investigação dentro da c
 Acima de aproximadamente 120 mil tokens de contexto, escreva um handoff curto em arquivo e
 recomende continuar em sessão nova.
 
+Quatro ferramentas de escopo de usuário automatizam parte desta admissão sem mudar o critério:
+rtk condensa a saída de comandos Bash antes de entrar no contexto; headroom comprime, em modo
+`cache`, resultados de ferramenta já admitidos no histórico das sessões CLI e deixa um marcador
+`<<ccr:...>>` recuperável; ponytail reduz o código escrito ao mínimo que cumpre a spec; caveman
+encurta a prosa. O hook de sessão reporta `tl-tools: ...` no início de cada sessão; quando a
+linha faltar ou trouxer `INATIVO`, a correção é `python scripts/tl_tools.py doctor --fix`, não
+uma conversa de diagnóstico. Política, limites e medições estão em
+[ferramentas de economia](../docs/TOKEN_TOOLS.md).
+
 ### Leitura seletiva por seção (Selective Retrieval)
 
 Priorize sempre a leitura seletiva por seção (`scripts/read_section.py --file <caminho> --heading <seletor>`)

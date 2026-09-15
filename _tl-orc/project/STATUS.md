@@ -1,8 +1,8 @@
 format_version: 1
 work_method: native
-active_work_ref: T026
+active_work_ref: none
 current_role: none
-next_action: Aguardar autorização humana para merge de T026 em main.
+next_action: T027 concluída. Atualizar package no consumidor platform.
 coordinator:
   harness: claude
   session: claude-code-b5b7f943
@@ -12,7 +12,7 @@ coordinator:
 active_batch: none
 batch_status: none
 review_followups: []
-next_task_id: 27
+next_task_id: 29
 next_deliverable_id: 1
 next_decision_id: 1
 next_discussion_id: 1
@@ -48,3 +48,5 @@ open_discussions: []
 | T024 | gov | none | done | [T015, T018] | [] | 1 | evidence/T024-r02.md |
 | T025 | feat | none | done | [] | [] | 2 | evidence/T025-r11.md |
 | T026 | feat | none | done | [T025] | [] | 6 | evidence/T026-r03.md |
+| T027 | feat | package | done | [T018, T026] | [] | 2 | evidence/T027-r01.md |
+| T028 | gov | none | draft | [T027] | [] | 1 | - |

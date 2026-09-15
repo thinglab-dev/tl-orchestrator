@@ -16,6 +16,8 @@ import errno
 import hashlib
 import json
 import os
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -2465,6 +2467,243 @@ def report(job_dir: Path, unit: str, max_bytes: int, expect: str | None = None) 
     return code
 
 
+# --- budgeted model dispatch (T027) -------------------------------------------
+
+
+def load_batch_frontmatter(path: Path | str) -> tuple[dict, str]:
+    target = Path(path)
+    text = target.read_text(encoding="utf-8")
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        raise ValueError(f"malformed batch file {target}: missing frontmatter delimiters")
+    fm_raw = parts[1]
+    body = parts[2]
+    try:
+        import yaml  # type: ignore[import]
+        data = yaml.safe_load(fm_raw)
+    except Exception:
+        data = json.loads(fm_raw)
+    if not isinstance(data, dict):
+        raise ValueError(f"batch frontmatter in {target} must be a dictionary")
+    return data, body
+
+
+def save_batch_frontmatter(path: Path | str, frontmatter: dict, body: str) -> None:
+    target = Path(path)
+    try:
+        import yaml  # type: ignore[import]
+        fm_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True)
+    except Exception:
+        fm_text = json.dumps(frontmatter, indent=2, ensure_ascii=False)
+    new_content = "---" + nl + fm_text + "---" + nl + body
+    temporary = target.with_name(target.name + f".tmp-{os.getpid()}")
+    try:
+        with open(temporary, "w", encoding="utf-8", newline=nl) as handle:
+            handle.write(new_content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    except OSError:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+        raise
+
+
+def budgeted_model_dispatch(
+    batch_input: dict | str | Path,
+    role: str,
+    phase: str,
+    call_id: str,
+    harness_cmd: list[str] | str,
+    cwd: str | Path | None = None,
+    payload_digest: str | None = None,
+    runner_fn: object | None = None,
+    calculate_reserve_fn: object | None = None,
+    unit_ref: str | None = None,
+    simulate_pre_dispatch_failure: bool = False,
+    simulate_ambiguous_outcome: bool = False,
+) -> tuple[bool, str, dict]:
+    """
+    Mandatory write-ahead budgeted model dispatch for Automatic Mode (T027).
+    Guarantees that ANY real call to harness/model passes through:
+    reserve -> pending_call persisted -> dispatch -> observed receipt -> consumed += 1 -> reserved -= 1 -> pending_call = null -> persistence.
+    """
+    if isinstance(batch_input, (str, Path)):
+        batch_path = Path(batch_input)
+        batch, body = load_batch_frontmatter(batch_path)
+    else:
+        batch_path = None
+        batch = batch_input
+        body = ""
+
+    b = batch.get("budget")
+    if not isinstance(b, dict):
+        return False, "invalid_batch_budget", batch
+
+    valid_roles = {"classifier", "planner", "maker", "checker", "advisor", "searcher"}
+    if role not in valid_roles:
+        return False, f"invalid_role_{role}", batch
+
+    valid_phases = {"debate", "planning", "implementation", "review", "rework"}
+    if phase not in valid_phases:
+        return False, f"invalid_phase_{phase}", batch
+
+    if batch.get("status") not in {"in_progress", "active"}:
+        return False, f"batch_status_not_active_{batch.get('status')}", batch
+
+    if b.get("pending_call") is not None:
+        return False, "pending_call_already_active", batch
+
+    # Check available budget
+    available = b.get("max_model_calls", 0) - b.get("consumed_model_calls", 0) - b.get("reserved_model_calls", 0)
+    if available < 1:
+        batch["status"] = "stopped"
+        if "execution" in batch and isinstance(batch["execution"], dict):
+            batch["execution"]["stop_reason"] = "model_call_budget_exhausted"
+        if batch_path:
+            save_batch_frontmatter(batch_path, batch, body)
+        return False, "model_call_budget_exhausted", batch
+
+    # Check dynamic reserve if calculate_reserve_fn is provided
+    if calculate_reserve_fn is not None and callable(calculate_reserve_fn):
+        required_reserve = calculate_reserve_fn(unit_ref or "unknown", phase)
+        remaining = b.get("max_model_calls", 0) - b.get("consumed_model_calls", 0)
+        if remaining < required_reserve:
+            batch["status"] = "stopped"
+            if "execution" in batch and isinstance(batch["execution"], dict):
+                batch["execution"]["stop_reason"] = "insufficient_budget_for_unit_verification"
+            if batch_path:
+                save_batch_frontmatter(batch_path, batch, body)
+            return False, "insufficient_budget_for_unit_verification", batch
+
+    # 1. Reserve slot
+    b["reserved_model_calls"] = b.get("reserved_model_calls", 0) + 1
+
+    # 2. Write-Ahead step: Persist pending_call BEFORE dispatch
+    if not payload_digest:
+        payload_str = json.dumps(harness_cmd, default=str, sort_keys=True) if isinstance(harness_cmd, (list, dict)) else str(harness_cmd)
+        p_digest = "sha256:" + digest(payload_str)
+    else:
+        p_digest = payload_digest
+
+    b["pending_call"] = {
+        "call_id": call_id,
+        "role": role,
+        "phase": phase,
+        "payload_digest": p_digest,
+        "dispatched_at": now(),
+    }
+    if batch_path:
+        save_batch_frontmatter(batch_path, batch, body)
+
+    # 3. Preflight check: Check if dispatch can actually be attempted
+    if simulate_pre_dispatch_failure:
+        b["reserved_model_calls"] = max(0, b["reserved_model_calls"] - 1)
+        b["pending_call"] = None
+        if batch_path:
+            save_batch_frontmatter(batch_path, batch, body)
+        return False, "PRE_DISPATCH_UNAVAILABLE", batch
+
+    cmd_list = harness_cmd if isinstance(harness_cmd, list) else shlex.split(str(harness_cmd))
+    if runner_fn is None and cmd_list:
+        exe = cmd_list[0]
+        if not shutil.which(exe) and not os.path.exists(exe):
+            b["reserved_model_calls"] = max(0, b["reserved_model_calls"] - 1)
+            b["pending_call"] = None
+            if batch_path:
+                save_batch_frontmatter(batch_path, batch, body)
+            return False, "PRE_DISPATCH_UNAVAILABLE", batch
+
+    # 4. Dispatch invocation
+    if simulate_ambiguous_outcome:
+        b["consumed_model_calls"] = b.get("consumed_model_calls", 0) + 1
+        b["reserved_model_calls"] = max(0, b.get("reserved_model_calls", 1) - 1)
+        b["pending_call"] = None
+        batch["status"] = "stopped"
+        if "execution" in batch and isinstance(batch["execution"], dict):
+            batch["execution"]["stop_reason"] = "unrecoverable_harness_failure"
+        if batch_path:
+            save_batch_frontmatter(batch_path, batch, body)
+        return False, "ambiguous_dispatch_stopped", batch
+
+    exit_code = 0
+    stdout = ""
+    stderr = ""
+    if runner_fn is not None and callable(runner_fn):
+        try:
+            res_tuple = runner_fn(cmd_list, cwd)
+            if isinstance(res_tuple, tuple):
+                exit_code = res_tuple[0]
+                stdout = res_tuple[1] if len(res_tuple) > 1 else ""
+                stderr = res_tuple[2] if len(res_tuple) > 2 else ""
+        except Exception as exc:
+            b["consumed_model_calls"] = b.get("consumed_model_calls", 0) + 1
+            b["reserved_model_calls"] = max(0, b.get("reserved_model_calls", 1) - 1)
+            b["pending_call"] = None
+            batch["status"] = "stopped"
+            if "execution" in batch and isinstance(batch["execution"], dict):
+                batch["execution"]["stop_reason"] = "unrecoverable_harness_failure"
+            if batch_path:
+                save_batch_frontmatter(batch_path, batch, body)
+            return False, f"unrecoverable_harness_failure: {exc}", batch
+    else:
+        try:
+            p = subprocess.run(cmd_list, cwd=cwd, capture_output=True, text=True, check=False)
+            exit_code, stdout, stderr = p.returncode, p.stdout, p.stderr
+        except Exception as exc:
+            b["consumed_model_calls"] = b.get("consumed_model_calls", 0) + 1
+            b["reserved_model_calls"] = max(0, b.get("reserved_model_calls", 1) - 1)
+            b["pending_call"] = None
+            batch["status"] = "stopped"
+            if "execution" in batch and isinstance(batch["execution"], dict):
+                batch["execution"]["stop_reason"] = "unrecoverable_harness_failure"
+            if batch_path:
+                save_batch_frontmatter(batch_path, batch, body)
+            return False, f"unrecoverable_harness_failure: {exc}", batch
+
+    # 5. Normal completion accounting (every real completed dispatch counts)
+    b["consumed_model_calls"] = b.get("consumed_model_calls", 0) + 1
+    b["reserved_model_calls"] = max(0, b.get("reserved_model_calls", 1) - 1)
+    b["pending_call"] = None
+    if batch_path:
+        save_batch_frontmatter(batch_path, batch, body)
+
+    result_detail = {
+        "batch": batch,
+        "exit_code": exit_code,
+        "stdout": stdout,
+        "stderr": stderr,
+    }
+    return (exit_code == 0), "dispatch_complete", result_detail
+
+
+def command_budgeted_dispatch(args: argparse.Namespace, argv: list[str], max_bytes: int) -> int:
+    cmd = argv
+    if not cmd:
+        raise JobError(EXIT_USAGE, "invalid_input", "budgeted-dispatch requires command after --")
+    ok, reason, detail = budgeted_model_dispatch(
+        batch_input=args.batch_file,
+        role=args.role,
+        phase=args.phase,
+        call_id=args.call_id,
+        harness_cmd=cmd,
+        cwd=args.cwd,
+        payload_digest=args.payload_digest,
+    )
+    result_payload = {
+        "schema": SCHEMA_VERSION,
+        "status": "ok" if ok else "failed",
+        "reason": reason,
+        "role": args.role,
+        "phase": args.phase,
+        "call_id": args.call_id,
+    }
+    if isinstance(detail, dict) and "exit_code" in detail:
+        result_payload["exit_code"] = detail["exit_code"]
+    emit(result_payload, max_bytes)
+    return 0 if ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tl_job.py",
@@ -2522,6 +2761,14 @@ def build_parser() -> argparse.ArgumentParser:
             help="the binding token `start` returned; nothing is delivered unless the job on disk still carries it",
         )
 
+    b_dispatch = subparsers.add_parser("budgeted-dispatch", help="dispatch a budgeted model call with mandatory write-ahead journaling")
+    b_dispatch.add_argument("--batch-file", required=True, help="path to the Bnnn.md batch file")
+    b_dispatch.add_argument("--role", required=True, choices=["classifier", "planner", "maker", "checker", "advisor", "searcher"])
+    b_dispatch.add_argument("--phase", required=True, choices=["debate", "planning", "implementation", "review", "rework"])
+    b_dispatch.add_argument("--call-id", required=True, help="unique call identifier")
+    b_dispatch.add_argument("--cwd", default=None, help="execution directory")
+    b_dispatch.add_argument("--payload-digest", default=None, help="optional payload digest")
+
     supervise_parser = subparsers.add_parser("supervise", help="internal: run and watch one claimed unit")
     supervise_parser.add_argument("--state-dir", required=True)
     supervise_parser.add_argument("--unit", required=True)
@@ -2544,6 +2791,8 @@ def main(raw: list[str] | None = None) -> int:
     max_bytes = DEFAULT_MAX_BYTES
     try:
         max_bytes = check_max_bytes(args.max_bytes)
+        if args.command == "budgeted-dispatch":
+            return command_budgeted_dispatch(args, argv, max_bytes)
         if args.command == "supervise":
             return supervise(args.state_dir, args.unit)
         if args.command == "start":

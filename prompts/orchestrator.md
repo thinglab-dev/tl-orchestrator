@@ -45,6 +45,7 @@ antes de despachar, conforme os [perfis](orchestrator-perfis.md#classificar-e-re
   de configuração e credenciais estáticas sem requisição de rede ou execução pesada de CLI) falha sem debitar
   chamada (`PRE_DISPATCH_UNAVAILABLE`, liberação de reserva). Qualquer preflight remoto ou invocação de CLI
   constitui tentativa formal com write-ahead obrigatório no journal (`pending_call`) e slot debitado.
+- **Universalidade do Write-Ahead e Retries (T027):** Toda e qualquer chamada real a modelo (Classifier, Planner, Maker, Checker, Advisor, Searcher) DEVE passar obrigatoriamente por write-ahead no journal antes do despacho (`budgeted_model_dispatch`). Cada tentativa real (inclusive retries por schema inválido) consome 1 chamada. Antes de autorizar um retry, valida-se o saldo para a reserva dinâmica obrigatória até o Checker independente.
 - **Tratamento das 4 classes de resultado de despacho (R5):**
   1. `PRE_DISPATCH_UNAVAILABLE`: avança com segurança para o próximo candidato da cadeia de fallback.
   2. `DISPATCH_FAILED_PROVEN_NO_EFFECT`: falha operacional sem efeitos colaterais. Fallback automático

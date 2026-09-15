@@ -36,7 +36,7 @@ import unittest
 import sys
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-from tl_job import budgeted_model_dispatch
+from tl_job import budgeted_model_dispatch, load_batch_frontmatter
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 BATCH_SCHEMA_PATH = ROOT / "schemas" / "batch.schema.json"
@@ -1378,6 +1378,38 @@ class TestAutomaticModeContract(unittest.TestCase):
         self.assertEqual(reason2, "insufficient_budget_for_unit_verification")
         self.assertEqual(batch["status"], "stopped")
         self.assertEqual(batch["execution"]["stop_reason"], "insufficient_budget_for_unit_verification")
+
+    def test_t027_budgeted_dispatch_with_batch_file_persistence(self) -> None:
+        import tempfile
+        batch = copy.deepcopy(self.valid_batch_frontmatter)
+        batch["budget"]["max_model_calls"] = 10
+        batch["budget"]["consumed_model_calls"] = 0
+        batch["budget"]["reserved_model_calls"] = 0
+        batch["budget"]["pending_call"] = None
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            batch_path = Path(tmpdir) / "B999.md"
+            import yaml
+            body_text = "# Batch Test Body\n"
+            batch_path.write_text(f"---\n{yaml.safe_dump(batch)}---\n{body_text}", encoding="utf-8")
+
+            success_runner = lambda cmd, cwd: (0, "model output", "")
+            ok, reason, detail = budgeted_model_dispatch(
+                batch_input=batch_path,
+                role="classifier",
+                phase="implementation",
+                call_id="call-01-classifier",
+                harness_cmd=["agy", "--help"],
+                runner_fn=success_runner,
+            )
+            self.assertTrue(ok)
+            self.assertEqual(reason, "dispatch_complete")
+
+            # Check persisted batch on disk
+            persisted, _ = load_batch_frontmatter(batch_path)
+            self.assertEqual(persisted["budget"]["consumed_model_calls"], 1)
+            self.assertEqual(persisted["budget"]["reserved_model_calls"], 0)
+            self.assertIsNone(persisted["budget"]["pending_call"])
 
     # AC09: Admission Gate by Unit
     # --------------------------------------------------------------------------

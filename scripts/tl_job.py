@@ -2490,6 +2490,7 @@ def load_batch_frontmatter(path: Path | str) -> tuple[dict, str]:
 
 def save_batch_frontmatter(path: Path | str, frontmatter: dict, body: str) -> None:
     target = Path(path)
+    nl = "\n"
     try:
         import yaml  # type: ignore[import]
         fm_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True)

@@ -143,9 +143,9 @@ sem resultado é reconciliado antes de qualquer escalonamento:
 | :--- | :--- | :--- |
 | `model_call` | estado do `tl_job.py` | nunca iniciou → `released` (não cobrada) · ainda rodando → o runtime **anexa** ao supervisor e espera · terminou sem resultado gravado → `ambiguous`, cobrada; a árvore suja vira checkpoint (`refs/tl/checkpoints/...`) e o próximo Maker recebe "continue do checkpoint" |
 | `local_commit` | árvore e pai de `HEAD` | árvore da intenção sobre o pai gravado → `ok` · `HEAD` avançou além do pai sem ser o commit esperado → `ambiguous`, `awaiting_operator` (nunca adota commit alheio) · senão → `released` |
-| `push` | `git ls-remote` contra o `remote_before` gravado na intenção | remoto no commit esperado → `ok` · remoto exatamente como observado antes da intenção → `released` (push roda) · qualquer outro estado (movido, apagado, divergente, inacessível) → `ambiguous`, unidade em `awaiting_operator` |
+| `push` | `git ls-remote` contra o `remote_before` gravado na intenção (também quando o próprio `git push` devolve erro: remoto no commit → `ok`; remoto como antes → falha normal; outro estado → `awaiting_operator`, nunca retry) | remoto no commit esperado → `ok` · remoto exatamente como observado antes da intenção → `released` (push roda) · qualquer outro estado (movido, apagado, divergente, inacessível) → `ambiguous`, unidade em `awaiting_operator` |
 | `pull_request` | `gh pr list --head` | existe com a mesma base e `headRefOid` exatamente igual ao commit revisado gravado na intenção → `ok` · não existe → `released` (o create adota um PR existente da branch só com base e head exatos, nunca duplica) · base/head diferentes, head ausente ou `gh` falhou → `ambiguous`, `awaiting_operator` |
-| `pull_request_merge` | `gh pr view` | mesclado com `baseRefName` e `headRefOid` iguais à base e ao commit revisados → `ok` · aberto → `released` (o merge revalida base, head e estado `OPEN` antes de chamar `gh pr merge --match-head-commit`) · mesclado em outra base ou outro head, ou `gh` falhou → `ambiguous`, `awaiting_operator` |
+| `pull_request_merge` | `gh pr view` | mesclado com `baseRefName` e `headRefOid` iguais à base e ao commit revisados → `ok` · aberto → `released` (o merge revalida base, head e estado `OPEN` antes de chamar `gh pr merge --match-head-commit` e verifica a base logo depois) · mesclado em outra base ou outro head, ou `gh` falhou → `ambiguous`, `awaiting_operator` |
 | `local_merge` | `merge-base --is-ancestor`, `MERGE_HEAD` | já mesclado → `ok` · merge em andamento na árvore → `ambiguous`, `awaiting_operator` (o runtime nunca faz `merge --abort` de um merge que não iniciou) · senão → `released` (o merge só roda se a branch ainda aponta para o commit revisado) |
 | `ci_rerun` | nenhuma | `ambiguous`: contado como reexecução, nunca repetido |
 | `gate`, `ci_query`, `prepare` | nenhuma | `released` (rodam de novo; antes dos portões a árvore volta à árvore do Maker gravada no step, para que resto de portão nunca chegue ao commit) |
@@ -278,6 +278,12 @@ PR, remoto divergente, journal corrompido, versão obsoleta), além do laço de 
 rerun de infraestrutura e reconciliação de merge.
 
 ## Limites conhecidos
+
+- `gh pr merge` só aceita precondição de head (`--match-head-commit`), não de base. O runtime
+  revalida base, head e estado `OPEN` imediatamente antes e verifica a base logo depois; um
+  humano que retargete o PR nesse intervalo produz `merged_into_unexpected_base` e
+  `awaiting_operator`, não um merge silencioso. Fechar essa janela é governança do
+  repositório (proteção de branch), não do runtime.
 
 - Concorrência 1. Worktrees em paralelo dependem do pool/árbitro do `tl_supervisor.py` e de
   medição; não entram nesta versão.

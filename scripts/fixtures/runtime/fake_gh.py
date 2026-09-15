@@ -56,6 +56,8 @@ def main(argv: list[str]) -> int:
             sys.stderr.write("merge refused" + chr(10))
         else:
             pr["state"], pr["mergedAt"], pr["head_oid"] = "MERGED", "2026-01-01T00:00:00Z", head_now
+            if state.get("retarget_on_merge"):
+                pr["base"] = state["retarget_on_merge"]
     elif argv[:2] == ["pr", "checks"]:
         seq = state["checks_sequence"]
         current = seq.pop(0) if len(seq) > 1 else seq[0]

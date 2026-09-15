@@ -682,6 +682,47 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(fold.recoveries[0]["verdict"], "released")
         self.assertEqual(git(fx.repo, "ls-remote", "--heads", "origin", "tl/B001/T001").split()[0], fold.units["T001"].commit)
 
+    def test_push_that_errors_after_landing_is_not_repeated(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True})
+        flag = self.root / "push_failed_once"
+        script = self.root / "flaky_git.py"
+        script.write_text(
+            "import os, subprocess, sys" + chr(10)
+            + "args = sys.argv[1:]" + chr(10)
+            + "r = subprocess.run(['git', *args])" + chr(10)
+            + "if args and args[0] == 'push' and not os.path.exists(" + repr(str(flag)) + "):" + chr(10)
+            + "    open(" + repr(str(flag)) + ", 'w').close()" + chr(10)
+            + "    sys.stderr.write('error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502')" + chr(10)
+            + "    sys.exit(1)" + chr(10)
+            + "sys.exit(r.returncode)" + chr(10), encoding="utf-8")
+        if os.name == "nt":
+            self.skipTest("a .cmd shim cannot forward multi-line commit messages; this scenario runs on the POSIX CI")
+        shim = self.root / "flaky_git"
+        shim.write_text("#!/bin/sh" + chr(10) + "exec " + sys.executable + " " + str(script) + ' "$@"' + chr(10), encoding="utf-8")
+        shim.chmod(0o755)
+        fx.config["git_executable"] = str(shim)
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "done")
+        fold = fx.fold()
+        step = fold.steps["T001:push:" + fold.units["T001"].commit]
+        self.assertEqual(step["status"], "ok")
+        self.assertIn("push reported an error but the remote is at the commit", step["result"]["detail"])
+        self.assertTrue(flag.exists())
+        self.assertEqual([a["class"] for a in fold.units["T001"].attempts], [], "no retry was journaled")
+
+    def test_pr_retargeted_between_check_and_merge_is_reported(self) -> None:
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"], "retarget_on_merge": "release"}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "blocked")
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertTrue(record.merged)
+        self.assertIn("merged_into_unexpected_base", record.reason)
+
     # ---- policy -----------------------------------------------------------------------------
 
     def test_scope_expansion_restores_tree_then_parks_on_repeat(self) -> None:

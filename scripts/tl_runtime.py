@@ -1812,18 +1812,29 @@ class Runtime:
         # push
         if record.phase == "push":
             if effects.effect_allowed("push"):
-                def push(intent: dict) -> dict:
-                    out = run_argv([self.git.exe, "push", "--quiet", "-u", "origin", record.branch], self.repo, 600)
-                    if out["exit_code"] != 0:
-                        return {"_status": "failed", "detail": out["stderr"][-400:]}
-                    return {"pushed": record.commit}
                 remote_before = run_argv([self.git.exe, "ls-remote", "--heads", "origin", record.branch], self.repo, 120)
                 if remote_before["exit_code"] != 0:
                     raise UnitPark("parked", "remote unreachable before push: " + remote_before["stderr"][-200:])
+                before = remote_before["stdout"].split()[0] if remote_before["stdout"].strip() else ""
+
+                def push(intent: dict) -> dict:
+                    out = run_argv([self.git.exe, "push", "--quiet", "-u", "origin", record.branch], self.repo, 600)
+                    if out["exit_code"] == 0:
+                        return {"pushed": record.commit}
+                    # An error reply does not prove the push failed: look at the remote before deciding.
+                    after = run_argv([self.git.exe, "ls-remote", "--heads", "origin", record.branch], self.repo, 120)
+                    remote_now = after["stdout"].split()[0] if after["exit_code"] == 0 and after["stdout"].strip() else ("" if after["exit_code"] == 0 else None)
+                    if remote_now == record.commit:
+                        return {"pushed": record.commit, "detail": "push reported an error but the remote is at the commit: " + out["stderr"][-200:]}
+                    if remote_now == before:
+                        return {"_status": "failed", "detail": out["stderr"][-400:]}
+                    return {"_status": "failed", "ambiguous": True, "detail": f"push errored and the remote is at {str(remote_now)[:12] or 'absent/unknown'}, neither the commit nor the pre-push state: " + out["stderr"][-200:]}
                 result = self.step(f"{uid}:push:{record.commit}", "push", uid, "push", {"type": "push", "commit": record.commit, "branch": record.branch}, push,
-                                   context={"remote_before": remote_before["stdout"].split()[0] if remote_before["stdout"].strip() else ""})
+                                   context={"remote_before": before})
                 if not result.get("pushed"):
                     detail = str(result.get("detail", ""))
+                    if result.get("ambiguous"):
+                        raise UnitPark("awaiting_operator", "push_ambiguous: " + detail[:200], decision={"options": ["retry", "skip"]})
                     move = self.failure(unit, "transient" if _TRANSIENT.search(detail) else "environment", normalize_signature("push", detail), detail, phase="push")
                     if move == "retry":
                         return self.deliver(unit)
@@ -1886,8 +1897,16 @@ class Runtime:
                         out = run_argv([*self.config["gh_argv"], "pr", "merge", str(record.pr["number"]), "--merge", "--delete-branch=false", "--match-head-commit", record.commit], self.repo, 300)
                         if out["exit_code"] != 0:
                             return {"_status": "failed", "detail": out["stderr"][-400:]}
+                        # gh has no base precondition: the base is checked right before and verified right after.
+                        after = self._pr_view(record.pr["number"]) or {}
+                        if after.get("baseRefName") not in (None, intent["base"]):
+                            return {"merged": True, "base_mismatch": after.get("baseRefName")}
                         return {"merged": True}
                     result = self.step(f"{uid}:merge:{record.commit}", "pull_request_merge", uid, "merge", {"type": "pull_request_merge", "pr": record.pr["number"], "commit": record.commit, "base": self.base_branch}, merge)
+                    if result.get("merged") and result.get("base_mismatch"):
+                        self.unit_state(uid, "running", "", phase="complete", merged=True)
+                        raise UnitPark("awaiting_operator", f"merged_into_unexpected_base: pull request {record.pr['number']} was retargeted to {result['base_mismatch']} between the check and the merge",
+                                       decision={"options": ["skip"]})
                     if result.get("merged"):
                         self.unit_state(uid, "running", "", phase="complete", merged=True)
                     else:

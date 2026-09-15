@@ -86,12 +86,16 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
   intenção de push grava `remote_before` e a recuperação só libera o push se o remoto está
   exatamente como antes da intenção (qualquer outro estado espera o operador).
   `notify_argv` mantido como comando do operador, fora de `permitted_effects` (documentado).
+- Revisão independente r6: `git push` que devolve erro é reconciliado contra o remoto antes de
+  qualquer retry (remoto no commit conta como enviado; estado desconhecido espera o operador);
+  base do PR verificada logo depois do merge, com `merged_into_unexpected_base` quando alguém
+  retargeta o PR entre a checagem e o merge (limitação do `gh` documentada).
 - Pacote canônico passa de 44 para 49 arquivos (`scripts/tl_runtime.py`,
   `scripts/tl_ci_slice.py`, `docs/RUNTIME.md`, dois schemas).
 
 ### Validação
 
-- `scripts/tests/test_tl_runtime.py` (77 testes, Git real, harness e `gh` scriptados):
+- `scripts/tests/test_tl_runtime.py` (79 testes, Git real, harness e `gh` scriptados):
   DAG com dependência e fechamento, rework, esgotamento, estagnação, loop por assinatura,
   oscilação, `intent_gap` → decisão do operador, expansão de escopo com árvore restaurada,
   segredo e caminho sensível parando o lote, push não autorizado nunca tentado, drift de spec

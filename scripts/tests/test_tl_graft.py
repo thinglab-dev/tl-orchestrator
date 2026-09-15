@@ -18,6 +18,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -326,6 +327,48 @@ class TestGraphStateInterpretation(unittest.TestCase):
     def test_missing_deep_layer_is_not_drift(self):
         state, _ = tl_graft._graph_state(json.loads(CLEAN_CHECK))
         self.assertEqual(state, "fresh")
+        without_context = json.loads(CLEAN_CHECK)
+        del without_context["context"]
+        self.assertEqual(tl_graft._graph_state(without_context)[0], "fresh")
+
+    INVALID_GRAPHS = (
+        {"graph": {}},
+        {"graph": {"added": 1}},
+        {"graph": {"missing": False, "nodes": 7, "added": [], "removed": []}},
+        {"graph": {"nodes": "7", "added": [], "removed": [], "changed": []}},
+        {"graph": {"nodes": True, "added": [], "removed": [], "changed": []}},
+        {"graph": {"nodes": 7, "added": [], "removed": {}, "changed": []}},
+    )
+
+    def test_incomplete_or_mistyped_report_is_unreadable_not_fresh(self):
+        """R25: absent or mistyped fields prove nothing — never `fresh`, never a traceback."""
+        for payload in self.INVALID_GRAPHS:
+            with self.subTest(payload=payload):
+                self.assertEqual(tl_graft._graph_state(payload), ("unreadable", {}))
+
+    def test_status_and_query_fall_back_on_incomplete_reports(self):
+        root, _ = _configured(self)
+        for payload in self.INVALID_GRAPHS[:2]:
+            body = json.dumps(payload)
+            with self.subTest(payload=payload):
+                with mock.patch.object(tl_graft, "_run", return_value=_run_result(0, body)):
+                    status = tl_graft.do_status(target=str(root))
+                self.assertFalse(status["ok"])
+                self.assertEqual(status["reason"], "check_unreadable")
+                runs = _QueryRuns(_run_result(0, ASK_HIT), _run_result(0, body))
+                with mock.patch.object(tl_graft, "_run", side_effect=runs):
+                    query = tl_graft.do_query(target=str(root), mode="ask", arg="x", limit_chars=100)
+                self.assertFalse(query["ok"])
+                self.assertEqual(query["reason"], "freshness_unverified")
+                self.assertEqual(query["fallback"], "rg")
+                self.assertNotIn("verified", query)
+                with mock.patch.object(tl_graft, "_run", return_value=_run_result(0, body)), mock.patch(
+                    "sys.stdout"
+                ) as fake_stdout:
+                    exit_code = tl_graft.main(["--target", str(root), "--json", "status"])
+                self.assertEqual(exit_code, 1)
+                written = "".join(call.args[0] for call in fake_stdout.write.call_args_list if call.args)
+                self.assertEqual(json.loads(written.strip())["reason"], "check_unreadable")
 
 
 class TestSetupFallbacks(unittest.TestCase):
@@ -882,6 +925,35 @@ class TestRealSubprocessCapture(unittest.TestCase):
         self.assertEqual(run.status, "spawn_error")
         self.assertIsNone(run.code)
 
+    def test_windows_containment_failure_is_a_spawn_error_before_popen(self):
+        """R23: without the job object nothing could end the descendants; never run unprotected."""
+        root = _tmp_root(self)
+        with mock.patch.object(tl_graft, "_WINDOWS", True), mock.patch.object(
+            tl_graft.tl_job, "JobObjectContainment", side_effect=tl_graft.tl_job.ContainmentError("sem job")
+        ), mock.patch.object(tl_graft.subprocess, "Popen") as popen_mock:
+            run = tl_graft._run(self._py("pass"), cwd=root, timeout=10, env=os.environ.copy())
+        popen_mock.assert_not_called()
+        self.assertEqual(run.status, "spawn_error")
+        self.assertIsNone(run.code)
+        self.assertFalse(run.ok)
+        self.assertIn("sem job", run.stderr)
+
+    def test_capture_not_proven_drained_is_not_ok(self):
+        """R23: a pump still alive after the final join is an unfinished capture, not success."""
+
+        class _NeverDrained(threading.Thread):
+            def is_alive(self):
+                return True
+
+        root = _tmp_root(self)
+        with mock.patch.object(tl_graft, "DRAIN_JOIN_SECONDS", 0.5), mock.patch.object(
+            tl_graft.threading, "Thread", _NeverDrained
+        ):
+            run = tl_graft._run(self._py("print('x')"), cwd=root, timeout=30, env=os.environ.copy())
+        self.assertEqual(run.status, "unconfirmed")
+        self.assertIsNone(run.code)
+        self.assertFalse(run.ok)
+
     def test_truncate_accepts_bytes(self):
         self.assertEqual(tl_graft._truncate(b"caf\xc3\xa9"), "café")
 
@@ -1046,6 +1118,88 @@ class TestDotenvFileRefusal(unittest.TestCase):
         result = tl_graft.do_disable(target=str(root))
         self.assertTrue(result["ok"], result)
         self.assertFalse(paths["base"].exists())
+
+
+class TestNpmConfigFileRefusal(unittest.TestCase):
+    """R24: `npm_config_userconfig`/`globalconfig` isolate the install only while the two files
+    they name do not exist; either one present would be loaded by npm as configuration."""
+
+    SECRET = "registry=https://sentinela.invalid/\n//sentinela.invalid/:_authToken=sentinela\n"
+
+    def test_each_existing_file_refuses_setup_without_reading_or_running_npm(self):
+        for key in ("npm_no_userrc", "npm_no_globalrc"):
+            with self.subTest(key=key):
+                root, paths = _configured(self)
+                paths["installed_marker"].unlink()
+                paths[key].write_text(self.SECRET, encoding="utf-8")
+                with mock.patch.object(tl_graft, "_run") as run_mock:
+                    for force in (False, True):
+                        result = tl_graft.do_setup(target=str(root), force=force)
+                        self.assertFalse(result["ok"])
+                        self.assertEqual(result["reason"], "npm_config_file_present")
+                        self.assertEqual(result["fallback"], "rg")
+                run_mock.assert_not_called()
+                self.assertEqual(paths[key].read_text(encoding="utf-8"), self.SECRET)
+
+
+class TestCacheOwnershipForStatusAndQuery(unittest.TestCase):
+    """R26: status/query seed `home/.graft` and start the CLI inside the cache, so an apparent
+    install they do not own must be refused before either happens, and left intact."""
+
+    def _apparent_install(self, stamp: str | None):
+        root = _tmp_root(self)
+        paths = tl_graft.cache_paths(root)
+        paths["base"].mkdir()
+        _install_fake_cli(paths)
+        if stamp is not None:
+            paths["stamp"].write_text(stamp, encoding="utf-8")
+        patcher = mock.patch.object(tl_graft, "node_available", return_value=("/n", "/npm"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return root, paths
+
+    def _snapshot(self, base: Path) -> dict[str, bytes]:
+        return {str(p.relative_to(base)): p.read_bytes() for p in sorted(base.rglob("*")) if p.is_file()}
+
+    STAMPS = {
+        "ausente": None,
+        "alheio": json.dumps({"tool": "outra-ferramenta"}),
+        "lista": "[]",
+        "malformado": "{isto não é json",
+    }
+
+    def test_status_and_query_refuse_without_writing_or_running(self):
+        for label, stamp in self.STAMPS.items():
+            with self.subTest(stamp=label):
+                root, paths = self._apparent_install(stamp)
+                before = self._snapshot(paths["base"])
+                with mock.patch.object(tl_graft, "_run") as run_mock, mock.patch.object(
+                    tl_graft, "seed_update_check"
+                ) as seed_mock:
+                    status = tl_graft.do_status(target=str(root))
+                    query = tl_graft.do_query(target=str(root), mode="ask", arg="x", limit_chars=100)
+                for result in (status, query):
+                    self.assertFalse(result["ok"])
+                    self.assertEqual(result["reason"], "foreign_cache_dir")
+                    self.assertEqual(result["fallback"], "rg")
+                self.assertFalse(status["configured"])
+                run_mock.assert_not_called()
+                seed_mock.assert_not_called()
+                self.assertFalse(paths["update_check"].exists())
+                self.assertEqual(self._snapshot(paths["base"]), before)
+
+    def test_list_stamp_is_foreign_for_setup_and_disable_without_traceback(self):
+        root, paths = self._apparent_install("[]")
+        self.assertEqual(tl_graft.cache_ownership(paths), "foreign")
+        before = self._snapshot(paths["base"])
+        with mock.patch.object(tl_graft, "_run") as run_mock:
+            setup = tl_graft.do_setup(target=str(root), force=False)
+            # The same structured refusal an unstamped directory gets (not an AttributeError).
+            with self.assertRaises(tl_graft.GraftUnavailable):
+                tl_graft.do_disable(target=str(root))
+        self.assertEqual(setup["reason"], "foreign_cache_dir")
+        run_mock.assert_not_called()
+        self.assertEqual(self._snapshot(paths["base"]), before)
 
 
 class TestNpmBinSymlinks(unittest.TestCase):
@@ -1242,6 +1396,7 @@ class TestWindowsDescendantContainment(unittest.TestCase):
 
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     STILL_ACTIVE = 259
+    ERROR_INVALID_PARAMETER = 87  # OpenProcess on a pid that names no process
 
     def _descendant_pid(self, marker: Path) -> int:
         deadline = time.monotonic() + 30
@@ -1255,17 +1410,41 @@ class TestWindowsDescendantContainment(unittest.TestCase):
             time.sleep(0.05)
         self.fail("o processo filho não registrou o pid do neto")
 
-    def _pid_alive(self, pid: int) -> bool:
+    def _kernel32(self):
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        return kernel32
+
+    def _last_error(self) -> int:
         import ctypes
 
-        kernel32 = ctypes.windll.kernel32
+        return ctypes.get_last_error()
+
+    def _pid_alive(self, pid: int) -> bool:
+        """True while running, False only when the process is proven gone or exited; any other
+        failure to inspect it fails the test instead of passing as a death."""
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = self._kernel32()
         handle = kernel32.OpenProcess(self.PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if not handle:
-            return False
-        try:
-            code = ctypes.c_ulong()
-            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            error = self._last_error()
+            if error == self.ERROR_INVALID_PARAMETER:
                 return False
+            self.fail(f"OpenProcess({pid}) falhou com erro {error}; encerramento não comprovado")
+        try:
+            code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                self.fail(f"GetExitCodeProcess({pid}) falhou com erro {self._last_error()}")
             return code.value == self.STILL_ACTIVE
         finally:
             kernel32.CloseHandle(handle)
@@ -1282,6 +1461,49 @@ class TestWindowsDescendantContainment(unittest.TestCase):
 
     def _cmd(self, marker: Path, child_code: str, mode: str) -> list[str]:
         return [sys.executable, "-c", self.PARENT, str(marker), child_code, mode]
+
+    def test_probe_sees_a_known_live_process_and_then_its_death(self):
+        """R27: the probe itself must tell alive from ended, or the tests below prove nothing."""
+        proc = subprocess.Popen([sys.executable, "-c", self.SLEEPER])
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait()))
+        self.assertTrue(self._pid_alive(proc.pid))
+        proc.kill()
+        proc.wait(timeout=30)
+        self._assert_ended(proc.pid)
+
+    def test_probe_query_failures_fail_instead_of_passing_as_death(self):
+        class _DeniedOpen:
+            def OpenProcess(self, access, inherit, pid):
+                return None
+
+        class _FailedExitCode:
+            closed: list = []
+
+            def OpenProcess(self, access, inherit, pid):
+                return 1234
+
+            def GetExitCodeProcess(self, handle, code):
+                return 0
+
+            def CloseHandle(self, handle):
+                self.closed.append(handle)
+                return 1
+
+        access_denied = 5
+        with mock.patch.object(self, "_kernel32", return_value=_DeniedOpen()), mock.patch.object(
+            self, "_last_error", return_value=access_denied
+        ):
+            with self.assertRaises(AssertionError):
+                self._pid_alive(4242)
+            with self.assertRaises(AssertionError):
+                self._assert_ended(4242)
+        failed = _FailedExitCode()
+        with mock.patch.object(self, "_kernel32", return_value=failed), mock.patch.object(
+            self, "_last_error", return_value=access_denied
+        ):
+            with self.assertRaises(AssertionError):
+                self._pid_alive(4242)
+        self.assertEqual(failed.closed, [1234])
 
     def test_timeout_ends_the_descendant_too(self):
         root = _tmp_root(self)

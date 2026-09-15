@@ -348,7 +348,7 @@ class RunResult:
         self.code = code
         self.stdout = stdout
         self.stderr = stderr
-        self.status = status  # ok | timeout | limit | spawn_error
+        self.status = status  # ok | timeout | limit | spawn_error | unconfirmed
 
     @property
     def ok(self) -> bool:
@@ -368,14 +368,14 @@ def _spawn_kwargs() -> dict:
     return {"start_new_session": True} if _POSIX_PROCESS_GROUPS else {}
 
 
-def _open_windows_containment() -> tl_job.JobObjectContainment | None:
-    """The same job-object containment `tl_job` uses for its own units, or `None` when it
-    could not be established (reported by the caller as a spawn error, never silently
-    downgraded to the weaker taskkill-only ending it replaces)."""
-    try:
-        return tl_job.JobObjectContainment()
-    except tl_job.ContainmentError:
-        return None
+_WINDOWS = os.name == "nt"
+
+
+def _open_windows_containment() -> tl_job.JobObjectContainment:
+    """The same job-object containment `tl_job` uses for its own units. `ContainmentError`
+    propagates: the caller reports it as a spawn error before starting anything, never
+    downgrading to a subprocess whose descendants nothing could end."""
+    return tl_job.JobObjectContainment()
 
 
 def _kill_process_tree(
@@ -424,7 +424,12 @@ def _run(
     into buffers capped at `byte_limit`; exceeding the cap or the deadline kills the process
     tree and reports it, instead of buffering an unbounded amount and truncating afterwards.
     """
-    containment = _open_windows_containment() if os.name == "nt" else None
+    containment = None
+    if _WINDOWS:
+        try:
+            containment = _open_windows_containment()
+        except tl_job.ContainmentError as exc:
+            return RunResult(None, "", f"contenção de processos indisponível: {exc}", "spawn_error")
     try:
         try:
             proc = subprocess.Popen(
@@ -509,6 +514,8 @@ def _run(
             _kill_process_tree(proc, pgid, containment)
             for thread in threads:
                 thread.join(timeout=DRAIN_JOIN_SECONDS)
+        # Neither a pump still reading nor a leader still running is a finished capture.
+        unconfirmed = any(thread.is_alive() for thread in threads) or proc.poll() is None
 
         with buffer_lock:
             out = bytes(buffers["stdout"]).decode("utf-8", "replace")
@@ -517,6 +524,8 @@ def _run(
             return RunResult(None, out, err, "timeout")
         if over_limit.is_set():
             return RunResult(proc.returncode, out, err, "limit")
+        if unconfirmed:
+            return RunResult(None, out, err, "unconfirmed")
         return RunResult(proc.returncode, out, err, "ok")
     finally:
         if containment is not None:
@@ -631,6 +640,23 @@ def assert_no_dotenv_file(paths: dict[str, Path]) -> None:
         )
 
 
+def assert_no_npm_config_files(paths: dict[str, Path]) -> None:
+    """Refuse to install while either reserved npm config path exists.
+
+    `npm_config_userconfig`/`npm_config_globalconfig` isolate the install only because these
+    two files never exist. One left in the cache would be loaded by npm as configuration —
+    registry, tokens and all. Same rule as `no-dotenv.env`: not read, not deleted, refused.
+    """
+    for key in ("npm_no_userrc", "npm_no_globalrc"):
+        path = paths[key]
+        if path.exists() or _is_reparse_point(path):
+            raise CacheUnsafe(
+                "npm_config_file_present",
+                f"{path} existe e o npm o carregaria como configuração; recusando instalar. Nada "
+                "foi lido nem alterado — apague ou renomeie esse arquivo para usar o acelerador.",
+            )
+
+
 def _scan_for_internal_reparse_points(base: Path, limit: int = 5) -> list[Path]:
     """Find the links under `base` that removing the cache could follow outside it.
 
@@ -691,7 +717,8 @@ def cache_ownership(paths: dict[str, Path]) -> str:
             return "empty"
         if stamp.is_file():
             data = json.loads(stamp.read_text(encoding="utf-8"))
-            return "ours" if data.get("tool") == CACHE_STAMP_TOOL else "foreign"
+            ours = isinstance(data, dict) and data.get("tool") == CACHE_STAMP_TOOL
+            return "ours" if ours else "foreign"
         return "empty" if not any(base.iterdir()) else "foreign"
     except (OSError, ValueError, UnicodeDecodeError):
         return "foreign"
@@ -806,6 +833,19 @@ def _guard(target: str | None, for_cli: bool = True) -> tuple[Path, dict[str, Pa
     return root, paths, None
 
 
+def _foreign_cache_refusal(paths: dict[str, Path], root: Path) -> dict | None:
+    """Status/query write the update-check record and start the CLI inside the cache, so only
+    in a cache our stamp proves is ours. An unstamped or foreign one is left exactly as found."""
+    if cache_ownership(paths) != "foreign":
+        return None
+    return _fallback(
+        "foreign_cache_dir",
+        f"O diretório {CACHE_DIRNAME}/ não tem o selo deste helper; nada foi escrito nem "
+        "executado nele. Siga com rg/leitura direta, ou rode o setup num diretório sem esse cache.",
+        root,
+    )
+
+
 # ---------------------------------------------------------------------------- commands
 
 
@@ -813,6 +853,10 @@ def do_setup(target: str | None, force: bool) -> dict:
     root, paths, refusal = _guard(target)
     if refusal is not None:
         return refusal
+    try:
+        assert_no_npm_config_files(paths)
+    except CacheUnsafe as exc:
+        return _fallback(exc.reason, exc.message, root)
 
     node, npm = node_available()
     if not node or not npm:
@@ -997,11 +1041,18 @@ def _graph_state(payload: dict | None) -> tuple[str, dict]:
         return "unreadable", {}
     if graph.get("missing"):
         return "missing", {}
+    # Freshness is only proven by a complete structural report: a node count and the three
+    # drift lists. A report missing any of them, or with another type, proves nothing.
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, int) or isinstance(nodes, bool) or nodes < 0:
+        return "unreadable", {}
+    if any(not isinstance(graph.get(key), list) for key in ("added", "removed", "changed")):
+        return "unreadable", {}
     detail = {
-        "nodes": graph.get("nodes"),
-        "added": len(graph.get("added") or []),
-        "removed": len(graph.get("removed") or []),
-        "changed": len(graph.get("changed") or []),
+        "nodes": nodes,
+        "added": len(graph["added"]),
+        "removed": len(graph["removed"]),
+        "changed": len(graph["changed"]),
     }
     structural_drift = detail["added"] or detail["removed"] or detail["changed"]
     if structural_drift:
@@ -1024,6 +1075,10 @@ def do_status(target: str | None) -> dict:
         )
         result["configured"] = False
         return result
+    refusal = _foreign_cache_refusal(paths, root)
+    if refusal is not None:
+        refusal["configured"] = False
+        return refusal
     if not is_installed(paths):
         result = _fallback(
             "not_configured",
@@ -1154,6 +1209,9 @@ def do_query(target: str | None, mode: str, arg: str, limit_chars: int) -> dict:
             "Graft indisponível; use rg/leitura direta para esta consulta.",
             root,
         )
+    refusal = _foreign_cache_refusal(paths, root)
+    if refusal is not None:
+        return refusal
     if not is_installed(paths) or not paths["wiring"].is_file():
         return _fallback(
             "not_configured",

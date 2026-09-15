@@ -15,13 +15,16 @@ from scripts import tl_supervisor
 from scripts import tl_run_story
 from scripts.tl_merge_guard import (
     AuthorityReceipt,
+    TrustRoot,
     compute_receipt_token,
     sign_authorization_envelope,
+    temporary_platform_anchor_for_testing,
 )
 from scripts.fixtures.runtime.fake_gh import (
     TEST_FIXTURE_APP_ID,
     TEST_FIXTURE_APP_SLUG,
     TEST_FIXTURE_KEY_ID,
+    TEST_FIXTURE_PUBLIC_KEY,
     TEST_FIXTURE_SECRET_KEY,
 )
 
@@ -94,8 +97,11 @@ class SupervisorCase(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        self._anchor_ctx = temporary_platform_anchor_for_testing({TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()})
+        self._anchor_ctx.__enter__()
 
     def tearDown(self):
+        self._anchor_ctx.__exit__(None, None, None)
         self.temporary.cleanup()
 
 
@@ -425,10 +431,14 @@ class MergeQueueTest(SupervisorCase):
 
     @mock.patch("scripts.tl_run_story.subprocess.run")
     def test_story_runner_invokes_gh_for_fifo_head_only(self, run):
+        merged_prs = set()
         def fake_run(args, *a, **kw):
             if len(args) >= 3 and args[1:3] == ["pr", "view"]:
-                return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "a" * 40, "baseRefOid": "b" * 40}), "")
+                pr_num = int(args[3])
+                state = "MERGED" if pr_num in merged_prs else "OPEN"
+                return subprocess.CompletedProcess(args, 0, json.dumps({"state": state, "headRefOid": "a" * 40, "baseRefOid": "b" * 40}), "")
             if len(args) >= 3 and args[1:3] == ["pr", "merge"]:
+                merged_prs.add(int(args[3]))
                 return subprocess.CompletedProcess(args, 0, "merged", "")
             return completed()
 
@@ -447,7 +457,8 @@ class MergeQueueTest(SupervisorCase):
             self.assertNotIn("12", cmd)
         merge_calls = [call_args[0][0] for call_args in run.call_args_list if call_args[0][0][1:3] == ["pr", "merge"]]
         self.assertEqual(len(merge_calls), 1)
-        self.assertEqual(merge_calls[0][:5], ["gh", "pr", "merge", "11", "--auto"])
+        self.assertEqual(merge_calls[0][:5], ["gh", "pr", "merge", "11", "--squash"])
+        self.assertNotIn("--auto", merge_calls[0])
         self.assertIn("--match-head-commit", merge_calls[0])
         self.assertEqual(merge_calls[0][merge_calls[0].index("--match-head-commit") + 1], "a" * 40)
 
@@ -693,6 +704,218 @@ class MergeQueueTest(SupervisorCase):
         self.assertEqual(result["state"], "failed")
         run.assert_not_called()
         self.assertIn("missing_authority_receipt", result["item"]["detail"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_fixture_seed_signed_receipt_against_production_anchor(self, run):
+        """When evaluated against production platform anchor, receipt signed with fixture seed must fail closed."""
+        # Temporarily exit test fixture anchor context to enforce true production anchor
+        self._anchor_ctx.__exit__(None, None, None)
+        try:
+            queue = self.root / "merge-queue.json"
+            tl_supervisor.enqueue_merge("T001", 11, queue)
+            # mock_receipt signs with TEST_FIXTURE_SECRET_KEY / key-test-fixture-v1
+            fixture_receipt = mock_receipt(True, story_id="T001", pr_number=11)
+            result = tl_run_story.merge_queue_head(queue, authority_receipt=fixture_receipt)
+            self.assertEqual(result["state"], "failed")
+            self.assertIn("fabricated_authority_receipt_rejected", result["item"]["detail"])
+            for call_args in run.call_args_list:
+                cmd = call_args[0][0]
+                self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+        finally:
+            self._anchor_ctx = temporary_platform_anchor_for_testing({TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()})
+            self._anchor_ctx.__enter__()
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_arbitrary_caller_supplied_trust_root(self, run):
+        """Merge queue must reject receipts accompanied by arbitrary caller-supplied trust root."""
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        rogue_root = TrustRoot(
+            trusted_app_id=TEST_FIXTURE_APP_ID,
+            trusted_app_slug=TEST_FIXTURE_APP_SLUG,
+            trusted_public_keys={"key-rogue-attacker": "01" * 32},
+            trust_source="dedicated_github_app",
+        )
+        result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt, trust_root=rogue_root)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("fabricated_authority_receipt_rejected", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_when_store_unavailable_without_merging(self, run):
+        """When external authority store cannot be initialized, merge must fail closed without calling gh pr merge."""
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        with mock.patch("scripts.tl_run_story.DurableExternalAuthorityStore", side_effect=RuntimeError("filesystem lock failure")):
+            result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("external_authority_store_initialization_failed", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_when_store_read_fails_without_merging(self, run):
+        """When reading authority state from store raises an exception, merge must fail closed without calling gh pr merge."""
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        mock_store = mock.Mock()
+        mock_store.get_state.side_effect = IOError("CAS file corrupted")
+        result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt, authority_store=mock_store)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("external_authority_store_read_failed", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_when_store_reserve_fails_without_merging(self, run):
+        """When CAS reservation returns False (concurrent conflict), merge must fail closed without calling gh pr merge."""
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        mock_store = mock.Mock()
+        mock_store.get_state.return_value = "unused"
+        mock_store.reserve.return_value = False
+        result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt, authority_store=mock_store)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("authorization_reservation_failed_concurrent_or_consumed", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_when_store_already_consumed_without_merging(self, run):
+        """When authority token was already consumed, merge must fail closed without calling gh pr merge."""
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        mock_store = mock.Mock()
+        mock_store.get_state.return_value = "consumed"
+        result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt, authority_store=mock_store)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("authorization_already_consumed", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_auto_enqueued_open_pr_without_marking_merged(self, run):
+        """When gh pr merge returns 0 but terminal view returns state OPEN (merge queue), fail closed and mark indeterminate."""
+        def fake_run(args, *a, **kw):
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                # Returns OPEN both pre-merge and post-merge (simulating auto-merge enqueued)
+                return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "a" * 40, "baseRefOid": "b" * 40}), "")
+            if len(args) >= 3 and args[1:3] == ["pr", "merge"]:
+                return subprocess.CompletedProcess(args, 0, "enqueued", "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        mock_store = mock.Mock()
+        mock_store.get_state.return_value = "unused"
+        mock_store.reserve.return_value = True
+
+        result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt, authority_store=mock_store)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("terminal_state_not_merged", result["item"]["detail"])
+        mock_store.mark_indeterminate.assert_called_with(receipt.authorization_id)
+        mock_store.commit_consumed.assert_not_called()
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_terminal_view_failure_and_marks_indeterminate(self, run):
+        """When terminal gh pr view check fails, merge must fail closed and mark authority indeterminate."""
+        view_count = 0
+        def fake_run(args, *a, **kw):
+            nonlocal view_count
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                view_count += 1
+                if view_count == 1:
+                    return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "a" * 40, "baseRefOid": "b" * 40}), "")
+                else:
+                    return subprocess.CompletedProcess(args, 1, "", "network disconnected after merge")
+            if len(args) >= 3 and args[1:3] == ["pr", "merge"]:
+                return subprocess.CompletedProcess(args, 0, "merged", "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        mock_store = mock.Mock()
+        mock_store.get_state.return_value = "unused"
+        mock_store.reserve.return_value = True
+
+        result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt, authority_store=mock_store)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("terminal_view_failed", result["item"]["detail"])
+        mock_store.mark_indeterminate.assert_called_with(receipt.authorization_id)
+        mock_store.commit_consumed.assert_not_called()
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_terminal_head_drift_and_marks_indeterminate(self, run):
+        """When terminal gh pr view reveals merged head drift, fail closed and mark indeterminate."""
+        view_count = 0
+        def fake_run(args, *a, **kw):
+            nonlocal view_count
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                view_count += 1
+                if view_count == 1:
+                    return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "a" * 40, "baseRefOid": "b" * 40}), "")
+                else:
+                    return subprocess.CompletedProcess(args, 0, json.dumps({"state": "MERGED", "headRefOid": "z" * 40, "baseRefOid": "b" * 40}), "")
+            if len(args) >= 3 and args[1:3] == ["pr", "merge"]:
+                return subprocess.CompletedProcess(args, 0, "merged", "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        mock_store = mock.Mock()
+        mock_store.get_state.return_value = "unused"
+        mock_store.reserve.return_value = True
+
+        result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt, authority_store=mock_store)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("terminal_head_drift", result["item"]["detail"])
+        mock_store.mark_indeterminate.assert_called_with(receipt.authorization_id)
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_terminal_base_drift_and_marks_indeterminate(self, run):
+        """When terminal gh pr view reveals merged base drift, fail closed and mark indeterminate."""
+        view_count = 0
+        def fake_run(args, *a, **kw):
+            nonlocal view_count
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                view_count += 1
+                if view_count == 1:
+                    return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "a" * 40, "baseRefOid": "b" * 40}), "")
+                else:
+                    return subprocess.CompletedProcess(args, 0, json.dumps({"state": "MERGED", "headRefOid": "a" * 40, "baseRefOid": "z" * 40}), "")
+            if len(args) >= 3 and args[1:3] == ["pr", "merge"]:
+                return subprocess.CompletedProcess(args, 0, "merged", "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        mock_store = mock.Mock()
+        mock_store.get_state.return_value = "unused"
+        mock_store.reserve.return_value = True
+
+        result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt, authority_store=mock_store)
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("terminal_base_drift", result["item"]["detail"])
+        mock_store.mark_indeterminate.assert_called_with(receipt.authorization_id)
 
     def test_corrupt_queue_never_dispatches_merge(self):
         queue = self.root / "merge-queue.json"

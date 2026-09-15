@@ -30,11 +30,11 @@ TEST_FIXTURE_APP_SLUG = "thinglab-merge-authority"
 
 try:
     from scripts.tl_merge_guard import ed25519_sign
-    TEST_FIXTURE_PUBLIC_KEY, _ = ed25519_sign(TEST_FIXTURE_SECRET_KEY, b"")
+    TEST_FIXTURE_PUBLIC_KEY, fixture_sig = ed25519_sign(TEST_FIXTURE_SECRET_KEY, b"")
 except Exception:
     try:
         from tl_merge_guard import ed25519_sign  # type: ignore[no-redef]
-        TEST_FIXTURE_PUBLIC_KEY, _ = ed25519_sign(TEST_FIXTURE_SECRET_KEY, b"")
+        TEST_FIXTURE_PUBLIC_KEY, fixture_sig = ed25519_sign(TEST_FIXTURE_SECRET_KEY, b"")
     except Exception:
         TEST_FIXTURE_PUBLIC_KEY = b"\x00" * 32
 

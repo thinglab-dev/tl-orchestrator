@@ -38,15 +38,30 @@ except ImportError:  # executed from the repository root
     from scripts import tl_ci_slice, tl_job  # type: ignore[no-redef]
 
 try:
-    from tl_merge_guard import AuthorityReceipt, LocalLedgerAuthorityStore, MergeAuthorityGate, TrustRoot, validate_post_review_delta
+    from tl_merge_guard import (
+        AuthorityReceipt,
+        LocalLedgerAuthorityStore,
+        MergeAuthorityGate,
+        TrustRoot,
+        temporary_platform_anchor_for_testing,
+        validate_post_review_delta,
+    )
 except ImportError:
     try:
-        from scripts.tl_merge_guard import AuthorityReceipt, LocalLedgerAuthorityStore, MergeAuthorityGate, TrustRoot, validate_post_review_delta
+        from scripts.tl_merge_guard import (
+            AuthorityReceipt,
+            LocalLedgerAuthorityStore,
+            MergeAuthorityGate,
+            TrustRoot,
+            temporary_platform_anchor_for_testing,
+            validate_post_review_delta,
+        )
     except ImportError:
         AuthorityReceipt = None
         LocalLedgerAuthorityStore = None
         MergeAuthorityGate = None
         TrustRoot = None
+        temporary_platform_anchor_for_testing = None
         def validate_post_review_delta(*_a, **_kw):
             return False, "merge_guard_unavailable"
 
@@ -2013,12 +2028,25 @@ class Runtime:
                     trust_root = getattr(self, "trust_root", None)
                     gh_cmd = list(self.config.get("gh_argv", ["gh"]))
                     if trust_root is None and TrustRoot is not None:
-                        if "TL_FAKE_GH_STATE" in os.environ:
+                        if "TL_FAKE_GH_STATE" in os.environ and self.batch.get("authorization", {}).get("authority_source") == "test":
                             try:
                                 try:
-                                    from scripts.fixtures.runtime.fake_gh import TEST_FIXTURE_APP_SLUG
+                                    from scripts.fixtures.runtime.fake_gh import (
+                                        TEST_FIXTURE_APP_SLUG,
+                                        TEST_FIXTURE_KEY_ID,
+                                        TEST_FIXTURE_PUBLIC_KEY,
+                                    )
                                 except ImportError:
-                                    from fixtures.runtime.fake_gh import TEST_FIXTURE_APP_SLUG  # type: ignore[no-redef]
+                                    from fixtures.runtime.fake_gh import (  # type: ignore[no-redef]
+                                        TEST_FIXTURE_APP_SLUG,
+                                        TEST_FIXTURE_KEY_ID,
+                                        TEST_FIXTURE_PUBLIC_KEY,
+                                    )
+                                if temporary_platform_anchor_for_testing is not None:
+                                    self._test_anchor = temporary_platform_anchor_for_testing({
+                                        TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()
+                                    })
+                                    self._test_anchor.__enter__()
                                 trust_root = TrustRoot.from_platform(
                                     app_slug=TEST_FIXTURE_APP_SLUG,
                                     gh_executable=gh_cmd,

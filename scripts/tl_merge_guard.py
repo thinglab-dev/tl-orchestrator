@@ -11,6 +11,7 @@ Guarantees that:
 from __future__ import annotations
 
 import argparse
+import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import fnmatch
@@ -223,10 +224,32 @@ def canonicalize_payload(payload: Any) -> bytes:
 
 IMMUTABLE_PLATFORM_AUTHORITY_APP_ID: int = 998811
 IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG: str = "thinglab-merge-authority"
+# Production immutable platform authority anchors (private key is NEVER stored in repository)
 IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS: dict[str, str] = {
-    "key-tl-app-v1": "4258fd7bf8d9437aad6b8980ad72a7f1460d6fb0bf80517605fd40889d2947a3",
-    "key-test-fixture-v1": "4258fd7bf8d9437aad6b8980ad72a7f1460d6fb0bf80517605fd40889d2947a3",
+    "key-tl-app-v1": "9d901616c6ba67e9fcf156fece357ceea9e3f6ad85731338a0815beedee723a1",
 }
+
+_active_platform_root_keys: dict[str, str] = dict(IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS)
+
+
+def get_platform_root_public_keys() -> dict[str, str]:
+    """Return active platform root public keys (strictly IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS in production)."""
+    return dict(_active_platform_root_keys)
+
+
+@contextlib.contextmanager
+def temporary_platform_anchor_for_testing(test_public_keys: dict[str, str]):
+    """
+    Test-only context manager to register temporary in-memory fixture keys.
+    Completely isolated from production immutable anchors.
+    """
+    global _active_platform_root_keys
+    old = _active_platform_root_keys
+    _active_platform_root_keys = dict(test_public_keys)
+    try:
+        yield
+    finally:
+        _active_platform_root_keys = old
 
 
 def compute_receipt_token(
@@ -267,9 +290,10 @@ class PlatformCapability:
         if not public_keys:
             return False
 
-        # 2. Reject any public keys not anchored in the immutable platform root keys
+        # 2. Reject any public keys not anchored in the platform root keys
+        platform_roots = get_platform_root_public_keys()
         for kid, khex in public_keys.items():
-            expected_hex = IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS.get(kid)
+            expected_hex = platform_roots.get(kid)
             if not expected_hex or expected_hex != khex:
                 return False
 
@@ -301,8 +325,8 @@ class PlatformCapability:
         except Exception:
             return False
 
-        # 5. Strictly verify signature against immutable platform root public keys ONLY
-        for anchor_hex in IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS.values():
+        # 5. Strictly verify signature against anchored platform root public keys ONLY
+        for anchor_hex in platform_roots.values():
             try:
                 pub_bytes = bytes.fromhex(anchor_hex)
                 if ed25519_verify(pub_bytes, domain_msg, sig_bytes):
@@ -413,7 +437,8 @@ class TrustRoot:
             self._verified_via_platform = False
             return False, f"untrusted_app_id: expected {IMMUTABLE_PLATFORM_AUTHORITY_APP_ID}, got {self.trusted_app_id}"
 
-        cmd = [gh_executable] if isinstance(gh_executable, str) else list(gh_executable)
+        gh_cmd = gh_executable if gh_executable is not None else "gh"
+        cmd = [gh_cmd] if isinstance(gh_cmd, str) else list(gh_cmd)
         try:
             proc = subprocess.run(
                 [*cmd, "api", f"apps/{self.trusted_app_slug}"],
@@ -450,9 +475,10 @@ class TrustRoot:
             self._verified_via_platform = False
             return False, "forged_or_unanchored_platform_response: missing or empty public_keys"
 
-        # Verify every returned key against the immutable platform trust anchor
+        # Verify every returned key against the platform trust anchor
+        platform_roots = get_platform_root_public_keys()
         for kid, khex in platform_keys.items():
-            expected = IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS.get(kid)
+            expected = platform_roots.get(kid)
             if not expected or expected != khex:
                 self._verified_via_platform = False
                 return False, f"forged_or_unanchored_platform_response: key {kid} not recognized by immutable platform trust anchor"
@@ -489,7 +515,8 @@ class TrustRoot:
         if app_slug != IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG:
             raise ValueError(f"Untrusted app slug: {app_slug} != {IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG}")
 
-        cmd = [gh_executable] if isinstance(gh_executable, str) else list(gh_executable)
+        gh_cmd = gh_executable if gh_executable is not None else "gh"
+        cmd = [gh_cmd] if isinstance(gh_cmd, str) else list(gh_cmd)
         try:
             proc = subprocess.run(
                 [*cmd, "api", f"apps/{app_slug}"],
@@ -516,8 +543,9 @@ class TrustRoot:
         if not pubkeys:
             raise ValueError("Forged or untrusted platform response: empty public_keys")
 
+        platform_roots = get_platform_root_public_keys()
         for kid, khex in pubkeys.items():
-            expected = IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS.get(kid)
+            expected = platform_roots.get(kid)
             if not expected or expected != khex:
                 raise ValueError(f"Forged or untrusted platform response: public key {kid} does not match immutable platform trust anchor")
 
@@ -872,7 +900,9 @@ class AuthorityReceipt:
         Verify that this receipt is authentic, was issued by MergeAuthorityGate,
         contains a valid cryptographic envelope signed by an authorized platform trust root,
         and carries a matching receipt_token.
-        Rejects auto-fabricated or caller-injected receipts without valid cryptographic backing.
+        Validates envelope schema, claims, timestamps, and verifies the signature strictly
+        against the anchored platform root public keys.
+        Never trusts caller-controlled keys or unverified TrustRoot.
         """
         if not self.is_confirmed:
             return False
@@ -887,6 +917,14 @@ class AuthorityReceipt:
             return False
         if not isinstance(self.envelope, dict) or not self.envelope:
             return False
+
+        # 1. Mandatory JSON Schema validation (fails closed)
+        schema_path = _resolve_schema_path()
+        is_schema_valid, schema_err = validate_against_schema(self.envelope, str(schema_path))
+        if not is_schema_valid:
+            return False
+
+        # 2. Scope bindings
         if self.envelope.get("authorization_id") != self.authorization_id:
             return False
         if int(self.envelope.get("target_pr", 0)) != int(self.target_pr):
@@ -900,11 +938,38 @@ class AuthorityReceipt:
         if self.envelope.get("expected_base_sha") != self.base_sha:
             return False
 
+        # 3. Acyclic authorization_id derivation verification
+        claim = {k: v for k, v in self.envelope.items() if k not in ("authorization_id", "provenance")}
+        derived_auth_id = derive_authorization_id(claim)
+        if self.authorization_id != derived_auth_id:
+            return False
+
+        # 4. Provenance & Identity verification
         provenance = self.envelope.get("provenance", {})
         if not isinstance(provenance, dict) or not provenance.get("signature"):
             return False
-        env_sig = str(provenance.get("signature", ""))
+        if provenance.get("mechanism") != "dedicated_github_app":
+            return False
+        if provenance.get("integration_id") != IMMUTABLE_PLATFORM_AUTHORITY_APP_ID:
+            return False
+        if provenance.get("issuer") != f"{IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG}[bot]":
+            return False
 
+        # 5. Timestamps check & expiration check
+        try:
+            issued_str = str(self.envelope.get("issued_at", ""))
+            expires_str = str(self.envelope.get("expires_at", ""))
+            issued_dt = validate_canonical_utc_timestamp(issued_str, "issued_at")
+            expires_dt = validate_canonical_utc_timestamp(expires_str, "expires_at")
+            if issued_dt > expires_dt:
+                return False
+            if datetime.now(timezone.utc) > expires_dt:
+                return False
+        except Exception:
+            return False
+
+        # 6. Receipt token verification
+        env_sig = str(provenance.get("signature", ""))
         expected_token = compute_receipt_token(
             authorization_id=self.authorization_id,
             target_pr=int(self.target_pr),
@@ -917,16 +982,30 @@ class AuthorityReceipt:
         if self.receipt_token != expected_token:
             return False
 
-        # Verify signature on the envelope against immutable platform root
+        # 7. Trust root validation (NEVER trust caller-controlled keys)
+        platform_keys = get_platform_root_public_keys()
+        if trust_root is not None:
+            if not isinstance(trust_root, TrustRoot):
+                return False
+            if not getattr(trust_root, "is_out_of_process", False):
+                return False
+            if trust_root.trusted_app_id != IMMUTABLE_PLATFORM_AUTHORITY_APP_ID:
+                return False
+            if trust_root.trusted_app_slug != IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG:
+                return False
+            # Reject any trust_root with keys not matching platform anchor
+            for kid, khex in trust_root.trusted_public_keys.items():
+                if platform_keys.get(kid) != khex:
+                    return False
+
+        # 8. Signature verification against anchored platform root public key
         key_id = str(provenance.get("key_id", ""))
-        root_keys = trust_root.trusted_public_keys if (trust_root is not None and trust_root.trusted_public_keys) else IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS
-        pub_hex = root_keys.get(key_id) or IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS.get(key_id)
+        pub_hex = platform_keys.get(key_id)
         if not pub_hex:
             return False
         try:
             pub_bytes = bytes.fromhex(pub_hex)
             sig_bytes = bytes.fromhex(env_sig)
-            claim = {k: v for k, v in self.envelope.items() if k not in ("authorization_id", "provenance")}
             canonical_claim = canonicalize_payload(claim)
             signing_payload = AUTHORIZATION_SIGNING_DOMAIN + canonical_claim
             if not ed25519_verify(pub_bytes, signing_payload, sig_bytes):

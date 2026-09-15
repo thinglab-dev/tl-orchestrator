@@ -48,6 +48,7 @@ from scripts.tl_merge_guard import (
     issue_platform_capability,
     parse_pr_comment_transport,
     sign_authorization_envelope,
+    temporary_platform_anchor_for_testing,
     validate_post_review_delta,
 )
 from scripts.fixtures.runtime.fake_gh import (
@@ -123,6 +124,10 @@ class MergeGuardBaseCase(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
+        self._anchor_ctx = temporary_platform_anchor_for_testing({
+            TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()
+        })
+        self._anchor_ctx.__enter__()
         self._orig_env = {
             "TL_MERGE_AUTHORITY_APP_ID": os.environ.get("TL_MERGE_AUTHORITY_APP_ID"),
             "TL_MERGE_AUTHORITY_APP_SLUG": os.environ.get("TL_MERGE_AUTHORITY_APP_SLUG"),
@@ -157,12 +162,16 @@ class MergeGuardBaseCase(unittest.TestCase):
         self.base_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(self.root), capture_output=True, text=True, check=True).stdout.strip()
 
     def tearDown(self):
-        for k, v in self._orig_env.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-        self.temp_dir.cleanup()
+        try:
+            if hasattr(self, "_anchor_ctx"):
+                self._anchor_ctx.__exit__(None, None, None)
+        finally:
+            for k, v in self._orig_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            self.temp_dir.cleanup()
 
 
 class TestMergeGuardProbes(MergeGuardBaseCase):
@@ -1225,7 +1234,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
         and MergeAuthorityGate fails closed with FAIL_CLOSED: unauthenticated_trust_root.
         """
         attacker_seed = hashlib.sha256(b"attacker-rogue-capability-seed").digest()
-        attacker_pub, _ = ed25519_sign(attacker_seed, b"")
+        attacker_pub, attacker_dummy_sig = ed25519_sign(attacker_seed, b"")
         attacker_keys = {"key-attacker-rogue": attacker_pub.hex()}
 
         # Attacker attempts to issue a capability signed by attacker's secret key
@@ -1291,7 +1300,7 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
         TrustRoot.from_platform raises ValueError, and MergeAuthorityGate fails closed.
         """
         attacker_seed = hashlib.sha256(b"attacker-forged-gh-seed").digest()
-        attacker_pub, _ = ed25519_sign(attacker_seed, b"")
+        attacker_pub, attacker_dummy_sig = ed25519_sign(attacker_seed, b"")
 
         # Fake CLI returning rogue keys not anchored in immutable platform trust anchor
         forged_script = self.root / "forged_gh.py"
@@ -1356,6 +1365,74 @@ sys.exit(0)
         self.assertEqual(receipt.status, "REJECTED")
         self.assertIn("FAIL_CLOSED: unauthenticated_trust_root", receipt.reason)
 
+    def test_probe_23h_fixture_seed_rejected_by_production_anchor_fails_closed(self):
+        """
+        Probe 23h: Fixture keys (deterministic test seed) must be strictly rejected by
+        the immutable production platform trust anchor.
+        """
+        # Exit the test anchor context to restore production immutable anchor
+        self._anchor_ctx.__exit__(None, None, None)
+        try:
+            fixture_script = self.root / "fixture_gh.py"
+            fixture_script.write_text(
+                f"""#!/usr/bin/env python3
+import json, sys
+data = {{
+    "id": {TEST_FIXTURE_APP_ID},
+    "slug": "{TEST_FIXTURE_APP_SLUG}",
+    "public_keys": {{"{TEST_FIXTURE_KEY_ID}": "{TEST_FIXTURE_PUBLIC_KEY.hex()}"}}
+}}
+print(json.dumps(data))
+sys.exit(0)
+""",
+                encoding="utf-8",
+            )
+            fixture_script.chmod(0o755)
+            fixture_cli = ["python3", str(fixture_script)]
+
+            # 1. authenticate_against_platform must reject fixture key under production anchor
+            root = TrustRoot(
+                trusted_app_id=TEST_FIXTURE_APP_ID,
+                trusted_app_slug=TEST_FIXTURE_APP_SLUG,
+                trusted_public_keys={TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
+                trust_source="dedicated_github_app",
+            )
+            is_auth, reason = root.authenticate_against_platform(gh_executable=fixture_cli)
+            self.assertFalse(is_auth)
+            self.assertIn("not recognized by immutable platform trust anchor", reason)
+
+            # 2. Gate evaluation under production anchor must fail closed
+            claim = make_valid_claim(
+                head_sha=self.base_sha,
+                base_sha=self.base_sha,
+                checker_commit=self.base_sha,
+                candidate_commit=self.base_sha,
+            )
+            env = make_envelope(claim, secret_key=TEST_FIXTURE_SECRET_KEY, key_id=TEST_FIXTURE_KEY_ID)
+            comment = format_comment(env)
+            receipt = MergeAuthorityGate.evaluate(
+                repo_root=self.root,
+                pr_number=claim["target_pr"],
+                live_pr_info={"state": "OPEN", "headRefOid": self.base_sha, "baseRefOid": self.base_sha},
+                checker_commit=self.base_sha,
+                candidate_commit=self.base_sha,
+                authority_store=InMemoryAuthorityStore(),
+                expected_repo=claim["target_repository"],
+                comments=[comment],
+                enforce_mode="delegated_single_merge",
+                trust_root=root,
+                gh_executable=fixture_cli,
+            )
+            self.assertFalse(receipt.is_confirmed)
+            self.assertEqual(receipt.status, "REJECTED")
+            self.assertIn("FAIL_CLOSED: unauthenticated_trust_root", receipt.reason)
+        finally:
+            self._anchor_ctx = temporary_platform_anchor_for_testing({
+                TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()
+            })
+            self._anchor_ctx.__enter__()
+
 
 if __name__ == "__main__":
     unittest.main()
+

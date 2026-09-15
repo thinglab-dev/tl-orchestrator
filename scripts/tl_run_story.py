@@ -229,48 +229,75 @@ def merge_queue_head(
                 subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
             )
 
-        # 5. External CAS Anti-Replay Reservation on Queue Path
+        # 5. External CAS Anti-Replay Reservation on Queue Path (MANDATORY PRECONDITION)
         store = authority_store
-        if store is None and DurableExternalAuthorityStore is not None:
+        if store is None:
+            if DurableExternalAuthorityStore is None:
+                reason = "external_authority_store_unavailable: DurableExternalAuthorityStore primitive missing"
+                return (
+                    AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+                )
             try:
                 store = DurableExternalAuthorityStore()
-            except Exception:
-                store = None
+            except Exception as exc:
+                reason = f"external_authority_store_initialization_failed: {exc}"
+                return (
+                    AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+                )
 
-        if store is not None:
+        try:
             curr_state = store.get_state(receipt.authorization_id)
-            if curr_state in {"consumed", "indeterminate"}:
-                reason = f"authorization_already_consumed: authority {receipt.authorization_id} has state '{curr_state}'"
-                rejected_receipt = AuthorityReceipt(
-                    status="REJECTED",
-                    authorization_id=receipt.authorization_id,
-                    target_pr=pr_number,
-                    head_sha=receipt.head_sha,
-                    base_sha=receipt.base_sha,
-                    checker_commit=receipt.checker_commit,
-                    candidate_commit=receipt.candidate_commit,
-                    reason=reason,
-                )
-                return (
-                    rejected_receipt,
-                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
-                )
-            if not store.reserve(receipt.authorization_id):
-                reason = f"authorization_reservation_failed_concurrent_or_consumed: could not reserve {receipt.authorization_id}"
-                rejected_receipt = AuthorityReceipt(
-                    status="REJECTED",
-                    authorization_id=receipt.authorization_id,
-                    target_pr=pr_number,
-                    head_sha=receipt.head_sha,
-                    base_sha=receipt.base_sha,
-                    checker_commit=receipt.checker_commit,
-                    candidate_commit=receipt.candidate_commit,
-                    reason=reason,
-                )
-                return (
-                    rejected_receipt,
-                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
-                )
+        except Exception as exc:
+            reason = f"external_authority_store_read_failed: {exc}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        if curr_state in {"consumed", "indeterminate"}:
+            reason = f"authorization_already_consumed: authority {receipt.authorization_id} has state '{curr_state}'"
+            rejected_receipt = AuthorityReceipt(
+                status="REJECTED",
+                authorization_id=receipt.authorization_id,
+                target_pr=pr_number,
+                head_sha=receipt.head_sha,
+                base_sha=receipt.base_sha,
+                checker_commit=receipt.checker_commit,
+                candidate_commit=receipt.candidate_commit,
+                reason=reason,
+            )
+            return (
+                rejected_receipt,
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        try:
+            reserve_ok = store.reserve(receipt.authorization_id)
+        except Exception as exc:
+            reason = f"external_authority_store_reserve_failed: {exc}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        if not reserve_ok:
+            reason = f"authorization_reservation_failed_concurrent_or_consumed: could not reserve {receipt.authorization_id}"
+            rejected_receipt = AuthorityReceipt(
+                status="REJECTED",
+                authorization_id=receipt.authorization_id,
+                target_pr=pr_number,
+                head_sha=receipt.head_sha,
+                base_sha=receipt.base_sha,
+                checker_commit=receipt.checker_commit,
+                candidate_commit=receipt.candidate_commit,
+                reason=reason,
+            )
+            return (
+                rejected_receipt,
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
 
         # 6. Mandatory Fresh Pre-Merge TOCTOU Revalidation (Fails closed on any error)
         cmd_view = [
@@ -345,13 +372,12 @@ def merge_queue_head(
                 subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
             )
 
-        # 7. Atomic CAS Reservation on Platform with --match-head-commit
+        # 7. Atomic Platform Merge Execution with --match-head-commit (NO --auto)
         cmd_merge = [
             gh_executable,
             "pr",
             "merge",
             str(item["pr_number"]),
-            "--auto",
             "--squash",
             "--delete-branch",
             "--match-head-commit",
@@ -363,8 +389,104 @@ def merge_queue_head(
             text=True,
             check=False,
         )
-        if proc.returncode == 0 and store is not None:
-            store.commit_consumed(receipt.authorization_id)
+
+        if proc.returncode != 0:
+            try:
+                store.mark_indeterminate(receipt.authorization_id)
+            except Exception:
+                pass
+            return (receipt, proc)
+
+        # 8. Terminal PR Verification (Must be confirmed MERGED before consuming authority)
+        cmd_terminal = [
+            gh_executable,
+            "pr",
+            "view",
+            str(pr_number),
+            "--json",
+            "state,headRefOid,baseRefOid",
+        ]
+        try:
+            proc_term = subprocess.run(
+                cmd_terminal,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if proc_term.returncode != 0:
+                raise ValueError(f"gh pr view terminal check failed with exit code {proc_term.returncode}: {proc_term.stderr.strip()}")
+            term_pr = json.loads(proc_term.stdout)
+            if not isinstance(term_pr, dict):
+                raise ValueError("terminal gh pr view returned non-dict JSON")
+        except Exception as exc:
+            try:
+                store.mark_indeterminate(receipt.authorization_id)
+            except Exception:
+                pass
+            reason = f"terminal_view_failed: {exc}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        term_state = str(term_pr.get("state", "")).upper()
+        if term_state != "MERGED":
+            try:
+                store.mark_indeterminate(receipt.authorization_id)
+            except Exception:
+                pass
+            reason = f"terminal_state_not_merged: PR #{pr_number} state is '{term_state}' (delayed merge, auto-merge queue, or still open); authority marked indeterminate"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        term_head = str(term_pr.get("headRefOid") or "").strip()
+        term_base = str(term_pr.get("baseRefOid") or "").strip()
+
+        if term_head and term_head != receipt.candidate_commit:
+            try:
+                store.mark_indeterminate(receipt.authorization_id)
+            except Exception:
+                pass
+            reason = f"terminal_head_drift: merged head {term_head} != authorized candidate {receipt.candidate_commit}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        if term_base and term_base != receipt.base_sha:
+            try:
+                store.mark_indeterminate(receipt.authorization_id)
+            except Exception:
+                pass
+            reason = f"terminal_base_drift: merged base {term_base} != authorized base {receipt.base_sha}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        # 9. Terminal state confirmed MERGED: commit consumed in CAS store
+        try:
+            committed = store.commit_consumed(receipt.authorization_id)
+            if not committed:
+                store.mark_indeterminate(receipt.authorization_id)
+                reason = "cas_commit_consumed_failed_after_merge: state was not reserved"
+                return (
+                    AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+                )
+        except Exception as exc:
+            try:
+                store.mark_indeterminate(receipt.authorization_id)
+            except Exception:
+                pass
+            reason = f"cas_commit_consumed_exception_after_merge: {exc}"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
         return (receipt, proc)
 
     return advance_merge_queue(queue_file, run, retry_failed=retry_failed)

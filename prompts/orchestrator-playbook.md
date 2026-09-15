@@ -83,6 +83,15 @@ Na retomada de sessões e passagens de bastão, utilize o gerador do manifesto d
 (`scripts/resume_generate.py`) para inspecionar integridade de fontes congeladas e compor o contexto
 resolvido da fase conforme `docs/CONTEXT_POLICY.md`.
 
+Para exploração ambígua de dependências/assinaturas num consumidor onde o usuário já ativou o
+acelerador local (ver [`docs/GRAFT.md`](../docs/GRAFT.md)), Planner e Maker podem consultar o
+helper antes de reabrir vários arquivos — localizando-o onde o pacote foi instalado (tipicamente
+`_tl-orc/package/scripts/tl_graft.py`) e passando o projeto em `--target`, com aspas em caminhos
+com espaços: `python "<pacote>/scripts/tl_graft.py" --target "<projeto>" --json query --mode ask
+--arg "..."`. Quando o caminho exato já é conhecido, leem direto. Consulta vazia, com erro, timeout ou grafo desatualizado não significa
+ausência de código: use `rg`/leitura direta como sempre. O mapa é dado derivado, nunca autoridade
+de requisito ou revisão, e ativá-lo não é pré-requisito de nenhum papel.
+
 ## Searcher sob demanda
 
 Quando faltar contexto factual para uma decisão, o Orquestrador pode consultar o Searcher antes ou

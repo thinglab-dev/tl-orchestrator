@@ -1,4 +1,4 @@
-"""Contract checks for the v0.13.0 operational guardrails."""
+"""Contract checks for the v0.13.0 operational guardrails (kept current through v0.14.0)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class ReleaseGuardrailsTest(unittest.TestCase):
     def test_package_version_is_consistent(self) -> None:
         manifest = json.loads(self.read("distribution-manifest.json"))
         marker = f"Versão atual do pacote: **{manifest['package_version']}**."
-        self.assertEqual(manifest["package_version"], "0.13.0")
+        self.assertEqual(manifest["package_version"], "0.14.0")
         self.assertIn(marker, self.read("README.md"))
         self.assertIn(marker, self.read("SKILL.md"))
 

@@ -4,6 +4,61 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-14
+
+### Adicionado
+
+- Acelerador de contexto opcional Graft (`scripts/tl_graft.py`, [`docs/GRAFT.md`](docs/GRAFT.md)):
+  ativa sob pedido em linguagem natural, instala uma versão pinada e verificada
+  (`@nanonets/graft@0.18.0`) num cache isolado por worktree, e gera um mapa estrutural do
+  código sem IA e sem chave. Nunca executa `graft init`, nunca toca `AGENTS.md`, `CLAUDE.md`,
+  `GEMINI.md`, `.claude/` ou configuração global de agente, e desativa a telemetria upstream
+  (`DO_NOT_TRACK=1`) em todo subprocesso que inicia.
+- `setup`/`status`/`query`/`disable` cobrem instalação/atualização de mapa, checagem de
+  atualidade, consulta (`ask`/`grep`/`skeleton`/`callers`/`map`) e remoção local; ausência de
+  Node/npm, erro, timeout, saída vazia ou mapa desatualizado nunca bloqueiam a tarefa nem são
+  tratados como ausência de código — o agente cai de volta para `rg`/leitura direta.
+- Contenção do cache no consumidor: o diretório `.tl-orc-graft-cache/` se auto-exclui por
+  inteiro (`.gitignore`/`.ignore` próprios com `*`), escrito antes da instalação e preservado
+  mesmo quando ela falha; os arquivos de ignore do projeto não são lidos nem alterados
+  (`GRAFT_NO_GITIGNORE`/`GRAFT_NO_IGNORE` no subprocesso).
+- Isolamento do subprocesso: chaves e configuração herdadas do ambiente são removidas, o
+  carregador de `.env` do Graft aponta para um arquivo inexistente e `HOME`/`USERPROFILE` vão
+  para dentro do cache com um registro de checagem semeado — o `~/.graft` real não é escrito e
+  a consulta em segundo plano ao registro npm não é disparada.
+- Recusas em vez de dano: layout de pasta-guarda-chuva sem Git com vários repositórios
+  (evitando builds dentro dos filhos), cache redirecionado por symlink/junção e cache de outro
+  dono são recusados com fallback, sem chamar o CLI e sem remover nada.
+- Contenção do subprocesso e da remoção: timeout e excesso de saída encerram o grupo de
+  processos inteiro no POSIX — inclusive descendentes que sobrevivem ao líder — e a saída só é
+  devolvida após terminar a drenagem dos pipes; o registro local de atualização só é escrito
+  depois de validar todo o caminho (`home/.graft/`) contra links/junções; o CLI é recusado se
+  `no-dotenv.env` existir, em vez de deixar o `dotenv` do upstream recarregar chaves; e uma
+  remoção parcial preserva os arquivos de ignore e o selo, mantendo o que sobrou ignorado e
+  permitindo concluir a desativação numa segunda tentativa. Os links legítimos que o npm cria
+  em `node_modules/.bin` são removidos sem serem seguidos.
+- Resposta de consulta só é considerada boa após checagem de frescor do grafo; grafo
+  desatualizado, saída degradada por contenção de lock, vazia ou ilegível viram fallback
+  explícito.
+- Integração mínima em `SKILL.md`, `prompts/orchestrator-playbook.md` e
+  `docs/PROJECT_CONFIGURATION.md` apontando para o guia, sem tornar a ativação pré-requisito do
+  método nem dar ao mapa autoridade de requisito ou revisão.
+
+### Validação
+
+- Testes offline (`scripts/tests/test_tl_graft.py`) cobrindo, além dos caminhos de fallback
+  (Node/npm ausente, erro/timeout de instalação e build, caminho com espaços e acentos, grafo
+  desatualizado, truncamento de saída): exclusão do cache verificada com `git status`/`git
+  check-ignore` em repositório real, recusa de junção/symlink e de cache alheio sem tocar nos
+  arquivos apontados, recusa do layout multi-repositório provando que nenhum filho foi escrito,
+  captura limitada e timeout de subprocessos reais com os dois fluxos cheios e UTF-8 parcial,
+  ambiente do subprocesso sem chaves-sentinela, e saída JSON em UTF-8 a partir de um processo
+  real sem `PYTHONIOENCODING`.
+- Prova real local com o CLI oficial (sem mocks) em fixture Go+Python: `setup`, os 5 modos de
+  `query`, `status` e `disable` executados com sucesso, inclusive em caminho com espaços;
+  telemetria confirmada suprimida com `DO_NOT_TRACK=1` (evento `build_completed` deixa de ser
+  enfileirado). Detalhes e comandos em `.tmp/graft-verification.md`.
+
 ## [0.13.0] - 2026-09-14
 
 ### Adicionado
@@ -739,3 +794,4 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 [0.11.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.10.0...v0.11.0
 [0.12.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.11.0...v0.12.0
 [0.13.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.12.0...v0.13.0
+[0.14.0]: https://github.com/thinglab-dev/tl-orchestrator/compare/v0.13.0...v0.14.0

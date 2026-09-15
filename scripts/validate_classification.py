@@ -283,7 +283,10 @@ def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str
                     if pat in lower_ev_reason:
                         errors.append(f"roles.{role_name}.evaluations[{idx}].reason contains forbidden over-selection phrase: '{pat}'")
             if model and effort:
-                eval_by_pair[(harness, model, effort)] = ev
+                pair = (harness, model, effort)
+                if pair in eval_by_pair:
+                    errors.append(f"roles.{role_name}.evaluations contains duplicate evaluation for pair {pair}")
+                eval_by_pair[pair] = ev
 
     candidates = role_data.get("candidates")
     if not isinstance(candidates, list):
@@ -365,6 +368,65 @@ def validate_v3_role(role_name: str, role_data: dict[str, Any], errors: list[str
                     errors.append(
                         f"roles.{role_name}: primary candidate uses effort 'xhigh' when 'high' for the same model is evaluated as sufficient. "
                         f"Requires selection_basis 'escalation' with escalation_reason 'concrete_technical_necessity' and supporting evidence_ids, or 'pinned'."
+                    )
+
+        # Minimum Sufficient Capability & Escalation Consistency Check for Maker
+        if role_name == "maker" and sel_basis != "pinned":
+            pri_cand = (p_harness, p_model, p_effort)
+            if pri_cand in DEFAULT_EFFICIENCY_ORDER:
+                pri_idx = DEFAULT_EFFICIENCY_ORDER.index(pri_cand)
+                higher_cands = DEFAULT_EFFICIENCY_ORDER[:pri_idx]
+            else:
+                higher_cands = DEFAULT_EFFICIENCY_ORDER
+
+            for hc in higher_cands:
+                ev_hc = eval_by_pair.get(hc)
+                if not ev_hc:
+                    continue
+                hc_sufficient = (
+                    ev_hc.get("technical_adequacy") == "sufficient"
+                    and ev_hc.get("dispatchable") is True
+                    and ev_hc.get("catalog_eligible", True) is True
+                )
+                if hc_sufficient:
+                    if sel_basis == "minimum_sufficient":
+                        errors.append(
+                            f"roles.maker: selection_basis 'minimum_sufficient' selected {pri_cand}, "
+                            f"but more efficient candidate {hc} is evaluated as sufficient and dispatchable"
+                        )
+                    elif sel_basis == "escalation":
+                        if esc_reason in ("efficient_candidate_insufficient", "efficient_candidate_uncertain", "catalog_ineligible"):
+                            errors.append(
+                                f"roles.maker: escalation_reason '{esc_reason}' is contradicted by evaluation for {hc}: "
+                                f"candidate is evaluated as sufficient, catalog_eligible, and dispatchable"
+                            )
+
+            if sel_basis == "escalation" and esc_reason == "efficient_candidate_insufficient":
+                any_insufficient = any(
+                    eval_by_pair.get(hc) and eval_by_pair[hc].get("technical_adequacy") == "insufficient"
+                    for hc in higher_cands
+                )
+                if not any_insufficient:
+                    errors.append(
+                        f"roles.maker: escalation_reason 'efficient_candidate_insufficient' requires at least one more efficient candidate to be evaluated as insufficient"
+                    )
+            elif sel_basis == "escalation" and esc_reason == "efficient_candidate_uncertain":
+                any_uncertain = any(
+                    eval_by_pair.get(hc) and eval_by_pair[hc].get("technical_adequacy") == "uncertain"
+                    for hc in higher_cands
+                )
+                if not any_uncertain:
+                    errors.append(
+                        f"roles.maker: escalation_reason 'efficient_candidate_uncertain' requires at least one more efficient candidate to be evaluated as uncertain"
+                    )
+            elif sel_basis == "escalation" and esc_reason == "catalog_ineligible":
+                any_ineligible = any(
+                    eval_by_pair.get(hc) and eval_by_pair[hc].get("catalog_eligible") is False
+                    for hc in higher_cands
+                )
+                if not any_ineligible:
+                    errors.append(
+                        f"roles.maker: escalation_reason 'catalog_ineligible' requires at least one more efficient candidate to be catalog ineligible"
                     )
 
     # Invariant R18: State matrix
@@ -623,16 +685,22 @@ def resolve_minimum_sufficient(
                 pinned_matching.sort(key=pin_sort_key)
                 return pinned_matching[0], "pinned", None
 
-    # Build evaluation lookup
+    # Build evaluation lookup and collect extra pairs
     eval_by_pair: dict[tuple[str, str, str], dict[str, Any]] = {}
+    extra_pairs: list[tuple[str, str, str]] = []
     for ev in evaluations:
         h = ev.get("harness")
         m = ev.get("model")
         e = ev.get("effort")
         if h and m and e:
-            eval_by_pair[(h, m, e)] = ev
-            if (h, m, e) not in eff_order:
-                eff_order.append((h, m, e))
+            pair = (h, m, e)
+            eval_by_pair[pair] = ev
+            if pair not in eff_order and pair not in extra_pairs:
+                extra_pairs.append(pair)
+
+    # Impose a stable, deterministic total order for pairs outside eff_order
+    extra_pairs.sort()
+    eff_order.extend(extra_pairs)
 
     # Identify eligible sufficient candidates
     eligible_sufficient: list[tuple[str, str, str]] = []

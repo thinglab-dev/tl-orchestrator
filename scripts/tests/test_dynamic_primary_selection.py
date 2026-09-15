@@ -88,24 +88,23 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
         }
 
     def test_r01_and_ac01_codex_as_primary_even_when_not_first_in_legacy_chain(self) -> None:
-        """AC01 & R18: Classifier can elect Codex as primary Maker over Agy/Claude."""
+        """AC01 & R18: Classifier can elect Codex as primary Maker over Agy/Claude when Agy is insufficient."""
         data = dict(self.base_v3)
         data["roles"] = {
             "maker": {
                 "tier": "heavy",
                 "selection_status": "conclusive",
-                "selection_basis": "minimum_sufficient",
-                "escalation_reason": None,
-                "reason": "Codex Terra elected as primary based on benchmark coding evidence",
+                "selection_basis": "escalation",
+                "escalation_reason": "efficient_candidate_insufficient",
+                "reason": "Codex Terra elected as primary based on benchmark coding evidence and Agy insufficiency",
                 "tie_break_applied": None,
                 "evaluations": [
                     self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
-                    self._make_eval("agy", "gemini-3.8-flash-high", "high", True, "sufficient", True),
+                    self._make_eval("agy", "gemini-3.8-flash-high", "high", True, "insufficient", False),
                     self._make_eval("claude", "sonnet", "high", True, "sufficient", True),
                 ],
                 "candidates": [
                     self._make_cand("codex", "gpt-5.6-terra", "high", "primary"),
-                    self._make_cand("agy", "gemini-3.8-flash-high", "high", "fallback"),
                     self._make_cand("claude", "sonnet", "high", "fallback"),
                 ],
             }
@@ -147,17 +146,17 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
             "maker": {
                 "tier": "heavy",
                 "selection_status": "conclusive",
-                "selection_basis": "minimum_sufficient",
-                "escalation_reason": None,
-                "reason": "Claude Sonnet High elected as primary Maker",
+                "selection_basis": "escalation",
+                "escalation_reason": "efficient_candidate_insufficient",
+                "reason": "Claude Sonnet High elected as primary Maker after more efficient options insufficient",
                 "tie_break_applied": None,
                 "evaluations": [
+                    self._make_eval("agy", "gemini-3.8-flash-high", "high", True, "insufficient", False),
+                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "insufficient", False),
                     self._make_eval("claude", "sonnet", "high", True, "sufficient", True),
-                    self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
                 ],
                 "candidates": [
                     self._make_cand("claude", "sonnet", "high", "primary"),
-                    self._make_cand("codex", "gpt-5.6-terra", "high", "fallback"),
                 ],
             }
         }
@@ -1319,7 +1318,10 @@ class MinimumSufficientEnforcementTest(unittest.TestCase):
     def test_escalation_requires_valid_closed_enum_escalation_reason(self) -> None:
         """selection_basis: escalation requires a valid enum escalation_reason."""
         payload = self._base_payload()
-        evals = [self._make_eval("codex", "gpt-5.6-terra", "high")]
+        evals = [
+            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="insufficient", dispatchable=False),
+            self._make_eval("codex", "gpt-5.6-terra", "high"),
+        ]
         cands = [self._make_cand("codex", "gpt-5.6-terra", "high", "primary")]
 
         # Missing escalation_reason
@@ -1472,6 +1474,77 @@ class MinimumSufficientEnforcementTest(unittest.TestCase):
         self.assertEqual(basis, "escalation")
         self.assertNotEqual(winner[0], "claude")
         self.assertNotEqual(winner[1], "claude-opus-5")
+
+    def test_escalation_contradicted_by_sufficient_efficient_candidate_fails(self) -> None:
+        """Codex's round 2 counterproof: escalation cannot claim efficient_candidate_insufficient when Agy is evaluated as sufficient."""
+        payload = self._base_payload()
+        evals = [
+            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="sufficient", dispatchable=True),
+            self._make_eval("codex", "gpt-5.6-terra", "xhigh", adequacy="sufficient", dispatchable=True),
+        ]
+        cands = [self._make_cand("codex", "gpt-5.6-terra", "xhigh", "primary")]
+        payload["roles"] = {
+            "maker": {
+                "tier": "heavy",
+                "selection_status": "conclusive",
+                "selection_basis": "escalation",
+                "escalation_reason": "efficient_candidate_insufficient",
+                "reason": "Claiming Agy is insufficient despite evaluation marking it sufficient",
+                "tie_break_applied": None,
+                "evaluations": evals,
+                "candidates": cands,
+            }
+        }
+        ok, errors = validate_classification_data(payload)
+        self.assertFalse(ok)
+        self.assertTrue(
+            any("is contradicted by evaluation for ('agy', 'gemini-3.8-flash-high', 'high')" in e for e in errors),
+            f"Expected contradiction error, got: {errors}",
+        )
+
+    def test_duplicate_evaluations_for_same_pair_fails(self) -> None:
+        """Evaluations with duplicate (harness, model, effort) pairs must be rejected fail-closed."""
+        payload = self._base_payload()
+        evals = [
+            self._make_eval("agy", "gemini-3.8-flash-high", "high"),
+            self._make_eval("agy", "gemini-3.8-flash-high", "high"),
+        ]
+        cands = [self._make_cand("agy", "gemini-3.8-flash-high", "high", "primary")]
+        payload["roles"] = {
+            "maker": {
+                "tier": "heavy",
+                "selection_status": "conclusive",
+                "selection_basis": "minimum_sufficient",
+                "reason": "Test reason",
+                "tie_break_applied": None,
+                "evaluations": evals,
+                "candidates": cands,
+            }
+        }
+        ok, errors = validate_classification_data(payload)
+        self.assertFalse(ok)
+        self.assertTrue(any("contains duplicate evaluation" in e for e in errors))
+
+    def test_resolver_deterministic_for_extra_candidates_outside_default_order(self) -> None:
+        """Codex's round 2 counterproof: resolver must be deterministic for extra candidates outside default order."""
+        base = [
+            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="insufficient", dispatchable=False),
+            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="insufficient", dispatchable=False),
+            self._make_eval("claude", "sonnet", "high", adequacy="insufficient", dispatchable=False),
+        ]
+        a = self._make_eval("codex", "model-a", "high", adequacy="sufficient", dispatchable=True)
+        z = self._make_eval("codex", "model-z", "high", adequacy="sufficient", dispatchable=True)
+
+        res1, basis1, reason1 = resolve_minimum_sufficient(base + [z, a])
+        res2, basis2, reason2 = resolve_minimum_sufficient(base + [a, z])
+
+        self.assertEqual(res1, ("codex", "model-a", "high"))
+        self.assertEqual(res2, ("codex", "model-a", "high"))
+        self.assertEqual(res1, res2)
+        self.assertEqual(basis1, "escalation")
+        self.assertEqual(basis2, "escalation")
+        self.assertEqual(reason1, "efficient_candidate_insufficient")
+        self.assertEqual(reason2, "efficient_candidate_insufficient")
 
 
 if __name__ == "__main__":

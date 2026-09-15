@@ -1,8 +1,8 @@
 format_version: 1
 work_method: native
-active_work_ref: none
+active_work_ref: T026
 current_role: none
-next_action: T025 concluída. Próxima unidade do lote ou comando do Operador.
+next_action: Aguardar autorização humana para merge de T026 em main.
 coordinator:
   harness: claude
   session: claude-code-b5b7f943
@@ -12,7 +12,7 @@ coordinator:
 active_batch: none
 batch_status: none
 review_followups: []
-next_task_id: 26
+next_task_id: 27
 next_deliverable_id: 1
 next_decision_id: 1
 next_discussion_id: 1
@@ -47,3 +47,4 @@ open_discussions: []
 | T023 | analysis | none | ready | [T010, T021] | [] | 1 | evidence/T012-r01.md |
 | T024 | gov | none | done | [T015, T018] | [] | 1 | evidence/T024-r02.md |
 | T025 | feat | none | done | [] | [] | 2 | evidence/T025-r11.md |
+| T026 | feat | none | done | [T025] | [] | 6 | evidence/T026-r03.md |

@@ -1833,5 +1833,643 @@ class TestSmokeLocalRealRollout(unittest.TestCase):
         self.assertTrue(valid, f"Real rollout schema validation failed: {errs}")
 
 
+class TestCodexUsageEventSemanticsAndDeduplicationT026(unittest.TestCase):
+    """Focal test suite for Task T026: Codex Usage Event Semantics and Deduplication v1.
+    Covers Classes A through F, bounded memory caps, non-circular eligibility,
+    and schema Draft 2020-12 backward compatibility.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.fixtures_dir = REPO_ROOT / "scripts" / "fixtures" / "tl_usage" / "codex"
+        cls.schema_path = REPO_ROOT / "schemas" / "usage-observation.schema.json"
+
+    def test_classe_a_structural_deduplication(self) -> None:
+        """Classe A: Two records sharing proven structural identity (response_id in same turn).
+        Exactly one enters semantic_per_response_sum, while raw_usage retains both (AC1, AC2, AC3).
+        """
+        f = self.fixtures_dir / "10_classe_a_structural_dedup.jsonl"
+        obs = parse_codex_rollout(str(f), run_id="run-t026-classe-a")
+
+        # 1. Raw usage channels (AC1)
+        channels = obs["raw_usage_channels"]
+        self.assertEqual(channels["token_usage_records"]["event_count"], 2)
+        self.assertEqual(channels["token_usage_records"]["per_response_sum"]["total_tokens"], 300)
+        self.assertEqual(channels["event_msg_token_counts"]["event_count"], 1)
+        self.assertEqual(channels["event_msg_token_counts"]["per_response_sum"]["total_tokens"], 150)
+        self.assertEqual(channels["cumulative_snapshots"]["snapshot_count"], 1)
+        self.assertEqual(channels["cumulative_snapshots"]["latest_snapshot"]["total_tokens"], 150)
+
+        # 2. Raw usage preservation (AC2, I23)
+        self.assertEqual(obs["raw_usage"]["response_count"], 3)
+        self.assertEqual(obs["raw_usage"]["per_response_sum"]["total_tokens"], 450)
+        self.assertEqual(obs["raw_usage"]["cumulative"]["total_tokens"], 150)
+        self.assertEqual(obs["raw_usage"]["reconciliation"]["status"], "divergent")
+
+        # 3. Semantic correlations layer (AC3, AC7)
+        sc = obs["semantic_correlations"]
+        self.assertEqual(sc["rule_id"], "codex-0.153.4-structural-event-dedup-v1")
+        self.assertEqual(sc["summary"]["records_observed"], 1)
+        self.assertEqual(sc["summary"]["records_retained"], 1)
+        self.assertFalse(sc["summary"]["records_truncated"])
+        self.assertEqual(sc["summary"]["correlated_events"], 2)
+        self.assertEqual(len(sc["records"]), 1)
+        rec = sc["records"][0]
+        self.assertEqual(rec["correlation_id"], "resp_a1")
+        self.assertEqual(rec["strategy"], "exact_identity")
+        self.assertEqual(rec["status"], "correlated")
+        self.assertEqual(rec["channels"], ["token_usage_record", "token_usage_record"])
+
+        # 4. Normalized usage & exact reconciliation (AC6)
+        nu = obs["normalized_usage"]
+        self.assertEqual(nu["status"], "normalized")
+        self.assertTrue(nu["eligible_for_normalization"])
+        self.assertEqual(nu["semantic_response_count"], 1)
+        self.assertEqual(nu["semantic_per_response_sum"]["total_tokens"], 150)
+        self.assertEqual(nu["cumulative"]["total_tokens"], 150)
+        self.assertEqual(nu["reconciliation"]["status"], "reconciled")
+        for f_name, f_data in nu["reconciliation"]["fields"].items():
+            self.assertEqual(f_data["status"], "reconciled", f"Field {f_name} not reconciled")
+            self.assertEqual(f_data["delta"], 0, f"Field {f_name} delta != 0")
+
+        # 5. Schema validation
+        valid, errs = validate_against_schema(obs, str(self.schema_path))
+        self.assertTrue(valid, f"Schema validation failed: {errs}")
+
+    def test_classe_b_independent_events_identical_counters(self) -> None:
+        """Classe B: Independent responses with identical token counts are NOT deduplicated (I20, AC4)."""
+        f = self.fixtures_dir / "11_classe_b_identical_counters.jsonl"
+        obs = parse_codex_rollout(str(f), run_id="run-t026-classe-b")
+
+        nu = obs["normalized_usage"]
+        self.assertEqual(nu["status"], "normalized")
+        self.assertTrue(nu["eligible_for_normalization"])
+        self.assertEqual(nu["semantic_response_count"], 2)
+        self.assertEqual(nu["semantic_per_response_sum"]["total_tokens"], 300)
+        self.assertEqual(nu["cumulative"]["total_tokens"], 300)
+        self.assertEqual(nu["reconciliation"]["status"], "reconciled")
+        for f_name, f_data in nu["reconciliation"]["fields"].items():
+            self.assertEqual(f_data["status"], "reconciled")
+            self.assertEqual(f_data["delta"], 0)
+
+        # Confirm 2 distinct correlation records
+        sc = obs["semantic_correlations"]
+        self.assertEqual(len(sc["records"]), 2)
+        self.assertEqual(sc["records"][0]["correlation_id"], "resp_b1")
+        self.assertEqual(sc["records"][1]["correlation_id"], "resp_b2")
+
+        valid, errs = validate_against_schema(obs, str(self.schema_path))
+        self.assertTrue(valid, f"Schema validation failed: {errs}")
+
+    def test_classe_c_missing_identity_degradation(self) -> None:
+        """Classe C: Missing response_id in Codex 0.153.4 degrades to ambiguous, partial, not_observable (AC5)."""
+        f = self.fixtures_dir / "12_classe_c_missing_identity.jsonl"
+        obs = parse_codex_rollout(str(f), run_id="run-t026-classe-c")
+
+        self.assertEqual(obs["parser_status"]["status"], "partial")
+        self.assertTrue(any("missing_response_id" in r for r in obs["parser_status"]["reasons"]))
+
+        nu = obs["normalized_usage"]
+        self.assertEqual(nu["status"], "not_observable")
+        self.assertFalse(nu["eligible_for_normalization"])
+        self.assertTrue(any("missing_response_id" in r for r in nu["ineligibility_reasons"]))
+        self.assertEqual(nu["semantic_response_count"], 0)
+        self.assertEqual(nu["semantic_per_response_sum"]["total_tokens"], "not_observable")
+        self.assertEqual(nu["reconciliation"]["status"], "not_observable")
+
+        valid, errs = validate_against_schema(obs, str(self.schema_path))
+        self.assertTrue(valid, f"Schema validation failed: {errs}")
+
+    def test_classe_d_real_sample_and_local_rollouts(self) -> None:
+        """Classe D: Structurally eligible real rollout samples produce reconciled with delta 0 (AC6)."""
+        f = self.fixtures_dir / "14_classe_d_real_sample.jsonl"
+        obs = parse_codex_rollout(str(f), run_id="run-t026-classe-d")
+
+        self.assertEqual(obs["parser_status"]["status"], "supported")
+        nu = obs["normalized_usage"]
+        self.assertEqual(nu["status"], "normalized")
+        self.assertTrue(nu["eligible_for_normalization"])
+        self.assertEqual(nu["semantic_response_count"], 14)
+        self.assertEqual(nu["semantic_per_response_sum"]["total_tokens"], 694323)
+        self.assertEqual(nu["cumulative"]["total_tokens"], 694323)
+        self.assertEqual(nu["reconciliation"]["status"], "reconciled")
+        for f_name, f_data in nu["reconciliation"]["fields"].items():
+            self.assertEqual(f_data["status"], "reconciled")
+            self.assertEqual(f_data["delta"], 0)
+
+        # Verify raw_usage remains divergent (preserving T025)
+        self.assertEqual(obs["raw_usage"]["reconciliation"]["status"], "divergent")
+        self.assertEqual(obs["raw_usage"]["response_count"], 28)
+
+        valid, errs = validate_against_schema(obs, str(self.schema_path))
+        self.assertTrue(valid, f"Schema validation failed: {errs}")
+
+    def test_classe_e_t025_regression_and_schema_compatibility(self) -> None:
+        """Classe E: Full regression for all T025 features and additive schema v1 backward compatibility (AC8)."""
+        # 1. Check all standard fixtures parse and validate against schema
+        for fixture_idx in range(1, 10):
+            matches = list(self.fixtures_dir.glob(f"{fixture_idx:02d}_*.jsonl"))
+            if matches:
+                obs = parse_codex_rollout(str(matches[0]), run_id=f"run-reg-{fixture_idx}")
+                valid, errs = validate_against_schema(obs, str(self.schema_path))
+                self.assertTrue(valid, f"Fixture {matches[0].name} schema validation failed: {errs}")
+
+        # 2. Check backward compatibility: observation without T026 fields remains valid Draft 2020-12
+        legacy_obs = parse_codex_rollout(str(self.fixtures_dir / "01_single_turn_complete.jsonl"), run_id="legacy-test")
+        legacy_copy = dict(legacy_obs)
+        del legacy_copy["raw_usage_channels"]
+        del legacy_copy["semantic_correlations"]
+        del legacy_copy["normalized_usage"]
+        valid, errs = validate_against_schema(legacy_copy, str(self.schema_path))
+        self.assertTrue(valid, f"Legacy T025 observation without optional fields must remain valid: {errs}")
+
+    def test_classe_f_conflicting_identity_turn_id_mismatch(self) -> None:
+        """Classe F: Conflicting structural identity (turn_id mismatch against active turn) degrades strictly (AC5)."""
+        f = self.fixtures_dir / "13_classe_f_conflicting_identity.jsonl"
+        obs = parse_codex_rollout(str(f), run_id="run-t026-classe-f")
+
+        self.assertEqual(obs["parser_status"]["status"], "partial")
+        self.assertTrue(any("conflicting_structural_identity" in r for r in obs["parser_status"]["reasons"]))
+
+        nu = obs["normalized_usage"]
+        self.assertEqual(nu["status"], "not_observable")
+        self.assertFalse(nu["eligible_for_normalization"])
+        self.assertTrue(any("conflicting_structural_identity" in r for r in nu["ineligibility_reasons"]))
+        self.assertEqual(nu["reconciliation"]["status"], "not_observable")
+
+        valid, errs = validate_against_schema(obs, str(self.schema_path))
+        self.assertTrue(valid, f"Schema validation failed: {errs}")
+
+    def test_classe_f_conflicting_response_id_reused_across_turns(self) -> None:
+        """Classe F: Response ID reused across different turns constitutes conflicting identity (AC5)."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as tmp:
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.000Z", "type": "session_meta",
+                "payload": {"id": "th-conf", "cli_version": "0.153.4"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.500Z", "type": "world_state",
+                "payload": {"state": "active"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.800Z", "type": "response_item",
+                "payload": {"type": "custom_tool_call"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:01.000Z", "type": "turn_context",
+                "payload": {"turn_id": "turn-1", "model": "gpt-5.6-terra"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:02.000Z", "type": "token_usage_record",
+                "payload": {"turn_id": "turn-1", "thread_id": "th-conf", "response_id": "resp_dup", "usage": {"total_tokens": 100}}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:03.000Z", "type": "turn_context",
+                "payload": {"turn_id": "turn-2", "model": "gpt-5.6-terra"}
+            }) + "\n")
+            # Same response_id but in turn-2!
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:04.000Z", "type": "token_usage_record",
+                "payload": {"turn_id": "turn-2", "thread_id": "th-conf", "response_id": "resp_dup", "usage": {"total_tokens": 100}}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:05.000Z", "type": "event_msg",
+                "payload": {"type": "session_complete"}
+            }) + "\n")
+            tmp_path = tmp.name
+
+        try:
+            obs = parse_codex_rollout(tmp_path, run_id="run-conf-dup")
+            self.assertEqual(obs["parser_status"]["status"], "partial")
+            self.assertTrue(any("conflicting_structural_identity" in r for r in obs["parser_status"]["reasons"]))
+            self.assertFalse(obs["normalized_usage"]["eligible_for_normalization"])
+            self.assertEqual(obs["normalized_usage"]["status"], "not_observable")
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_r1_counterfactual_new_turn_response_without_intermediate_turn_context_normalizes_cleanly(self) -> None:
+        """R1 Counterfactual: A new response advancing turn_id without an intermediate turn_context line
+        does NOT trigger false-positive conflict from active_turn_id state, proving independence from stream ordering (I21).
+        """
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as tmp:
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.000Z", "type": "session_meta",
+                "payload": {"id": "th-no-tc", "cli_version": "0.153.4"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.500Z", "type": "world_state",
+                "payload": {"state": "active"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.800Z", "type": "response_item",
+                "payload": {"type": "message"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:01.000Z", "type": "turn_context",
+                "payload": {"turn_id": "turn-1", "model": "gpt-5.6-terra"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:02.000Z", "type": "token_usage_record",
+                "payload": {
+                    "turn_id": "turn-1", "thread_id": "th-no-tc", "response_id": "resp_turn_1",
+                    "usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 0, "total_tokens": 150}
+                }
+            }) + "\n")
+            # Directly a token_usage_record with turn-2, WITHOUT any intermediate turn_context event!
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:03.000Z", "type": "token_usage_record",
+                "payload": {
+                    "turn_id": "turn-2", "thread_id": "th-no-tc", "response_id": "resp_turn_2",
+                    "usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 0, "total_tokens": 150}
+                }
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:04.000Z", "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 0, "total_tokens": 150},
+                        "total_token_usage": {"input_tokens": 200, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 100, "reasoning_output_tokens": 0, "total_tokens": 300}
+                    }
+                }
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:05.000Z", "type": "event_msg",
+                "payload": {"type": "session_complete"}
+            }) + "\n")
+            tmp_path = tmp.name
+
+        try:
+            obs = parse_codex_rollout(tmp_path, run_id="run-no-tc-test")
+            nu = obs["normalized_usage"]
+            # Must NOT flag false conflict: normalizes cleanly with both responses accounted for!
+            self.assertTrue(nu["eligible_for_normalization"])
+            self.assertEqual(nu["status"], "normalized")
+            self.assertEqual(nu["semantic_response_count"], 2)
+            self.assertEqual(nu["semantic_per_response_sum"]["total_tokens"], 300)
+            self.assertEqual(nu["cumulative"]["total_tokens"], 300)
+            self.assertEqual(nu["reconciliation"]["status"], "reconciled")
+            self.assertEqual(nu["reconciliation"]["fields"]["total_tokens"]["delta"], 0)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_bounded_memory_cap_and_truncation_metadata(self) -> None:
+        """Bounded Memory: Cap on semantic_correlations.records (50) does NOT truncate aggregation (I25, AC7)."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as tmp:
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.000Z", "type": "session_meta",
+                "payload": {"id": "th-cap", "cli_version": "0.153.4"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.500Z", "type": "world_state",
+                "payload": {"state": "active"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.800Z", "type": "response_item",
+                "payload": {"type": "custom_tool_call"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:01.000Z", "type": "turn_context",
+                "payload": {"turn_id": "turn-cap", "model": "gpt-5.6-terra"}
+            }) + "\n")
+
+            total_tokens_expected = 0
+            # Emit 60 responses
+            for i in range(60):
+                tokens = 10
+                total_tokens_expected += tokens
+                tmp.write(json.dumps({
+                    "timestamp": f"2026-06-25T13:01:{i:02d}.000Z", "type": "token_usage_record",
+                    "payload": {
+                        "turn_id": "turn-cap", "thread_id": "th-cap", "response_id": f"resp_cap_{i}",
+                        "usage": {"input_tokens": tokens, "output_tokens": 0, "total_tokens": tokens}
+                    }
+                }) + "\n")
+                tmp.write(json.dumps({
+                    "timestamp": f"2026-06-25T13:01:{i:02d}.500Z", "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {"input_tokens": tokens, "output_tokens": 0, "total_tokens": tokens},
+                            "total_token_usage": {"input_tokens": total_tokens_expected, "output_tokens": 0, "total_tokens": total_tokens_expected}
+                        }
+                    }
+                }) + "\n")
+
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:05:00.000Z", "type": "event_msg",
+                "payload": {"type": "session_complete"}
+            }) + "\n")
+            tmp_path = tmp.name
+
+        try:
+            obs = parse_codex_rollout(tmp_path, run_id="run-cap-test")
+            sc = obs["semantic_correlations"]
+
+            # Cap is strictly enforced on retained list
+            self.assertEqual(len(sc["records"]), 50)
+            self.assertEqual(sc["summary"]["records_retained"], 50)
+            self.assertEqual(sc["summary"]["records_observed"], 60)
+            self.assertTrue(sc["summary"]["records_truncated"])
+            self.assertEqual(sc["summary"]["correlated_events"], 60)
+
+            # Calculation processes 100% of the events without truncation
+            nu = obs["normalized_usage"]
+            self.assertEqual(nu["semantic_response_count"], 60)
+            self.assertEqual(nu["semantic_per_response_sum"]["total_tokens"], total_tokens_expected)
+            self.assertEqual(nu["cumulative"]["total_tokens"], total_tokens_expected)
+            self.assertEqual(nu["reconciliation"]["status"], "reconciled")
+            self.assertEqual(nu["reconciliation"]["fields"]["total_tokens"]["delta"], 0)
+
+            valid, errs = validate_against_schema(obs, str(self.schema_path))
+            self.assertTrue(valid, f"Schema validation failed: {errs}")
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_non_circular_eligibility_with_factual_divergence(self) -> None:
+        """Non-Circular Eligibility: If structurally eligible and delta != 0, remains divergent (I24, AC6)."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as tmp:
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.000Z", "type": "session_meta",
+                "payload": {"id": "th-div", "cli_version": "0.153.4"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.500Z", "type": "world_state",
+                "payload": {"state": "active"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.800Z", "type": "response_item",
+                "payload": {"type": "custom_tool_call"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:01.000Z", "type": "turn_context",
+                "payload": {"turn_id": "turn-div", "model": "gpt-5.6-terra"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:02.000Z", "type": "token_usage_record",
+                "payload": {
+                    "turn_id": "turn-div", "thread_id": "th-div", "response_id": "resp_div_1",
+                    "usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 0, "total_tokens": 150}
+                }
+            }) + "\n")
+            # Cumulative reports 200 total tokens instead of 150 (factual mismatch in rollout)
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:03.000Z", "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 0, "total_tokens": 150},
+                        "total_token_usage": {"input_tokens": 120, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 80, "reasoning_output_tokens": 0, "total_tokens": 200}
+                    }
+                }
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:04.000Z", "type": "event_msg",
+                "payload": {"type": "session_complete"}
+            }) + "\n")
+            tmp_path = tmp.name
+
+        try:
+            obs = parse_codex_rollout(tmp_path, run_id="run-div-test")
+            nu = obs["normalized_usage"]
+
+            # Eligibility must NOT be circular: structurally eligible despite divergence!
+            self.assertTrue(nu["eligible_for_normalization"])
+            self.assertEqual(nu["ineligibility_reasons"], [])
+            self.assertEqual(nu["status"], "normalized")
+
+            # Reconciliation reports divergent factually with exact delta
+            self.assertEqual(nu["reconciliation"]["status"], "divergent")
+            self.assertEqual(nu["reconciliation"]["fields"]["total_tokens"]["status"], "divergent")
+            self.assertEqual(nu["reconciliation"]["fields"]["total_tokens"]["delta"], 50)
+            self.assertEqual(nu["reconciliation"]["fields"]["total_tokens"]["cumulative_value"], 200)
+            self.assertEqual(nu["reconciliation"]["fields"]["total_tokens"]["per_response_value"], 150)
+
+            valid, errs = validate_against_schema(obs, str(self.schema_path))
+            self.assertTrue(valid, f"Schema validation failed: {errs}")
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_unsupported_harness_version_ineligibility(self) -> None:
+        """Harness version 0.153.0 is valid for parsing but ineligible for 0.153.4 deduplication rule."""
+        f = self.fixtures_dir / "01_single_turn_complete.jsonl"
+        obs = parse_codex_rollout(str(f), run_id="run-t026-ver-01530")
+
+        self.assertEqual(obs["parser_status"]["status"], "supported")
+        nu = obs["normalized_usage"]
+        self.assertFalse(nu["eligible_for_normalization"])
+        self.assertEqual(nu["status"], "not_observable")
+        self.assertIn("unsupported_rule_harness_version:0.153.0", nu["ineligibility_reasons"])
+
+    def test_r2_counterfactual_reordering_of_channels_does_not_affect_normalization(self) -> None:
+        """R2 Counterfactual: Interleaving or inverting order of event_msg vs token_usage_record
+        does NOT alter structural correlation or normalization, proving independence from temporal adjacency (I21).
+        """
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as tmp:
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.000Z", "type": "session_meta",
+                "payload": {"id": "th-reorder", "cli_version": "0.153.4"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.500Z", "type": "world_state",
+                "payload": {"state": "active"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.800Z", "type": "response_item",
+                "payload": {"type": "message"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:01.000Z", "type": "turn_context",
+                "payload": {"turn_id": "turn-reorder", "model": "gpt-5.6-terra"}
+            }) + "\n")
+            # Inverted order: event_msg token_count appears BEFORE token_usage_record!
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:02.000Z", "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 0, "total_tokens": 150},
+                        "total_token_usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 0, "total_tokens": 150}
+                    }
+                }
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:03.000Z", "type": "token_usage_record",
+                "payload": {
+                    "turn_id": "turn-reorder", "thread_id": "th-reorder", "response_id": "resp_reorder_1",
+                    "usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 0, "total_tokens": 150}
+                }
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:04.000Z", "type": "event_msg",
+                "payload": {"type": "session_complete"}
+            }) + "\n")
+            tmp_path = tmp.name
+
+        try:
+            obs = parse_codex_rollout(tmp_path, run_id="run-reorder-test")
+            nu = obs["normalized_usage"]
+            self.assertTrue(nu["eligible_for_normalization"])
+            self.assertEqual(nu["status"], "normalized")
+            self.assertEqual(nu["semantic_response_count"], 1)
+            self.assertEqual(nu["semantic_per_response_sum"]["total_tokens"], 150)
+            self.assertEqual(nu["cumulative"]["total_tokens"], 150)
+            self.assertEqual(nu["reconciliation"]["status"], "reconciled")
+            self.assertEqual(nu["reconciliation"]["fields"]["total_tokens"]["delta"], 0)
+
+            # Correlation record is solely tied to token_usage_record
+            sc = obs["semantic_correlations"]
+            self.assertEqual(len(sc["records"]), 1)
+            self.assertEqual(sc["records"][0]["correlation_id"], "resp_reorder_1")
+            self.assertEqual(sc["records"][0]["channels"], ["token_usage_record"])
+
+            valid, errs = validate_against_schema(obs, str(self.schema_path))
+            self.assertTrue(valid, f"Schema validation failed: {errs}")
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_r2_counterfactual_unkeyed_interleaved_token_counts_do_not_create_adjacency_correlations(self) -> None:
+        """R2 Counterfactual: Interleaved unkeyed token_count events do NOT create artificial response correlations."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as tmp:
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.000Z", "type": "session_meta",
+                "payload": {"id": "th-interleave", "cli_version": "0.153.4"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.500Z", "type": "world_state",
+                "payload": {"state": "active"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.800Z", "type": "response_item",
+                "payload": {"type": "message"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:01.000Z", "type": "turn_context",
+                "payload": {"turn_id": "turn-int", "model": "gpt-5.6-terra"}
+            }) + "\n")
+            # Genuine response
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:02.000Z", "type": "token_usage_record",
+                "payload": {
+                    "turn_id": "turn-int", "thread_id": "th-interleave", "response_id": "resp_int_1",
+                    "usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 0, "total_tokens": 150}
+                }
+            }) + "\n")
+            # 3 intermediate telemetry token_count updates (e.g. streaming progress / rate limits)
+            for k in range(3):
+                tmp.write(json.dumps({
+                    "timestamp": f"2026-06-25T13:00:03.{k}00Z", "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 0, "total_tokens": 150},
+                            "total_token_usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 0, "total_tokens": 150}
+                        }
+                    }
+                }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:04.000Z", "type": "event_msg",
+                "payload": {"type": "session_complete"}
+            }) + "\n")
+            tmp_path = tmp.name
+
+        try:
+            obs = parse_codex_rollout(tmp_path, run_id="run-interleave-test")
+            nu = obs["normalized_usage"]
+            # Remains exactly 1 semantic response despite 3 unkeyed telemetry messages!
+            self.assertEqual(nu["semantic_response_count"], 1)
+            self.assertEqual(nu["semantic_per_response_sum"]["total_tokens"], 150)
+            self.assertEqual(nu["reconciliation"]["status"], "reconciled")
+
+            # Raw usage channels segregate the 3 extra telemetry events
+            channels = obs["raw_usage_channels"]
+            self.assertEqual(channels["token_usage_records"]["event_count"], 1)
+            self.assertEqual(channels["event_msg_token_counts"]["event_count"], 3)
+            self.assertEqual(channels["cumulative_snapshots"]["snapshot_count"], 3)
+
+            valid, errs = validate_against_schema(obs, str(self.schema_path))
+            self.assertTrue(valid, f"Schema validation failed: {errs}")
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_r3_identity_ledger_cap_exceeded_degrades_defensively_with_bounded_memory(self) -> None:
+        """R3 Bounded Memory: Streams with distinct response count exceeding MAX_IDENTITY_LEDGER_CAP (100)
+        degrade safely to not_observable without unbounded dictionary expansion (I25).
+        """
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as tmp:
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.000Z", "type": "session_meta",
+                "payload": {"id": "th-ledger-cap", "cli_version": "0.153.4"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.500Z", "type": "world_state",
+                "payload": {"state": "active"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:00.800Z", "type": "response_item",
+                "payload": {"type": "message"}
+            }) + "\n")
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:00:01.000Z", "type": "turn_context",
+                "payload": {"turn_id": "turn-ledger-cap", "model": "gpt-5.6-terra"}
+            }) + "\n")
+
+            # Emit 105 distinct response IDs (exceeding MAX_IDENTITY_LEDGER_CAP = 100)
+            cum_tokens = 0
+            for i in range(105):
+                cum_tokens += 10
+                tmp.write(json.dumps({
+                    "timestamp": f"2026-06-25T13:01:{i % 60:02d}.000Z", "type": "token_usage_record",
+                    "payload": {
+                        "turn_id": "turn-ledger-cap", "thread_id": "th-ledger-cap", "response_id": f"resp_ledger_{i:03d}",
+                        "usage": {"input_tokens": 10, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0, "total_tokens": 10}
+                    }
+                }) + "\n")
+                tmp.write(json.dumps({
+                    "timestamp": f"2026-06-25T13:01:{i % 60:02d}.500Z", "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {"input_tokens": 10, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0, "total_tokens": 10},
+                            "total_token_usage": {"input_tokens": cum_tokens, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0, "total_tokens": cum_tokens}
+                        }
+                    }
+                }) + "\n")
+
+            tmp.write(json.dumps({
+                "timestamp": "2026-06-25T13:05:00.000Z", "type": "event_msg",
+                "payload": {"type": "session_complete"}
+            }) + "\n")
+            tmp_path = tmp.name
+
+        try:
+            obs = parse_codex_rollout(tmp_path, run_id="run-ledger-cap-test")
+            nu = obs["normalized_usage"]
+            # Must degrade safely because identity ledger cap was exceeded
+            self.assertFalse(nu["eligible_for_normalization"])
+            self.assertEqual(nu["status"], "not_observable")
+            self.assertTrue(any("identity_ledger_cap_exceeded:100" in r for r in nu["ineligibility_reasons"]))
+
+            # Semantic correlations records remain capped at 50
+            sc = obs["semantic_correlations"]
+            self.assertEqual(len(sc["records"]), 50)
+            self.assertEqual(sc["summary"]["records_retained"], 50)
+            self.assertEqual(sc["summary"]["records_observed"], 105)
+            self.assertTrue(sc["summary"]["records_truncated"])
+
+            valid, errs = validate_against_schema(obs, str(self.schema_path))
+            self.assertTrue(valid, f"Schema validation failed: {errs}")
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+
 if __name__ == "__main__":
     unittest.main()
+

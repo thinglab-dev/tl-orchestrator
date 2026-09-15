@@ -280,6 +280,186 @@
           }
         }
       }
+    },
+    "raw_usage_channels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "token_usage_records",
+        "event_msg_token_counts",
+        "cumulative_snapshots"
+      ],
+      "properties": {
+        "token_usage_records": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event_count", "per_response_sum"],
+          "properties": {
+            "event_count": { "type": "integer", "minimum": 0 },
+            "per_response_sum": { "$ref": "#/$defs/token_counters" }
+          }
+        },
+        "event_msg_token_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event_count", "per_response_sum"],
+          "properties": {
+            "event_count": { "type": "integer", "minimum": 0 },
+            "per_response_sum": { "$ref": "#/$defs/token_counters" }
+          }
+        },
+        "cumulative_snapshots": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["snapshot_count", "latest_snapshot"],
+          "properties": {
+            "snapshot_count": { "type": "integer", "minimum": 0 },
+            "latest_snapshot": { "$ref": "#/$defs/token_counters" }
+          }
+        }
+      }
+    },
+    "semantic_correlations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "summary",
+        "records"
+      ],
+      "properties": {
+        "rule_id": {
+          "type": ["string", "null"]
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "records_observed",
+            "records_retained",
+            "records_truncated",
+            "correlated_events",
+            "ambiguous_events",
+            "unmatched_events"
+          ],
+          "properties": {
+            "records_observed": { "type": "integer", "minimum": 0 },
+            "records_retained": { "type": "integer", "minimum": 0 },
+            "records_truncated": { "type": "boolean" },
+            "correlated_events": { "type": "integer", "minimum": 0 },
+            "ambiguous_events": { "type": "integer", "minimum": 0 },
+            "unmatched_events": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "correlation_id",
+              "status",
+              "strategy",
+              "response_id",
+              "turn_id",
+              "thread_id",
+              "channels",
+              "counters",
+              "reasons"
+            ],
+            "properties": {
+              "correlation_id": { "type": "string", "minLength": 1 },
+              "status": {
+                "enum": ["correlated", "ambiguous", "unmatched"]
+              },
+              "strategy": {
+                "enum": ["exact_identity", "versioned_structural_relation", "none"]
+              },
+              "response_id": { "type": ["string", "null"] },
+              "turn_id": { "type": ["string", "null"] },
+              "thread_id": { "type": ["string", "null"] },
+              "channels": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "counters": { "$ref": "#/$defs/token_counters" },
+              "reasons": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "normalized_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "rule_id",
+        "eligible_for_normalization",
+        "ineligibility_reasons",
+        "semantic_response_count",
+        "semantic_per_response_sum",
+        "cumulative",
+        "reconciliation"
+      ],
+      "properties": {
+        "status": {
+          "enum": ["normalized", "not_observable"]
+        },
+        "rule_id": {
+          "type": ["string", "null"]
+        },
+        "eligible_for_normalization": {
+          "type": "boolean"
+        },
+        "ineligibility_reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "semantic_response_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "semantic_per_response_sum": {
+          "$ref": "#/$defs/token_counters"
+        },
+        "cumulative": {
+          "$ref": "#/$defs/token_counters"
+        },
+        "reconciliation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "fields"],
+          "properties": {
+            "status": {
+              "enum": ["reconciled", "divergent", "not_observable"]
+            },
+            "fields": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "input_tokens",
+                "cached_input_tokens",
+                "cache_write_input_tokens",
+                "output_tokens",
+                "reasoning_output_tokens",
+                "total_tokens"
+              ],
+              "properties": {
+                "input_tokens": { "$ref": "#/$defs/field_reconciliation" },
+                "cached_input_tokens": { "$ref": "#/$defs/field_reconciliation" },
+                "cache_write_input_tokens": { "$ref": "#/$defs/field_reconciliation" },
+                "output_tokens": { "$ref": "#/$defs/field_reconciliation" },
+                "reasoning_output_tokens": { "$ref": "#/$defs/field_reconciliation" },
+                "total_tokens": { "$ref": "#/$defs/field_reconciliation" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

@@ -32,6 +32,10 @@ MAX_RATE_LIMITS_CAP = 50
 MAX_THREADS_CAP = 100
 MAX_CONTEXTS_CAP = 50
 MAX_EVENT_TYPES_CAP = 20
+MAX_CORRELATIONS_CAP = 50
+MAX_IDENTITY_LEDGER_CAP = 100
+
+RULE_ID_CODEX_0_153_4 = "codex-0.153.4-structural-event-dedup-v1"
 
 
 def is_supported_harness_version(ver: Optional[str]) -> bool:
@@ -427,6 +431,36 @@ def parse_codex_rollout(session_path: str, run_id: str) -> Dict[str, Any]:
     threads_cap_exceeded = False
     rate_limits_cap_exceeded = False
 
+    # T026: Raw usage channels tracking
+    token_usage_records_count: int = 0
+    token_usage_records_sums: Dict[str, int] = {f: 0 for f in counter_fields}
+    token_usage_records_observed: Dict[str, bool] = {f: False for f in counter_fields}
+
+    event_msg_token_counts_count: int = 0
+    event_msg_token_counts_sums: Dict[str, int] = {f: 0 for f in counter_fields}
+    event_msg_token_counts_observed: Dict[str, bool] = {f: False for f in counter_fields}
+
+    cumulative_snapshots_count: int = 0
+    latest_cumulative_snapshot: Dict[str, Any] = {f: "not_observable" for f in counter_fields}
+
+    # T026: Semantic correlation & normalization tracking (R2 & R3: bounded identity ledger)
+    identity_ledger: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+
+    semantic_correlations_records: List[Dict[str, Any]] = []
+    records_observed_count: int = 0
+    records_overflow_count: int = 0
+    correlated_events_count: int = 0
+    ambiguous_events_count: int = 0
+    unmatched_events_count: int = 0
+
+    semantic_response_count: int = 0
+    semantic_per_resp_sums: Dict[str, int] = {f: 0 for f in counter_fields}
+    semantic_per_resp_observed: Dict[str, bool] = {f: False for f in counter_fields}
+
+    has_ambiguous_identity: bool = False
+    has_conflicting_identity: bool = False
+    structural_ineligibility_reasons: List[str] = []
+
     def append_reason(reasons_list: List[str], reason: str) -> None:
         if len(reasons_list) < MAX_REASONS_CAP - 1:
             reasons_list.append(reason)
@@ -669,10 +703,18 @@ def parse_codex_rollout(session_path: str, run_id: str) -> Dict[str, Any]:
                         if isinstance(tot, dict):
                             latest_cum = {k: format_counter(tot[k]) for k in counter_fields if k in tot}
                             has_usage_counters = True
+                            cumulative_snapshots_count += 1
+                            latest_cumulative_snapshot = {k: format_counter(tot.get(k)) for k in counter_fields}
 
                         last = info.get("last_token_usage")
                         if isinstance(last, dict):
                             process_delta(last)
+                            event_msg_token_counts_count += 1
+                            for f in counter_fields:
+                                val = last.get(f)
+                                if isinstance(val, int) and not isinstance(val, bool) and val >= 0:
+                                    event_msg_token_counts_sums[f] += val
+                                    event_msg_token_counts_observed[f] = True
 
                     rl = payload.get("rate_limits")
                     sanitized_rl = sanitize_rate_limit(rl)
@@ -685,16 +727,153 @@ def parse_codex_rollout(session_path: str, run_id: str) -> Dict[str, Any]:
                         else:
                             rate_limits_cap_exceeded = True
 
+                    # T026 (R1 & R2): event_msg(token_count) is an unkeyed UI telemetry/snapshot channel.
+                    # It has no response_id; per I21, it is strictly not associated to response_id by adjacency.
+
             elif rec_type == "token_usage_record":
                 usage = payload.get("usage")
                 t_id = payload.get("thread_id")
                 turn_id = payload.get("turn_id")
+                response_id = payload.get("response_id")
+
+                t_id_str = str(t_id) if isinstance(t_id, (str, int)) and not isinstance(t_id, bool) else None
+                turn_id_str = str(turn_id) if isinstance(turn_id, (str, int)) and not isinstance(turn_id, bool) else None
+
                 if turn_id:
-                    register_turn(str(turn_id) if isinstance(turn_id, str) else None)
+                    register_turn(turn_id_str)
                 if t_id and t_id in threads_data:
                     threads_data[t_id]["turn_count"] += 1
                 if isinstance(usage, dict):
                     process_delta(usage)
+
+                # T026: Channel accounting for token_usage_records
+                if isinstance(usage, dict):
+                    token_usage_records_count += 1
+                    for f in counter_fields:
+                        val = usage.get(f)
+                        if isinstance(val, int) and not isinstance(val, bool) and val >= 0:
+                            token_usage_records_sums[f] += val
+                            token_usage_records_observed[f] = True
+
+                # T026: Structural correlation & identity validation
+                is_valid_resp_id = isinstance(response_id, str) and bool(response_id.strip())
+                if not is_valid_resp_id:
+                    # In Codex 0.153.4, missing response_id is ambiguous (Classe C)
+                    if harness_version == "0.153.4":
+                        has_ambiguous_identity = True
+                        ambiguous_events_count += 1
+                        records_observed_count += 1
+                        reason = "ambiguous_usage_event_identity:missing_response_id"
+                        if reason not in structural_ineligibility_reasons:
+                            structural_ineligibility_reasons.append(reason)
+                        if len(semantic_correlations_records) < MAX_CORRELATIONS_CAP:
+                            semantic_correlations_records.append({
+                                "correlation_id": f"ambiguous_token_usage_record_line_{line_idx}",
+                                "status": "ambiguous",
+                                "strategy": "none",
+                                "response_id": None,
+                                "turn_id": turn_id_str,
+                                "thread_id": t_id_str,
+                                "channels": ["token_usage_record"],
+                                "counters": {f: format_counter(usage.get(f)) if isinstance(usage, dict) else "not_observable" for f in counter_fields},
+                                "reasons": [reason],
+                            })
+                        else:
+                            records_overflow_count += 1
+                else:
+                    resp_id_str = str(response_id).strip()
+                    # Check for conflicting identity (Classe F)
+                    if resp_id_str in identity_ledger:
+                        prev_turn, prev_thread = identity_ledger[resp_id_str]
+                        if (turn_id_str is not None and prev_turn is not None and turn_id_str != prev_turn) or (t_id_str is not None and prev_thread is not None and t_id_str != prev_thread):
+                            # Conflicting reuse of response_id across different turns/threads (Classe F)
+                            has_conflicting_identity = True
+                            ambiguous_events_count += 1
+                            records_observed_count += 1
+                            conflict_r = "conflicting_structural_identity:response_id_reused_with_different_turn_or_thread"
+                            if conflict_r not in structural_ineligibility_reasons:
+                                structural_ineligibility_reasons.append(conflict_r)
+                            if len(semantic_correlations_records) < MAX_CORRELATIONS_CAP:
+                                semantic_correlations_records.append({
+                                    "correlation_id": f"{resp_id_str}_conflict_line_{line_idx}",
+                                    "status": "ambiguous",
+                                    "strategy": "none",
+                                    "response_id": resp_id_str,
+                                    "turn_id": turn_id_str,
+                                    "thread_id": t_id_str,
+                                    "channels": ["token_usage_record"],
+                                    "counters": {f: format_counter(usage.get(f)) if isinstance(usage, dict) else "not_observable" for f in counter_fields},
+                                    "reasons": [conflict_r],
+                                })
+                            else:
+                                records_overflow_count += 1
+                        else:
+                            # Proven structural duplicate in same turn cycle (Classe A)
+                            correlated_events_count += 1
+                            records_observed_count += 1
+                            for rec in semantic_correlations_records:
+                                if rec.get("correlation_id") == resp_id_str:
+                                    rec["channels"].append("token_usage_record")
+                                    rec["reasons"].append("duplicate_token_usage_record_correlated_exact_identity")
+                                    break
+                    else:
+                        # New distinct response event!
+                        if len(identity_ledger) < MAX_IDENTITY_LEDGER_CAP:
+                            identity_ledger[resp_id_str] = (turn_id_str, t_id_str)
+                            correlated_events_count += 1
+                            records_observed_count += 1
+                            semantic_response_count += 1
+                            resp_counters = {}
+                            if isinstance(usage, dict):
+                                for f in counter_fields:
+                                    val = usage.get(f)
+                                    if isinstance(val, int) and not isinstance(val, bool) and val >= 0:
+                                        semantic_per_resp_sums[f] += val
+                                        semantic_per_resp_observed[f] = True
+                                        resp_counters[f] = val
+                                    else:
+                                        resp_counters[f] = "not_observable"
+                            else:
+                                resp_counters = {f: "not_observable" for f in counter_fields}
+
+                            rec_data = {
+                                "correlation_id": resp_id_str,
+                                "status": "correlated",
+                                "strategy": "exact_identity",
+                                "response_id": resp_id_str,
+                                "turn_id": turn_id_str,
+                                "thread_id": t_id_str,
+                                "channels": ["token_usage_record"],
+                                "counters": resp_counters,
+                                "reasons": ["exact_response_id_registered"],
+                            }
+                            if len(semantic_correlations_records) < MAX_CORRELATIONS_CAP:
+                                semantic_correlations_records.append(rec_data)
+                            else:
+                                records_overflow_count += 1
+                        else:
+                            # R3: Bounded memory cap on identity ledger exceeded
+                            has_ambiguous_identity = True
+                            ambiguous_events_count += 1
+                            records_observed_count += 1
+                            cap_r = f"identity_ledger_cap_exceeded:{MAX_IDENTITY_LEDGER_CAP}"
+                            if cap_r not in structural_ineligibility_reasons:
+                                structural_ineligibility_reasons.append(cap_r)
+                            if len(semantic_correlations_records) < MAX_CORRELATIONS_CAP:
+                                semantic_correlations_records.append({
+                                    "correlation_id": f"ledger_overflow_{resp_id_str}",
+                                    "status": "ambiguous",
+                                    "strategy": "none",
+                                    "response_id": resp_id_str,
+                                    "turn_id": turn_id_str,
+                                    "thread_id": t_id_str,
+                                    "channels": ["token_usage_record"],
+                                    "counters": {f: format_counter(usage.get(f)) if isinstance(usage, dict) else "not_observable" for f in counter_fields},
+                                    "reasons": [cap_r],
+                                })
+                            else:
+                                records_overflow_count += 1
+
 
             # Track thread references from payload
             ref_t_id = payload.get("thread_id")
@@ -836,6 +1015,140 @@ def parse_codex_rollout(session_path: str, run_id: str) -> Dict[str, Any]:
         },
         "response_count": response_count,
     }
+
+    # T026: Raw Usage Channels (AC1)
+    raw_usage_channels = {
+        "token_usage_records": {
+            "event_count": token_usage_records_count,
+            "per_response_sum": {
+                f: (token_usage_records_sums[f] if token_usage_records_observed[f] else "not_observable")
+                for f in counter_fields
+            },
+        },
+        "event_msg_token_counts": {
+            "event_count": event_msg_token_counts_count,
+            "per_response_sum": {
+                f: (event_msg_token_counts_sums[f] if event_msg_token_counts_observed[f] else "not_observable")
+                for f in counter_fields
+            },
+        },
+        "cumulative_snapshots": {
+            "snapshot_count": cumulative_snapshots_count,
+            "latest_snapshot": latest_cumulative_snapshot,
+        },
+    }
+
+    # T026: Semantic Correlations Layer (AC3, AC7, I25)
+    records_retained = len(semantic_correlations_records)
+    records_observed = records_retained + records_overflow_count
+    records_truncated = records_overflow_count > 0
+    semantic_correlations = {
+        "rule_id": RULE_ID_CODEX_0_153_4 if harness_version == "0.153.4" else None,
+        "summary": {
+            "records_observed": records_observed,
+            "records_retained": records_retained,
+            "records_truncated": records_truncated,
+            "correlated_events": correlated_events_count,
+            "ambiguous_events": ambiguous_events_count,
+            "unmatched_events": unmatched_events_count,
+        },
+        "records": semantic_correlations_records,
+    }
+
+    # T026: Normalized Usage Layer & Non-Circular Eligibility Evaluation (AC6, I24)
+    ineligibility_reasons: List[str] = []
+
+    # 1. Rule applicability & supported version
+    if harness_version != "0.153.4":
+        ineligibility_reasons.append(f"unsupported_rule_harness_version:{harness_version}")
+
+    # 2. Format fingerprint & structural integrity
+    if format_fingerprint not in SUPPORTED_FORMAT_FINGERPRINTS:
+        ineligibility_reasons.append(f"unsupported_source_format_fingerprint:{format_fingerprint}")
+    if syntax_error_encountered or truncated_line_encountered:
+        ineligibility_reasons.append("encountered_json_syntax_or_truncation_errors")
+    if unrecognized_event_encountered:
+        ineligibility_reasons.append(first_unrecognized_reason or "unrecognized_event_in_stream")
+
+    # 3. Required channels observable
+    if token_usage_records_count == 0:
+        ineligibility_reasons.append("required_usage_channel_missing:token_usage_records")
+    if cumulative_snapshots_count == 0:
+        ineligibility_reasons.append("required_usage_channel_missing:cumulative_snapshots")
+
+    # 4. No ambiguous or conflicting usage identities (Classe C and Classe F)
+    if has_ambiguous_identity or has_conflicting_identity:
+        for r in structural_ineligibility_reasons:
+            if r not in ineligibility_reasons:
+                ineligibility_reasons.append(r)
+
+    eligible_for_normalization = (len(ineligibility_reasons) == 0)
+
+    if eligible_for_normalization:
+        norm_status = "normalized"
+        norm_rule_id = RULE_ID_CODEX_0_153_4
+        norm_resp_count = semantic_response_count
+        norm_per_resp_sum = {
+            f: (semantic_per_resp_sums[f] if semantic_per_resp_observed[f] else "not_observable")
+            for f in counter_fields
+        }
+        norm_cum = raw_cum
+
+        norm_field_reconciliations: Dict[str, Any] = {}
+        norm_any_divergent = False
+        norm_any_observable = False
+
+        for f in counter_fields:
+            r = reconcile_field(norm_cum.get(f), norm_per_resp_sum.get(f))
+            norm_field_reconciliations[f] = r
+            if r["status"] == "divergent":
+                norm_any_divergent = True
+            if r["status"] == "reconciled":
+                norm_any_observable = True
+
+        if norm_any_divergent:
+            norm_overall_recon = "divergent"
+        elif norm_any_observable:
+            norm_overall_recon = "reconciled"
+        else:
+            norm_overall_recon = "not_observable"
+
+        normalized_usage = {
+            "status": norm_status,
+            "rule_id": norm_rule_id,
+            "eligible_for_normalization": True,
+            "ineligibility_reasons": [],
+            "semantic_response_count": norm_resp_count,
+            "semantic_per_response_sum": norm_per_resp_sum,
+            "cumulative": norm_cum,
+            "reconciliation": {
+                "status": norm_overall_recon,
+                "fields": norm_field_reconciliations,
+            },
+        }
+    else:
+        normalized_usage = {
+            "status": "not_observable",
+            "rule_id": RULE_ID_CODEX_0_153_4 if harness_version == "0.153.4" else None,
+            "eligible_for_normalization": False,
+            "ineligibility_reasons": ineligibility_reasons,
+            "semantic_response_count": 0,
+            "semantic_per_response_sum": {f: "not_observable" for f in counter_fields},
+            "cumulative": raw_cum,
+            "reconciliation": {
+                "status": "not_observable",
+                "fields": {
+                    f: {
+                        "status": "not_observable",
+                        "cumulative_value": raw_cum.get(f, "not_observable"),
+                        "per_response_value": "not_observable",
+                        "delta": None,
+                    }
+                    for f in counter_fields
+                },
+            },
+        }
+
 
     # 4. Derived Usage (Invariant I5: strictly not_observable)
     derived_usage = {
@@ -997,6 +1310,18 @@ def parse_codex_rollout(session_path: str, run_id: str) -> Dict[str, Any]:
         mandatory_priorities.append(f"threads_topology_cap_exceeded:{MAX_THREADS_CAP}")
     if rate_limits_cap_exceeded:
         mandatory_priorities.append(f"rate_limits_cap_exceeded:{MAX_RATE_LIMITS_CAP}")
+    if has_ambiguous_identity:
+        for r in structural_ineligibility_reasons:
+            if "ambiguous" in r or "missing" in r:
+                mandatory_priorities.append(r)
+        if not any("ambiguous" in p or "missing" in p for p in mandatory_priorities):
+            mandatory_priorities.append("ambiguous_usage_event_identity")
+    if has_conflicting_identity:
+        for r in structural_ineligibility_reasons:
+            if "conflict" in r or "mismatch" in r:
+                mandatory_priorities.append(r)
+        if not any("conflict" in p or "mismatch" in p for p in mandatory_priorities):
+            mandatory_priorities.append("conflicting_structural_identity")
 
     if mandatory_priorities:
         parser_status = "partial"
@@ -1029,6 +1354,9 @@ def parse_codex_rollout(session_path: str, run_id: str) -> Dict[str, Any]:
         },
         "timing": timing,
         "raw_usage": raw_usage,
+        "raw_usage_channels": raw_usage_channels,
+        "semantic_correlations": semantic_correlations,
+        "normalized_usage": normalized_usage,
         "derived_usage": derived_usage,
         "observed_contexts": observed_contexts,
         "thread_topology": thread_topology,
@@ -1100,6 +1428,45 @@ def build_empty_or_unsupported_observation(
                 "fields": not_obs_recons,
             },
             "response_count": 0,
+        },
+        "raw_usage_channels": {
+            "token_usage_records": {
+                "event_count": 0,
+                "per_response_sum": not_obs_counters,
+            },
+            "event_msg_token_counts": {
+                "event_count": 0,
+                "per_response_sum": not_obs_counters,
+            },
+            "cumulative_snapshots": {
+                "snapshot_count": 0,
+                "latest_snapshot": not_obs_counters,
+            },
+        },
+        "semantic_correlations": {
+            "rule_id": None,
+            "summary": {
+                "records_observed": 0,
+                "records_retained": 0,
+                "records_truncated": False,
+                "correlated_events": 0,
+                "ambiguous_events": 0,
+                "unmatched_events": 0,
+            },
+            "records": [],
+        },
+        "normalized_usage": {
+            "status": "not_observable",
+            "rule_id": None,
+            "eligible_for_normalization": False,
+            "ineligibility_reasons": parser_reasons or ["empty_or_unsupported_session"],
+            "semantic_response_count": 0,
+            "semantic_per_response_sum": not_obs_counters,
+            "cumulative": not_obs_counters,
+            "reconciliation": {
+                "status": "not_observable",
+                "fields": not_obs_recons,
+            },
         },
         "derived_usage": {
             "uncached_input_tokens": "not_observable",

@@ -107,6 +107,11 @@
         },
         "continue_independent_after_block": {
           "type": "boolean"
+        },
+        "target_repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "description": "T028: Canonical target repository (owner/repo) explicitly authorized for pull request and merge operations."
         }
       }
     },
@@ -220,6 +225,11 @@
                 "type": "string",
                 "pattern": "^auth-[0-9a-f]{32}$",
                 "description": "T028: unique identifier of the out-of-band merge authorization envelope."
+              },
+              "target_repository": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+                "description": "T028: Canonical target repository (owner/repo) explicitly authorized for this unit."
               }
             },
             "allOf": [
@@ -237,7 +247,8 @@
                 "then": {
                   "required": [
                     "checker_approved_commit",
-                    "integration_candidate_commit"
+                    "integration_candidate_commit",
+                    "target_repository"
                   ]
                 }
               }

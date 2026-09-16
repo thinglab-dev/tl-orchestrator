@@ -292,7 +292,7 @@ def _read_queue(path: Path) -> list[dict]:
         raise ValueError("invalid merge queue")
     items = value["items"]
     for item in items:
-        required = {"story_id", "pr_number", "state", "enqueued_at"}
+        required = {"story_id", "pr_number", "state", "enqueued_at", "target_repository"}
         if (
             not isinstance(item, dict)
             or not required.issubset(item)
@@ -314,14 +314,9 @@ def _read_queue(path: Path) -> list[dict]:
             or not isinstance(item.get("enqueued_at"), (int, float))
             or isinstance(item.get("enqueued_at"), bool)
             or ("detail" in item and not isinstance(item["detail"], str))
-            or (
-                "target_repository" in item
-                and (
-                    not isinstance(item["target_repository"], str)
-                    or not item["target_repository"]
-                    or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", item["target_repository"])
-                )
-            )
+            or not isinstance(item.get("target_repository"), str)
+            or not item.get("target_repository")
+            or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", item["target_repository"])
             or (
                 "started_at" in item
                 and (
@@ -354,9 +349,13 @@ def enqueue_merge(story_id, pr_number, queue_file, target_repository: str | None
         or pr_number < 1
     ):
         return {"state": "invalid_input"}
-    resolved_repo = target_repository if target_repository is not None else os.environ.get("TL_TARGET_REPOSITORY", "thinglab-dev/tl-orchestrator")
-    if not isinstance(resolved_repo, str) or not resolved_repo or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", resolved_repo):
+    if (
+        not isinstance(target_repository, str)
+        or not target_repository
+        or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", target_repository)
+    ):
         return {"state": "invalid_input"}
+    resolved_repo = target_repository
     try:
         with _FileLock(target.with_name(target.name + ".lock")):
             items = _read_queue(target)

@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -83,7 +84,8 @@ class Fixture:
         self.batch = {
             "id": "B001", "status": "in_progress", "batch_revision": 1,
             "authorization": {"proposal_id": "P1", "proposal_digest": "d" * 16, "authority_source": "test", "authorized_at": "2026-01-01T00:00:00Z",
-                              "permitted_effects": permitted, "continue_independent_after_block": continue_after_block},
+                              "permitted_effects": permitted, "continue_independent_after_block": continue_after_block,
+                              "target_repository": "thinglab-dev/tl-orchestrator"},
             "frozen_scope": scope,
             "budget": {"max_model_calls": max_calls, "consumed_model_calls": 0, "reserved_model_calls": 0, "max_rework_rounds_per_unit": max_rework,
                        "max_advisor_calls": 0, "consumed_advisor_calls": 0, "pending_call": None},
@@ -103,6 +105,7 @@ class Fixture:
                       "checker": {"adapter": "fake-checker", "model": "c1", "effort": "low", "timeout_seconds": 120}},
             "gates": {"always": gates if gates is not None else [{"id": "compile", "argv": [sys.executable, "-c", "import pkg"]}], "by_flag": {}, "canonical": []},
             "limits": base_limits, "base_branch": "main", "gh_executable": [sys.executable, str(FAKE_GH)],
+            "target_repository": "thinglab-dev/tl-orchestrator",
             "ci": {"enabled": ci, "poll_seconds": 0, "timeout_seconds": 5, "flaky_reruns": 1},
             "sensitive_paths": ["secrets/"], "env_allowlist": ["TL_FAKE_GH_STATE"], "accept_unisolated_worker": True,
         }
@@ -1257,6 +1260,69 @@ class RuntimeTest(unittest.TestCase):
         calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
         self.assertEqual(sum(1 for c in calls if c[:2] == ["pr", "create"]), 1)
         self.assertIn("REVIEW\n\n- T001: PR https://example.invalid/pr/100 open, not merged", (fx.state_dir / "report.md").read_text(encoding="utf-8"))
+
+    def test_probe_target_repository_fail_closed_and_hostile_env_isolation(self) -> None:
+        """Action Item R1 counterfactual probe:
+        1. When target_repository is missing, Runtime._resolve_target_repository and CI fail closed (Refusal)
+           even if origin has a GitHub remote and hostile TL_TARGET_REPOSITORY or GH_REPO are in os.environ.
+        2. When target_repository is explicitly provided, hostile env variables do not override it.
+        3. Invalid regex format fails closed.
+        4. CI.checks and CI._runs never invoke gh when target_repository is missing.
+        """
+        fx = Fixture(self.root, units=1)
+        # Point origin to a deceptive remote URL
+        subprocess.run(["git", "remote", "set-url", "origin", "https://github.com/hostile-org/hostile-repo.git"], cwd=fx.repo, check=True)
+
+        # 1. Missing target repository with hostile env
+        fx.config.pop("target_repository", None)
+        fx.batch["authorization"].pop("target_repository", None)
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+
+        hostile_env = {
+            "TL_TARGET_REPOSITORY": "attacker/env-repo",
+            "GH_REPO": "attacker/gh-repo",
+        }
+        with mock.patch.dict(os.environ, hostile_env):
+            rt = fx.runtime()
+            with self.assertRaises(tl_runtime.Refusal) as ctx:
+                rt._resolve_target_repository()
+            self.assertIn("missing_or_invalid_target_repository", str(ctx.exception))
+
+            # CI checks also fails closed without executing gh
+            ci = tl_runtime.CI(fx.config, fx.repo, fx.state_dir / "artifacts")
+            with self.assertRaises(tl_runtime.Refusal) as ctx_ci:
+                ci.checks(1)
+            self.assertIn("missing_or_invalid_target_repository", str(ctx_ci.exception))
+
+            with self.assertRaises(tl_runtime.Refusal) as ctx_ci2:
+                ci._runs("feat/branch", "abc1234")
+            self.assertIn("missing_or_invalid_target_repository", str(ctx_ci2.exception))
+
+        # 2. Hostile env cannot override authorized target repository
+        fx.config["target_repository"] = "thinglab-dev/tl-orchestrator"
+        fx.batch["authorization"]["target_repository"] = "thinglab-dev/tl-orchestrator"
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        with mock.patch.dict(os.environ, hostile_env):
+            rt2 = fx.runtime()
+            resolved = rt2._resolve_target_repository()
+            self.assertEqual(resolved, "thinglab-dev/tl-orchestrator")
+            ci2 = tl_runtime.CI(fx.config, fx.repo, fx.state_dir / "artifacts", target_repository="thinglab-dev/tl-orchestrator")
+            self.assertEqual(ci2._resolve_target_repo(), "thinglab-dev/tl-orchestrator")
+
+        # 3. Invalid target repository format fails closed
+        fx.config["target_repository"] = "invalid_repo_no_slash"
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        rt3 = fx.runtime()
+        with self.assertRaises(tl_runtime.Refusal) as ctx3:
+            rt3._resolve_target_repository()
+        self.assertIn("missing_or_invalid_target_repository", str(ctx3.exception))
+
+        ci3 = tl_runtime.CI(fx.config, fx.repo, fx.state_dir / "artifacts", target_repository="invalid_repo_no_slash")
+        with self.assertRaises(tl_runtime.Refusal) as ctx_ci3:
+            ci3.checks(1)
+        self.assertIn("missing_or_invalid_target_repository", str(ctx_ci3.exception))
 
 
 class CiSliceTest(unittest.TestCase):

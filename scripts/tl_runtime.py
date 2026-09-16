@@ -683,6 +683,7 @@ class Unit:
     integration_candidate_commit: str = ""
     authority_mode: str = ""
     authorization_id: str = ""
+    target_repository: str = ""
 
 
 def load_unit(batch_unit: dict, repo: Path, tasks_dir: str) -> Unit:
@@ -716,6 +717,7 @@ def load_unit(batch_unit: dict, repo: Path, tasks_dir: str) -> Unit:
         integration_candidate_commit=str(batch_unit.get("integration_candidate_commit") or ""),
         authority_mode=str(batch_unit.get("authority_mode") or ""),
         authorization_id=str(batch_unit.get("authorization_id") or ""),
+        target_repository=str(batch_unit.get("target_repository") or ""),
     )
 
 
@@ -1095,15 +1097,21 @@ def run_gate(gate: dict, repo: Path, env: dict, output_cap: int, values: dict | 
 
 
 class CI:
-    def __init__(self, config: dict, repo: Path, artifacts: Path):
+    def __init__(self, config: dict, repo: Path, artifacts: Path, target_repository: str | None = None):
         self.config = config.get("ci", {}) if isinstance(config.get("ci"), dict) else {}
         self.gh = config.get("gh_argv", ["gh"])
         self.repo = repo
         self.artifacts = artifacts
-        self.target_repository = config.get("target_repository")
+        raw_repo = target_repository if target_repository is not None else config.get("target_repository")
+        self.target_repository = str(raw_repo).strip() if raw_repo is not None else ""
+
+    def _resolve_target_repo(self) -> str:
+        if not self.target_repository or not isinstance(self.target_repository, str) or not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", self.target_repository):
+            raise Refusal("missing_or_invalid_target_repository", 2)
+        return self.target_repository
 
     def checks(self, pr_number: int) -> dict:
-        target_repo = self.target_repository or "thinglab-dev/tl-orchestrator"
+        target_repo = self._resolve_target_repo()
         record = run_argv([*self.gh, "pr", "checks", str(pr_number), "--repo", target_repo, "--json", "name,state,link,workflow"], self.repo, 120)
         if record["exit_code"] != 0:
             # gh exits 8 when checks are pending and 1 when some failed; both still print JSON.
@@ -1126,7 +1134,8 @@ class CI:
         return {"state": state, "rows": rows}
 
     def _runs(self, branch: str, commit: str) -> list:
-        argv = [*self.gh, "run", "list", "--branch", branch, "--json", "databaseId,conclusion,status,headSha", "--limit", "10"]
+        target_repo = self._resolve_target_repo()
+        argv = [*self.gh, "run", "list", "--repo", target_repo, "--branch", branch, "--json", "databaseId,conclusion,status,headSha", "--limit", "10"]
         if commit:
             argv += ["--commit", commit]
         runs = run_argv(argv, self.repo, 120)
@@ -1137,6 +1146,7 @@ class CI:
         return [r for r in rows if isinstance(r, dict) and (not commit or not r.get("headSha") or r.get("headSha") == commit)]
 
     def failed_log(self, pr_number: int, branch: str, commit: str = "") -> tuple[str, str]:
+        target_repo = self._resolve_target_repo()
         run_id = None
         try:
             for row in self._runs(branch, commit):
@@ -1147,17 +1157,18 @@ class CI:
             pass
         if run_id is None:
             return "", ""
-        log = run_argv([*self.gh, "run", "view", str(run_id), "--log-failed"], self.repo, 300, cap=5_000_000)
+        log = run_argv([*self.gh, "run", "view", str(run_id), "--repo", target_repo, "--log-failed"], self.repo, 300, cap=5_000_000)
         raw = self.artifacts / f"ci-{run_id}.log"
         raw.parent.mkdir(parents=True, exist_ok=True)
         raw.write_text(log["stdout"], encoding="utf-8")
         return log["stdout"], raw.as_posix()
 
     def rerun_failed(self, branch: str, commit: str = "") -> bool:
+        target_repo = self._resolve_target_repo()
         try:
             for row in self._runs(branch, commit):
                 if str(row.get("conclusion", "")).lower() == "failure":
-                    return run_argv([*self.gh, "run", "rerun", str(row["databaseId"]), "--failed"], self.repo, 120)["exit_code"] == 0
+                    return run_argv([*self.gh, "run", "rerun", str(row["databaseId"]), "--repo", target_repo, "--failed"], self.repo, 120)["exit_code"] == 0
         except (ValueError, KeyError):
             return False
         return False
@@ -1241,7 +1252,8 @@ class Runtime:
         self.policy = Policy(self.config, self.batch)
         self.harness = Harness(self.config, self.repo, self.state_dir / "jobs", self.policy)
         self.compiler = ContextCompiler(self.config, self.repo, self.git)
-        self.ci = CI(self.config, self.repo, self.state_dir / "artifacts")
+        target_repo = self.config.get("target_repository") or self.batch.get("authorization", {}).get("target_repository")
+        self.ci = CI(self.config, self.repo, self.state_dir / "artifacts", target_repository=target_repo)
         self.units: dict[str, Unit] = {}
         for batch_unit in self.batch["frozen_scope"]["units"]:
             self.units[batch_unit["work_ref"]] = load_unit(batch_unit, self.repo, self.config.get("tasks_dir", ""))
@@ -1939,7 +1951,7 @@ class Runtime:
                 title = f"{uid}: {unit.title}"[:120]
 
                 def pr(intent: dict) -> dict:
-                    rows = self._find_pr(record.branch)
+                    rows = self._find_pr(record.branch, uid)
                     if rows is None:
                         return {"_status": "failed", "detail": "gh pr list failed before create"}
                     if rows:
@@ -1952,7 +1964,7 @@ class Runtime:
                         if state != "OPEN":
                             return {"_status": "failed", "detail": f"pull request {row.get('number')} for this branch is {state}"}
                         return {"url": row.get("url"), "number": row.get("number"), "existing": True}
-                    expected_repo = self._resolve_target_repository()
+                    expected_repo = self._resolve_target_repository(uid)
                     body = f"Batch {self.batch_id}, unit {uid}. Spec {unit.spec_path.relative_to(self.repo).as_posix()} @ {unit.spec_revision}.\n\nGenerated by tl_runtime {RUNTIME_VERSION}."
                     out = run_argv([*self.config["gh_argv"], "pr", "create", "--repo", expected_repo, "--head", record.branch, "--base", base, "--title", title, "--body", body], self.repo, 300)
                     if out["exit_code"] != 0:
@@ -1988,7 +2000,7 @@ class Runtime:
                 if self.config["ci"].get("enabled") and record.ci.get("state") != "success":
                     self.note(f"{uid}: merge skipped, CI state {record.ci.get('state') or 'unknown'}")
                 else:
-                    view = self._pr_view(record.pr["number"])
+                    view = self._pr_view(record.pr["number"], uid)
                     if view is None:
                         raise UnitPark("awaiting_operator", f"gh pr view failed before merge evaluation for PR {record.pr['number']}", decision={"options": ["retry", "skip"]})
                     if str(view.get("state", "")).upper() == "MERGED" and view.get("baseRefName") == self.base_branch and view.get("headRefOid") == record.commit:
@@ -2020,7 +2032,7 @@ class Runtime:
                         raise UnitPark("awaiting_operator", f"human_merge_only: unit {uid} configured for {authority_mode}", decision={"options": ["retry", "skip"]})
                     else:
                         raise UnitPark("awaiting_operator", f"unsupported_authority_mode: {authority_mode}", decision={"options": ["skip"]})
-                    expected_repo = self._resolve_target_repository()
+                    expected_repo = self._resolve_target_repository(uid)
                     comments = view.get("comments") or []
 
                     store = getattr(self, "authority_store", None)
@@ -2085,7 +2097,7 @@ class Runtime:
                         receipt = None
 
                     def merge(intent: dict) -> dict:
-                        curr_view = self._pr_view(record.pr["number"])
+                        curr_view = self._pr_view(record.pr["number"], uid)
                         if curr_view is None:
                             return {"_status": "failed", "detail": "gh pr view failed before merge"}
                         if str(curr_view.get("state", "")).upper() == "MERGED" and curr_view.get("baseRefName") == intent["base"] and curr_view.get("headRefOid") == record.commit:
@@ -2108,7 +2120,7 @@ class Runtime:
                         self._fault_point("after_call:pull_request_merge")
                         if out["exit_code"] != 0:
                             return {"_status": "failed", "detail": out["stderr"][-400:]}
-                        after = self._pr_view(record.pr["number"])
+                        after = self._pr_view(record.pr["number"], uid)
                         if after is None:
                             return {"_status": "ambiguous", "merged": False, "queued": True, "detail": "gh pr merge returned success but gh pr view failed afterwards; verify and retry"}
                         if str(after.get("state", "")).upper() != "MERGED":
@@ -2204,6 +2216,7 @@ class Runtime:
 
     def ci_loop(self, unit: Unit) -> str:
         uid = unit.id
+        self.ci.target_repository = self._resolve_target_repository(uid)
         record = self.fold.units[uid]
         number = record.pr["number"]
         deadline = time.time() + float(self.config["ci"]["timeout_seconds"])
@@ -2273,8 +2286,8 @@ class Runtime:
                 self.unit_state(uid, "retryable", "resumed after restart", phase=record.phase)
         self.refold()
 
-    def _pr_view(self, number) -> dict | None:
-        expected_repo = self._resolve_target_repository()
+    def _pr_view(self, number, unit_id: str | None = None) -> dict | None:
+        expected_repo = self._resolve_target_repository(unit_id)
         out = run_argv([*self.config["gh_argv"], "pr", "view", str(number), "--repo", expected_repo, "--json", "state,mergedAt,headRefOid,baseRefName,baseRefOid,comments"], self.repo, 120)
         try:
             view = json.loads(out["stdout"] or "{}") if out["exit_code"] == 0 else None
@@ -2282,33 +2295,22 @@ class Runtime:
             view = None
         return view if isinstance(view, dict) else None
 
-    def _resolve_target_repository(self) -> str:
-        repo = self.config.get("target_repository") or self.batch.get("authorization", {}).get("target_repository")
-        if "target_repository" in self.config and not self.config.get("target_repository"):
-            raise Refusal("missing_or_invalid_target_repository in config", 2)
-        if repo:
-            repo_str = str(repo).strip()
-            if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo_str):
-                raise Refusal(f"invalid_target_repository: '{repo}'", 2)
-            return repo_str
-        try:
-            url = self.git.run("remote", "get-url", "origin").strip()
-            m = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
-            if m and re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", m.group(1)):
-                return m.group(1)
-        except Exception:
-            pass
-        repo_env = os.environ.get("TL_TARGET_REPOSITORY", "").strip()
-        if repo_env:
-            if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo_env):
-                raise Refusal(f"invalid_target_repository: '{repo_env}'", 2)
-            return repo_env
-        return "thinglab-dev/tl-orchestrator"
+    def _resolve_target_repository(self, unit_id: str | None = None) -> str:
+        repo = ""
+        if unit_id and unit_id in self.units and getattr(self.units[unit_id], "target_repository", ""):
+            repo = self.units[unit_id].target_repository
+        if not repo:
+            repo = self.config.get("target_repository") or self.batch.get("authorization", {}).get("target_repository")
+        if not repo or not isinstance(repo, str):
+            raise Refusal("missing_or_invalid_target_repository", 2)
+        repo_str = repo.strip()
+        if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo_str):
+            raise Refusal(f"missing_or_invalid_target_repository: '{repo}'", 2)
+        return repo_str
 
-
-    def _find_pr(self, branch: str) -> list | None:
+    def _find_pr(self, branch: str, unit_id: str | None = None) -> list | None:
         """Open or merged pull requests whose head is `branch`; None when gh failed."""
-        expected_repo = self._resolve_target_repository()
+        expected_repo = self._resolve_target_repository(unit_id)
         out = run_argv([*self.config["gh_argv"], "pr", "list", "--repo", expected_repo, "--head", branch, "--state", "all", "--json", "number,url,baseRefName,headRefOid,state", "--limit", "1"], self.repo, 120)
         try:
             rows = json.loads(out["stdout"] or "[]") if out["exit_code"] == 0 else None
@@ -2376,8 +2378,9 @@ class Runtime:
             if before is None and not remote_sha:
                 return "released", {"detail": "remote branch absent; push will run"}
             return "ambiguous", {"detail": f"remote at {remote_sha[:12] or 'absent'}: neither the pushed commit {commit[:12]} nor the pre-push state {str(before)[:12] or 'absent'}"}
+        uid = intent.get("unit", "")
         if effect == "pull_request":
-            rows = self._find_pr(payload.get("branch", ""))
+            rows = self._find_pr(payload.get("branch", ""), uid)
             if rows is None:
                 return "ambiguous", {"detail": "gh pr list failed"}
             if rows:
@@ -2393,7 +2396,7 @@ class Runtime:
                 return "ok", {"url": row.get("url"), "number": row.get("number"), "detail": "pull request already exists"}
             return "released", {"detail": "no pull request for branch; create will run"}
         if effect == "pull_request_merge":
-            view = self._pr_view(payload.get("pr", ""))
+            view = self._pr_view(payload.get("pr", ""), uid)
             if view is None:
                 return "ambiguous", {"detail": "gh pr view failed"}
             if str(view.get("state", "")).upper() == "MERGED" or view.get("mergedAt"):

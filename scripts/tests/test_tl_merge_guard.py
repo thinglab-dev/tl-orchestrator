@@ -1817,7 +1817,7 @@ sys.exit(0)
         )
         self.assertEqual(
             rule.get("then", {}).get("required"),
-            ["checker_approved_commit", "integration_candidate_commit"],
+            ["checker_approved_commit", "integration_candidate_commit", "target_repository"],
         )
 
         def eval_unit_conditional(unit: dict) -> tuple[bool, str]:
@@ -1865,12 +1865,23 @@ sys.exit(0)
         })
         self.assertFalse(ok)
 
-        # 5. authority_mode = delegated_single_merge with both commit bindings -> VALID
+        # 5. authority_mode = delegated_single_merge with both commit bindings but missing target_repository -> INVALID
         ok, msg = eval_unit_conditional({
             "work_ref": "T018",
             "authority_mode": "delegated_single_merge",
             "checker_approved_commit": "a" * 40,
             "integration_candidate_commit": "b" * 40,
+        })
+        self.assertFalse(ok, "Expected invalid for delegated_single_merge when target_repository is missing")
+        self.assertIn("target_repository", msg)
+
+        # 6. authority_mode = delegated_single_merge with commit bindings and target_repository -> VALID
+        ok, msg = eval_unit_conditional({
+            "work_ref": "T018",
+            "authority_mode": "delegated_single_merge",
+            "checker_approved_commit": "a" * 40,
+            "integration_candidate_commit": "b" * 40,
+            "target_repository": "thinglab-dev/tl-orchestrator",
         })
         self.assertTrue(ok, msg)
 

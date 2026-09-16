@@ -110,8 +110,6 @@ def merge_queue_head(
             if expected_repo_param is not None
             else (item.get("target_repository") if "target_repository" in item else item.get("expected_repo"))
         )
-        if raw_repo is None:
-            raw_repo = os.environ.get("TL_TARGET_REPOSITORY")
 
         expected_repo = str(raw_repo).strip() if raw_repo is not None else ""
         if not expected_repo or not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", expected_repo):

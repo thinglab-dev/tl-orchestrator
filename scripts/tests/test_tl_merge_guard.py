@@ -1557,6 +1557,7 @@ sys.exit(0)
                     base_sha="b" * 40,
                     checker_commit="a" * 40,
                     candidate_commit="a" * 40,
+                    target_repository="thinglab-dev/tl-orchestrator",
                     envelope=env,
                     receipt_token=compute_receipt_token(
                         authorization_id=env["authorization_id"],
@@ -1566,6 +1567,7 @@ sys.exit(0)
                         head_sha="a" * 40,
                         base_sha="b" * 40,
                         envelope_signature=env["provenance"]["signature"],
+                        target_repository="thinglab-dev/tl-orchestrator",
                     ),
                 )
                 # Must be rejected because runtime anchor does NOT trust fixture key
@@ -1796,6 +1798,154 @@ sys.exit(0)
                 self.assertEqual(latest_cas.get("state"), "indeterminate")
             finally:
                 os.environ.pop("TL_FAKE_GH_STATE", None)
+
+    def test_batch_schema_authority_mode_conditional(self):
+        """Action Item R4: verify conditional batch schema validation for authority_mode."""
+        schema_path = Path("schemas/batch.schema.json")
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        unit_schema = schema["properties"]["frozen_scope"]["properties"]["units"]["items"]
+
+        # Structural assertions on schemas/batch.schema.json
+        self.assertIn("allOf", unit_schema)
+        rules = unit_schema["allOf"]
+        self.assertEqual(len(rules), 1)
+        rule = rules[0]
+        self.assertEqual(rule.get("if", {}).get("required"), ["authority_mode"])
+        self.assertEqual(
+            rule.get("if", {}).get("properties", {}).get("authority_mode", {}).get("const"),
+            "delegated_single_merge",
+        )
+        self.assertEqual(
+            rule.get("then", {}).get("required"),
+            ["checker_approved_commit", "integration_candidate_commit"],
+        )
+
+        def eval_unit_conditional(unit: dict) -> tuple[bool, str]:
+            if_rule = rule["if"]
+            then_rule = rule["then"]
+            if_matches = True
+            for req in if_rule.get("required", []):
+                if req not in unit:
+                    if_matches = False
+                    break
+            if if_matches:
+                for prop, sub in if_rule.get("properties", {}).items():
+                    if prop in unit:
+                        if "const" in sub and unit[prop] != sub["const"]:
+                            if_matches = False
+                            break
+                    else:
+                        if_matches = False
+                        break
+            if not if_matches:
+                return True, "if condition did not match; then condition not applied"
+            for req in then_rule.get("required", []):
+                if req not in unit:
+                    return False, f"Missing required conditional field: {req}"
+            return True, "Valid"
+
+        # 1. authority_mode absent -> if fails -> valid without commit bindings
+        ok, msg = eval_unit_conditional({"work_ref": "T018"})
+        self.assertTrue(ok, msg)
+
+        # 2. authority_mode = human_merge_only -> if fails -> valid without commit bindings
+        ok, msg = eval_unit_conditional({"work_ref": "T018", "authority_mode": "human_merge_only"})
+        self.assertTrue(ok, msg)
+
+        # 3. authority_mode = delegated_single_merge without commit bindings -> if matches, then fails -> INVALID
+        ok, msg = eval_unit_conditional({"work_ref": "T018", "authority_mode": "delegated_single_merge"})
+        self.assertFalse(ok, "Expected invalid for delegated_single_merge when commit bindings are missing")
+        self.assertIn("Missing required conditional field", msg)
+
+        # 4. authority_mode = delegated_single_merge with only one commit binding -> INVALID
+        ok, msg = eval_unit_conditional({
+            "work_ref": "T018",
+            "authority_mode": "delegated_single_merge",
+            "checker_approved_commit": "a" * 40,
+        })
+        self.assertFalse(ok)
+
+        # 5. authority_mode = delegated_single_merge with both commit bindings -> VALID
+        ok, msg = eval_unit_conditional({
+            "work_ref": "T018",
+            "authority_mode": "delegated_single_merge",
+            "checker_approved_commit": "a" * 40,
+            "integration_candidate_commit": "b" * 40,
+        })
+        self.assertTrue(ok, msg)
+
+    def test_authority_receipt_target_repository_validation(self):
+        """Action Item R1: verify target_repository binding in AuthorityReceipt.is_authentic."""
+        claim = make_valid_claim(
+            repo="thinglab-dev/tl-orchestrator",
+            pr=100,
+            head_sha="a" * 40,
+            base_sha="b" * 40,
+            checker_commit="a" * 40,
+            candidate_commit="a" * 40,
+        )
+        env = make_envelope(claim)
+        auth_id = env["authorization_id"]
+        sig = env["provenance"]["signature"]
+
+        tok_ok = compute_receipt_token(
+            authorization_id=auth_id,
+            target_pr=100,
+            candidate_commit="a" * 40,
+            checker_commit="a" * 40,
+            head_sha="a" * 40,
+            base_sha="b" * 40,
+            envelope_signature=sig,
+            target_repository="thinglab-dev/tl-orchestrator",
+        )
+        receipt_ok = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id,
+            target_pr=100,
+            head_sha="a" * 40,
+            base_sha="b" * 40,
+            checker_commit="a" * 40,
+            candidate_commit="a" * 40,
+            target_repository="thinglab-dev/tl-orchestrator",
+            envelope=env,
+            receipt_token=tok_ok,
+        )
+        self.assertTrue(receipt_ok.is_authentic(trust_root=self.trust_root, expected_repo="thinglab-dev/tl-orchestrator"))
+
+        # Mismatch with expected_repo -> rejected
+        self.assertFalse(receipt_ok.is_authentic(trust_root=self.trust_root, expected_repo="attacker/fork-repo"))
+
+        # Receipt target_repository mismatch with envelope -> rejected
+        receipt_bad_repo = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id,
+            target_pr=100,
+            head_sha="a" * 40,
+            base_sha="b" * 40,
+            checker_commit="a" * 40,
+            candidate_commit="a" * 40,
+            target_repository="attacker/fork-repo",
+            envelope=env,
+            receipt_token=tok_ok,
+        )
+        self.assertFalse(receipt_bad_repo.is_authentic(trust_root=self.trust_root))
+
+        # Envelope without target_repository -> rejected
+        env_no_repo = dict(env)
+        env_no_repo.pop("target_repository", None)
+        receipt_no_env_repo = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id,
+            target_pr=100,
+            head_sha="a" * 40,
+            base_sha="b" * 40,
+            checker_commit="a" * 40,
+            candidate_commit="a" * 40,
+            target_repository="thinglab-dev/tl-orchestrator",
+            envelope=env_no_repo,
+            receipt_token=tok_ok,
+        )
+        self.assertFalse(receipt_no_env_repo.is_authentic(trust_root=self.trust_root))
 
 
 if __name__ == "__main__":

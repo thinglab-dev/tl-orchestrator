@@ -292,9 +292,10 @@ def compute_receipt_token(
     head_sha: str,
     base_sha: str,
     envelope_signature: str,
+    target_repository: str = "",
 ) -> str:
-    """Compute deterministic cryptographic receipt token binding authorization and commits."""
-    msg = f"{authorization_id}:{target_pr}:{candidate_commit}:{checker_commit}:{head_sha}:{base_sha}:{envelope_signature}".encode("utf-8")
+    """Compute deterministic cryptographic receipt token binding authorization, repo, and commits."""
+    msg = f"{authorization_id}:{target_repository}:{target_pr}:{candidate_commit}:{checker_commit}:{head_sha}:{base_sha}:{envelope_signature}".encode("utf-8")
     return "rcpt-" + hashlib.sha256(b"TL_AUTHORITY_RECEIPT_V1\0" + msg).hexdigest()
 
 
@@ -957,6 +958,7 @@ class AuthorityReceipt:
     base_sha: str = ""
     checker_commit: str = ""
     candidate_commit: str = ""
+    target_repository: str = ""
     reason: str = ""
     envelope: dict[str, Any] | None = None
     degraded_mode: str | None = None
@@ -966,7 +968,7 @@ class AuthorityReceipt:
     def is_confirmed(self) -> bool:
         return self.status == "CONFIRMED"
 
-    def is_authentic(self, trust_root: TrustRoot | None = None) -> bool:
+    def is_authentic(self, trust_root: TrustRoot | None = None, expected_repo: str | None = None) -> bool:
         """
         Verify that this receipt is authentic, was issued by MergeAuthorityGate,
         contains a valid cryptographic envelope signed by an authorized platform trust root,
@@ -999,6 +1001,13 @@ class AuthorityReceipt:
         if self.envelope.get("authorization_id") != self.authorization_id:
             return False
         if int(self.envelope.get("target_pr", 0)) != int(self.target_pr):
+            return False
+        envelope_repo = self.envelope.get("target_repository")
+        if not isinstance(envelope_repo, str) or not envelope_repo:
+            return False
+        if self.target_repository and self.target_repository != envelope_repo:
+            return False
+        if expected_repo and (envelope_repo != expected_repo or (self.target_repository and self.target_repository != expected_repo)):
             return False
         if self.envelope.get("integration_candidate_commit") != self.candidate_commit:
             return False
@@ -1041,6 +1050,7 @@ class AuthorityReceipt:
 
         # 6. Receipt token verification
         env_sig = str(provenance.get("signature", ""))
+        target_repo = str(self.target_repository or envelope_repo or "")
         expected_token = compute_receipt_token(
             authorization_id=self.authorization_id,
             target_pr=int(self.target_pr),
@@ -1049,6 +1059,7 @@ class AuthorityReceipt:
             head_sha=self.head_sha,
             base_sha=self.base_sha,
             envelope_signature=env_sig,
+            target_repository=target_repo,
         )
         if self.receipt_token != expected_token:
             return False
@@ -1206,7 +1217,8 @@ def parse_pr_comment_transport(
             if int_id != root.trusted_app_id:
                 return f"FAIL_CLOSED: untrusted_app_id: {int_id} != {root.trusted_app_id}", []
 
-            author_login = comment.get("author", {}).get("login", "")
+            author_dict = comment.get("author") or comment.get("user") or {}
+            author_login = author_dict.get("login", "")
             expected_bot = f"{root.trusted_app_slug}[bot]"
             if author_login != expected_bot:
                 return f"FAIL_CLOSED: untrusted_comment_author: comment author {author_login!r} is not trusted bot {expected_bot!r}", []
@@ -1272,6 +1284,7 @@ class MergeAuthorityGate:
                 base_sha=base_sha,
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
+                target_repository=expected_repo,
                 reason="missing_commit_bindings",
             )
 
@@ -1284,6 +1297,7 @@ class MergeAuthorityGate:
                 base_sha=base_sha,
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
+                target_repository=expected_repo,
                 reason=f"pr_not_open: {pr_state}",
             )
 
@@ -1296,6 +1310,7 @@ class MergeAuthorityGate:
                 base_sha=base_sha,
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
+                target_repository=expected_repo,
                 reason=f"candidate_commit_mismatch: pr head {head_sha} != candidate {candidate_commit}",
             )
 
@@ -1310,13 +1325,21 @@ class MergeAuthorityGate:
                 base_sha=base_sha,
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
+                target_repository=expected_repo,
                 reason=delta_reason,
             )
 
         # Out-of-process root of trust check for delegated_single_merge
-        resolved_root = trust_root if trust_root is not None else TrustRoot.from_env()
+        if trust_root is not None:
+            resolved_root = trust_root
+        else:
+            try:
+                resolved_root = TrustRoot.from_platform(gh_executable=gh_executable)
+            except Exception:
+                resolved_root = TrustRoot.from_env()
+
         if enforce_mode == "delegated_single_merge":
-            if trust_root is not None and getattr(resolved_root, "trust_source", "") != "advisory_env":
+            if getattr(resolved_root, "trust_source", "") != "advisory_env":
                 is_auth, auth_err = resolved_root.verify_out_of_process_authenticity(gh_executable=gh_executable)
                 if not is_auth:
                     return AuthorityReceipt(
@@ -1327,6 +1350,7 @@ class MergeAuthorityGate:
                         base_sha=base_sha,
                         checker_commit=checker_commit,
                         candidate_commit=candidate_commit,
+                        target_repository=expected_repo,
                         reason=f"FAIL_CLOSED: unauthenticated_trust_root: {auth_err}",
                     )
             else:
@@ -1339,6 +1363,7 @@ class MergeAuthorityGate:
                         base_sha=base_sha,
                         checker_commit=checker_commit,
                         candidate_commit=candidate_commit,
+                        target_repository=expected_repo,
                         reason="advisory_trust_root_degraded_to_human_merge_only: local process environment trust root is not mechanically isolated; delegated_single_merge requires out-of-process authority root",
                         degraded_mode="human_merge_only.enforced",
                     )
@@ -1368,6 +1393,7 @@ class MergeAuthorityGate:
                 base_sha=base_sha,
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
+                target_repository=expected_repo,
                 reason=parse_status,
             )
 
@@ -1384,6 +1410,7 @@ class MergeAuthorityGate:
                 base_sha=base_sha,
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
+                target_repository=expected_repo,
                 reason=f"envelope_checker_commit_mismatch: {envelope.get('checker_approved_commit')} != {checker_commit}",
                 envelope=envelope,
             )
@@ -1396,6 +1423,7 @@ class MergeAuthorityGate:
                 base_sha=base_sha,
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
+                target_repository=expected_repo,
                 reason=f"envelope_authority_mode_mismatch: {envelope.get('authority_mode')} != {enforce_mode}",
                 envelope=envelope,
             )
@@ -1411,6 +1439,7 @@ class MergeAuthorityGate:
                 base_sha=base_sha,
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
+                target_repository=expected_repo,
                 reason="authorization_already_consumed",
                 envelope=envelope,
             )
@@ -1424,6 +1453,7 @@ class MergeAuthorityGate:
                 base_sha=base_sha,
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
+                target_repository=expected_repo,
                 reason="human_merge_only_mode",
                 envelope=envelope,
             )
@@ -1438,6 +1468,7 @@ class MergeAuthorityGate:
                 base_sha=base_sha,
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
+                target_repository=expected_repo,
                 reason="authorization_reservation_failed_concurrent_or_consumed",
                 envelope=envelope,
             )
@@ -1445,6 +1476,7 @@ class MergeAuthorityGate:
         env_sig = ""
         if isinstance(envelope, dict):
             env_sig = str(envelope.get("provenance", {}).get("signature", ""))
+        target_repo = str(expected_repo or (envelope.get("target_repository") if isinstance(envelope, dict) else "") or "")
         receipt_tok = compute_receipt_token(
             authorization_id=auth_id,
             target_pr=pr_number,
@@ -1453,6 +1485,7 @@ class MergeAuthorityGate:
             head_sha=head_sha,
             base_sha=base_sha,
             envelope_signature=env_sig,
+            target_repository=target_repo,
         )
 
         return AuthorityReceipt(
@@ -1463,6 +1496,7 @@ class MergeAuthorityGate:
             base_sha=base_sha,
             checker_commit=checker_commit,
             candidate_commit=candidate_commit,
+            target_repository=target_repo,
             reason="AUTHORITY_CONFIRMED",
             envelope=envelope,
             receipt_token=receipt_tok,

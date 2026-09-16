@@ -15,6 +15,9 @@ from scripts import tl_supervisor
 from scripts import tl_run_story
 from scripts.tl_merge_guard import (
     AuthorityReceipt,
+    AuthorityStore,
+    DurableExternalAuthorityStore,
+    MergeAuthorityGate,
     TrustRoot,
     compute_receipt_token,
     sign_authorization_envelope,
@@ -42,6 +45,7 @@ def mock_receipt(
     base_sha="b" * 40,
     checker_commit="a" * 40,
     candidate_commit="a" * 40,
+    target_repository="thinglab-dev/tl-orchestrator",
     nonce: str | None = None,
 ):
     if nonce is None:
@@ -49,7 +53,7 @@ def mock_receipt(
         nonce = uuid.uuid4().hex
     claim = {
         "schema_version": 1,
-        "target_repository": "thinglab-dev/tl-orchestrator",
+        "target_repository": target_repository,
         "target_pr": pr_number,
         "expected_head_sha": head_sha,
         "expected_base_sha": base_sha,
@@ -78,6 +82,7 @@ def mock_receipt(
         head_sha=head_sha,
         base_sha=base_sha,
         envelope_signature=env_sig,
+        target_repository=target_repository,
     )
     return AuthorityReceipt(
         status="CONFIRMED" if confirmed else "REJECTED",
@@ -87,6 +92,7 @@ def mock_receipt(
         base_sha=base_sha,
         checker_commit=checker_commit,
         candidate_commit=candidate_commit,
+        target_repository=target_repository,
         reason=reason,
         envelope=envelope,
         receipt_token=token,
@@ -479,6 +485,30 @@ class MergeQueueTest(SupervisorCase):
             self.assertNotEqual(cmd[1:3], ["pr", "merge"])
 
     @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_cross_repository_receipt_reuse_without_merging(self, run):
+        """Action Item R1: Cross-repository/fork authority reuse in the merge queue must be blocked before invoking gh pr merge."""
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        fork_receipt = mock_receipt(
+            True,
+            story_id="T001",
+            pr_number=11,
+            head_sha="a" * 40,
+            base_sha="b" * 40,
+            target_repository="attacker/fork-repo",
+        )
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=fork_receipt,
+            expected_repo="thinglab-dev/tl-orchestrator",
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("cross_repository_authority_reuse_rejected", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
     def test_merge_queue_rejects_fabricated_receipt_without_merging(self, run):
         """Fabricated receipt with missing commits or authorization ID must be blocked."""
         queue = self.root / "merge-queue.json"
@@ -491,6 +521,7 @@ class MergeQueueTest(SupervisorCase):
             base_sha="b" * 40,
             checker_commit="",
             candidate_commit="",
+            target_repository="thinglab-dev/tl-orchestrator",
             reason="bogus",
         )
         result = tl_run_story.merge_queue_head(
@@ -561,6 +592,7 @@ class MergeQueueTest(SupervisorCase):
             base_sha="b" * 40,
             checker_commit="a" * 40,
             candidate_commit="a" * 40,
+            target_repository="thinglab-dev/tl-orchestrator",
             reason="fabricated",
             envelope=None,
             receipt_token="",
@@ -680,6 +712,22 @@ class MergeQueueTest(SupervisorCase):
         self.assertEqual(result["state"], "failed")
         self.assertIn("cross_pr_receipt_mismatch", result["item"]["detail"])
 
+    def test_supervisor_merge_succeeded_rejects_cross_repo_receipt_mismatch(self):
+        """Action Item R1: Supervisor _merge_succeeded rejects a receipt issued for a different repository."""
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        fork_receipt = mock_receipt(
+            True,
+            story_id="T001",
+            pr_number=11,
+            target_repository="attacker/fork-repo",
+        )
+        result = tl_supervisor.advance_merge_queue(
+            queue, lambda item: fork_receipt
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("cross_repository_receipt_mismatch", result["item"]["detail"])
+
     def test_uninspected_callback_without_authority_receipt_is_rejected(self):
         queue = self.root / "merge-queue.json"
         tl_supervisor.enqueue_merge("T001", 11, queue)
@@ -702,8 +750,10 @@ class MergeQueueTest(SupervisorCase):
         tl_supervisor.enqueue_merge("T001", 11, queue)
         result = tl_run_story.merge_queue_head(queue)
         self.assertEqual(result["state"], "failed")
-        run.assert_not_called()
         self.assertIn("missing_authority_receipt", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
 
     @mock.patch("scripts.tl_run_story.subprocess.run")
     def test_merge_queue_rejects_fixture_seed_signed_receipt_against_production_anchor(self, run):
@@ -976,6 +1026,357 @@ class MergeQueueTest(SupervisorCase):
         self.assertIn("terminal_missing_commit_bindings", result["item"]["detail"])
         mock_store.mark_indeterminate.assert_called_with(receipt.authorization_id)
         mock_store.commit_consumed.assert_not_called()
+
+    def test_canonical_gate_integrated_merge_flow_single_atomic_possession(self):
+        """Action Item R2: Integrated canonical flow with real MergeAuthorityGate, durable store, and PR comment.
+        Proves single atomic possession (unused -> reserved -> consumed), PR merged, without mocked validator."""
+        store_dir = self.root / "auth_store_r2"
+        store = DurableExternalAuthorityStore(store_dir=store_dir)
+        queue = self.root / "merge-queue-r2.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+
+        claim = {
+            "schema_version": 1,
+            "target_repository": "thinglab-dev/tl-orchestrator",
+            "target_pr": 11,
+            "expected_head_sha": "a" * 40,
+            "expected_base_sha": "b" * 40,
+            "checker_approved_commit": "a" * 40,
+            "integration_candidate_commit": "a" * 40,
+            "authority_mode": "delegated_single_merge",
+            "issued_at": "2026-09-15T00:00:00Z",
+            "expires_at": "2029-01-01T00:00:00Z",
+            "nonce": "nonce-r2-canonical-1234",
+        }
+        envelope = sign_authorization_envelope(
+            claim,
+            secret_key=TEST_FIXTURE_SECRET_KEY,
+            key_id=TEST_FIXTURE_KEY_ID,
+            mechanism="dedicated_github_app",
+            integration_id=TEST_FIXTURE_APP_ID,
+            issuer=f"{TEST_FIXTURE_APP_SLUG}[bot]",
+        )
+        auth_id = envelope["authorization_id"]
+        self.assertEqual(store.get_state(auth_id), "unused")
+
+        merge_invoked = False
+        def fake_run(args, *a, **kw):
+            nonlocal merge_invoked
+            cmd = args
+            if len(cmd) >= 3 and cmd[1:3] == ["api", f"apps/{TEST_FIXTURE_APP_SLUG}"]:
+                return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                    "id": TEST_FIXTURE_APP_ID,
+                    "slug": TEST_FIXTURE_APP_SLUG,
+                    "public_keys": {TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
+                }), "")
+            if len(cmd) >= 4 and cmd[1:3] == ["pr", "view"] and cmd[3] == "11":
+                if any("comments" in arg for arg in cmd):
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                        "state": "OPEN",
+                        "headRefOid": "a" * 40,
+                        "baseRefOid": "b" * 40,
+                        "baseRefName": "main",
+                        "comments": [{
+                            "id": 1,
+                            "body": f"```json:tl-merge-authorization\n{json.dumps(envelope)}\n```",
+                            "author": {"login": f"{TEST_FIXTURE_APP_SLUG}[bot]"},
+                            "user": {"login": f"{TEST_FIXTURE_APP_SLUG}[bot]"},
+                            "author_association": "COLLABORATOR",
+                        }],
+                    }), "")
+                elif merge_invoked:
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                        "state": "MERGED",
+                        "headRefOid": "a" * 40,
+                        "baseRefOid": "b" * 40,
+                    }), "")
+                else:
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                        "state": "OPEN",
+                        "headRefOid": "a" * 40,
+                        "baseRefOid": "b" * 40,
+                    }), "")
+            if len(cmd) >= 3 and cmd[1:3] == ["pr", "merge"]:
+                merge_invoked = True
+                return subprocess.CompletedProcess(cmd, 0, "merged", "")
+            return completed()
+
+        with mock.patch("scripts.tl_run_story.subprocess.run", side_effect=fake_run), \
+             mock.patch("scripts.tl_merge_guard.subprocess.run", side_effect=fake_run):
+            result = tl_run_story.merge_queue_head(
+                queue,
+                authority_store=store,
+                repo_root=self.root,
+                expected_repo="thinglab-dev/tl-orchestrator",
+            )
+
+        self.assertEqual(result["state"], "merged")
+        self.assertTrue(merge_invoked)
+        self.assertEqual(store.get_state(auth_id), "consumed")
+        queue_item = json.loads(queue.read_text(encoding="utf-8"))["items"][0]
+        self.assertEqual(queue_item["state"], "merged")
+
+    def test_cli_advance_connects_to_canonical_gate_without_mocked_validator(self):
+        """Action Item R2: CLI advance connects to canonical gate without requiring a mocked validator."""
+        store_dir = self.root / "cli_auth_store"
+        store = DurableExternalAuthorityStore(store_dir=store_dir)
+        queue = self.root / "cli-merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+
+        claim = {
+            "schema_version": 1,
+            "target_repository": "thinglab-dev/tl-orchestrator",
+            "target_pr": 11,
+            "expected_head_sha": "a" * 40,
+            "expected_base_sha": "b" * 40,
+            "checker_approved_commit": "a" * 40,
+            "integration_candidate_commit": "a" * 40,
+            "authority_mode": "delegated_single_merge",
+            "issued_at": "2026-09-15T00:00:00Z",
+            "expires_at": "2029-01-01T00:00:00Z",
+            "nonce": "nonce-r2-cli-5678",
+        }
+        envelope = sign_authorization_envelope(
+            claim,
+            secret_key=TEST_FIXTURE_SECRET_KEY,
+            key_id=TEST_FIXTURE_KEY_ID,
+            mechanism="dedicated_github_app",
+            integration_id=TEST_FIXTURE_APP_ID,
+            issuer=f"{TEST_FIXTURE_APP_SLUG}[bot]",
+        )
+        auth_id = envelope["authorization_id"]
+
+        merge_invoked = False
+        def fake_run(args, *a, **kw):
+            nonlocal merge_invoked
+            cmd = args
+            if len(cmd) >= 3 and cmd[1:3] == ["api", f"apps/{TEST_FIXTURE_APP_SLUG}"]:
+                return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                    "id": TEST_FIXTURE_APP_ID,
+                    "slug": TEST_FIXTURE_APP_SLUG,
+                    "public_keys": {TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
+                }), "")
+            if len(cmd) >= 4 and cmd[1:3] == ["pr", "view"] and cmd[3] == "11":
+                if any("comments" in arg for arg in cmd):
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                        "state": "OPEN",
+                        "headRefOid": "a" * 40,
+                        "baseRefOid": "b" * 40,
+                        "baseRefName": "main",
+                        "comments": [{
+                            "id": 1,
+                            "body": f"```json:tl-merge-authorization\n{json.dumps(envelope)}\n```",
+                            "author": {"login": f"{TEST_FIXTURE_APP_SLUG}[bot]"},
+                            "user": {"login": f"{TEST_FIXTURE_APP_SLUG}[bot]"},
+                            "author_association": "COLLABORATOR",
+                        }],
+                    }), "")
+                elif merge_invoked:
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                        "state": "MERGED",
+                        "headRefOid": "a" * 40,
+                        "baseRefOid": "b" * 40,
+                    }), "")
+                else:
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                        "state": "OPEN",
+                        "headRefOid": "a" * 40,
+                        "baseRefOid": "b" * 40,
+                    }), "")
+            if len(cmd) >= 3 and cmd[1:3] == ["pr", "merge"]:
+                merge_invoked = True
+                return subprocess.CompletedProcess(cmd, 0, "merged", "")
+            return completed()
+
+        with mock.patch("scripts.tl_run_story.subprocess.run", side_effect=fake_run), \
+             mock.patch("scripts.tl_merge_guard.subprocess.run", side_effect=fake_run):
+            exit_code = tl_run_story.main([
+                "advance",
+                "--queue", str(queue),
+                "--repo-root", str(self.root),
+                "--store-dir", str(store_dir),
+            ])
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(merge_invoked)
+        self.assertEqual(store.get_state(auth_id), "consumed")
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_post_reservation_toctou_view_failure_marks_indeterminate(self, run):
+        """Action Item R3: Post-reservation gh pr view failure must mark store indeterminate and not merge."""
+        def fake_run(args, *a, **kw):
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                return subprocess.CompletedProcess(args, 1, "", "transient network failure")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_view")
+
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+            authority_store=store,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("toctou_live_view_failed", result["item"]["detail"])
+        self.assertEqual(store.get_state(receipt.authorization_id), "indeterminate")
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_post_reservation_toctou_invalid_json_marks_indeterminate(self, run):
+        """Action Item R3: Post-reservation invalid live PR JSON must mark store indeterminate and not merge."""
+        def fake_run(args, *a, **kw):
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                return subprocess.CompletedProcess(args, 0, "<html>Bad Gateway</html>", "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_json")
+
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+            authority_store=store,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("toctou_invalid_live_pr_json", result["item"]["detail"])
+        self.assertEqual(store.get_state(receipt.authorization_id), "indeterminate")
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_post_reservation_toctou_pr_not_open_marks_indeterminate(self, run):
+        """Action Item R3: Post-reservation non-OPEN PR state must mark store indeterminate and not merge."""
+        def fake_run(args, *a, **kw):
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                return subprocess.CompletedProcess(args, 0, json.dumps({"state": "CLOSED", "headRefOid": "a" * 40, "baseRefOid": "b" * 40}), "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_closed")
+
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+            authority_store=store,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("toctou_pr_not_open", result["item"]["detail"])
+        self.assertEqual(store.get_state(receipt.authorization_id), "indeterminate")
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_post_reservation_toctou_missing_shas_marks_indeterminate(self, run):
+        """Action Item R3: Post-reservation missing live commit SHAs must mark store indeterminate and not merge."""
+        def fake_run(args, *a, **kw):
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "", "baseRefOid": "b" * 40}), "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_shas")
+
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+            authority_store=store,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("toctou_missing_live_shas", result["item"]["detail"])
+        self.assertEqual(store.get_state(receipt.authorization_id), "indeterminate")
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_post_reservation_toctou_head_drift_marks_indeterminate(self, run):
+        """Action Item R3: Post-reservation head drift must mark store indeterminate and not merge."""
+        def fake_run(args, *a, **kw):
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "c" * 40, "baseRefOid": "b" * 40}), "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_hdrift")
+
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+            authority_store=store,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("merge_queue_toctou_head_drift", result["item"]["detail"])
+        self.assertEqual(store.get_state(receipt.authorization_id), "indeterminate")
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_post_reservation_toctou_base_drift_marks_indeterminate(self, run):
+        """Action Item R3: Post-reservation base drift must mark store indeterminate and not merge."""
+        def fake_run(args, *a, **kw):
+            if len(args) >= 3 and args[1:3] == ["pr", "view"]:
+                return subprocess.CompletedProcess(args, 0, json.dumps({"state": "OPEN", "headRefOid": "a" * 40, "baseRefOid": "d" * 40}), "")
+            return completed()
+
+        run.side_effect = fake_run
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_bdrift")
+
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+            authority_store=store,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("merge_queue_toctou_base_drift", result["item"]["detail"])
+        self.assertEqual(store.get_state(receipt.authorization_id), "indeterminate")
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_post_reservation_unexpected_exception_marks_indeterminate(self, run):
+        """Action Item R3: Unexpected exception post-reservation must defensively mark store indeterminate and not merge."""
+        run.side_effect = OSError("simulated post-reservation I/O error")
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue)
+        receipt = mock_receipt(True, story_id="T001", pr_number=11)
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_exc")
+
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+            authority_store=store,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertTrue(
+            "merge_queue_unexpected_post_reservation_failure" in result["item"]["detail"]
+            or "toctou_live_view_failed" in result["item"]["detail"]
+        )
+        self.assertEqual(store.get_state(receipt.authorization_id), "indeterminate")
 
     def test_corrupt_queue_never_dispatches_merge(self):
         queue = self.root / "merge-queue.json"

@@ -225,6 +225,9 @@
             "allOf": [
               {
                 "if": {
+                  "required": [
+                    "authority_mode"
+                  ],
                   "properties": {
                     "authority_mode": {
                       "const": "delegated_single_merge"

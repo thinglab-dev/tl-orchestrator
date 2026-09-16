@@ -305,6 +305,7 @@ def _read_queue(path: Path) -> list[dict]:
                 "detail",
                 "in_flight_token",
                 "started_at",
+                "target_repository",
             }
             or not _valid_story_id(item.get("story_id"))
             or not isinstance(item.get("pr_number"), int)
@@ -313,6 +314,14 @@ def _read_queue(path: Path) -> list[dict]:
             or not isinstance(item.get("enqueued_at"), (int, float))
             or isinstance(item.get("enqueued_at"), bool)
             or ("detail" in item and not isinstance(item["detail"], str))
+            or (
+                "target_repository" in item
+                and (
+                    not isinstance(item["target_repository"], str)
+                    or not item["target_repository"]
+                    or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", item["target_repository"])
+                )
+            )
             or (
                 "started_at" in item
                 and (
@@ -335,7 +344,7 @@ def _read_queue(path: Path) -> list[dict]:
     return items
 
 
-def enqueue_merge(story_id, pr_number, queue_file):
+def enqueue_merge(story_id, pr_number, queue_file, target_repository: str | None = None):
     """Append a merge request to the durable FIFO."""
     target = Path(queue_file)
     if (
@@ -345,6 +354,9 @@ def enqueue_merge(story_id, pr_number, queue_file):
         or pr_number < 1
     ):
         return {"state": "invalid_input"}
+    resolved_repo = target_repository if target_repository is not None else os.environ.get("TL_TARGET_REPOSITORY", "thinglab-dev/tl-orchestrator")
+    if not isinstance(resolved_repo, str) or not resolved_repo or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", resolved_repo):
+        return {"state": "invalid_input"}
     try:
         with _FileLock(target.with_name(target.name + ".lock")):
             items = _read_queue(target)
@@ -353,6 +365,7 @@ def enqueue_merge(story_id, pr_number, queue_file):
             item = {
                 "story_id": story_id,
                 "pr_number": pr_number,
+                "target_repository": resolved_repo,
                 "state": "pending",
                 "enqueued_at": time.time(),
             }
@@ -388,11 +401,11 @@ def _merge_succeeded(result: object, dispatch_item: dict | None = None) -> tuple
     if not receipt.is_confirmed:
         return False, f"authority_not_confirmed: {receipt.reason}"
 
-    if not receipt.is_authentic():
-        return False, f"unverified_or_fabricated_receipt: {receipt.reason}"
-
     # Scope binding validation against dispatch_item
     if dispatch_item is not None:
+        expected_repo = dispatch_item.get("target_repository")
+        if expected_repo and getattr(receipt, "target_repository", None) != expected_repo:
+            return False, f"cross_repository_receipt_mismatch: receipt target_repository={getattr(receipt, 'target_repository', None)} != item target_repository={expected_repo}"
         expected_pr = int(dispatch_item.get("pr_number", 0))
         if expected_pr and int(receipt.target_pr) != expected_pr:
             return False, f"cross_pr_receipt_mismatch: receipt target_pr={receipt.target_pr} != item pr_number={expected_pr}"
@@ -400,6 +413,10 @@ def _merge_succeeded(result: object, dispatch_item: dict | None = None) -> tuple
             return False, f"candidate_commit_mismatch: receipt candidate_commit={receipt.candidate_commit} != item candidate_commit={dispatch_item['candidate_commit']}"
         if "base_sha" in dispatch_item and dispatch_item["base_sha"] != receipt.base_sha:
             return False, f"base_sha_mismatch: receipt base_sha={receipt.base_sha} != item base_sha={dispatch_item['base_sha']}"
+
+    expected_repo = dispatch_item.get("target_repository") if dispatch_item else None
+    if not receipt.is_authentic(expected_repo=expected_repo):
+        return False, f"unverified_or_fabricated_receipt: {receipt.reason}"
 
     if isinstance(outcome, bool):
         return outcome, receipt.reason if outcome else f"merge_failed: {receipt.reason}"

@@ -2,7 +2,7 @@ format_version: 1
 work_method: native
 active_work_ref: T028
 current_role: checker
-next_action: Executar revisão independente r16 via OpenAI Codex (gpt-5.6-terra/high) em fresh session report-only.
+next_action: Executar revisão independente r17 via OpenAI Codex (gpt-5.6-terra/high) em fresh session report-only.
 coordinator:
   harness: claude
   session: claude-code-b5b7f943
@@ -49,6 +49,6 @@ open_discussions: []
 | T025 | feat | none | done | [] | [] | 2 | evidence/T025-r11.md |
 | T026 | feat | none | done | [T025] | [] | 6 | evidence/T026-r03.md |
 | T027 | feat | package | done | [T018, T026] | [] | 2 | evidence/T027-r01.md |
-| T028 | gov | none | in_progress | [T027] | [] | 16 | evidence/T028-r01.md |
+| T028 | gov | none | in_progress | [T027] | [] | 17 | evidence/T028-r01.md |
 | T029 | feat | none | done | [T026] | [] | 12 | evidence/T029-r11.md |
 | T030 | gov | none | done | [T029] | [] | 2 | evidence/T030-r01.md |

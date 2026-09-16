@@ -2093,6 +2093,11 @@ class Runtime:
                             if receipt.degraded_mode:
                                 raise UnitPark("awaiting_operator", f"human_merge_only: {receipt.reason}", decision={"options": ["retry", "skip"]})
                             raise UnitPark("awaiting_operator", f"merge_authority_not_confirmed: {receipt.reason}", decision={"options": ["retry", "skip"]})
+                        if receipt is not None and receipt.is_confirmed:
+                            receipt_mode = getattr(receipt, "authority_mode", "")
+                            env_mode = receipt.envelope.get("authority_mode") if isinstance(receipt.envelope, dict) else None
+                            if receipt_mode == "human_merge_only" or env_mode == "human_merge_only" or (env_mode is not None and env_mode != "delegated_single_merge"):
+                                raise UnitPark("awaiting_operator", f"human_merge_only: receipt authority_mode is {env_mode or receipt_mode}", decision={"options": ["retry", "skip"]})
                     else:
                         receipt = None
 

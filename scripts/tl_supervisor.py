@@ -306,6 +306,7 @@ def _read_queue(path: Path) -> list[dict]:
                 "in_flight_token",
                 "started_at",
                 "target_repository",
+                "authority_mode",
             }
             or not _valid_story_id(item.get("story_id"))
             or not isinstance(item.get("pr_number"), int)
@@ -317,6 +318,7 @@ def _read_queue(path: Path) -> list[dict]:
             or not isinstance(item.get("target_repository"), str)
             or not item.get("target_repository")
             or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", item["target_repository"])
+            or ("authority_mode" in item and item["authority_mode"] not in {"delegated_single_merge", "human_merge_only"})
             or (
                 "started_at" in item
                 and (
@@ -328,20 +330,22 @@ def _read_queue(path: Path) -> list[dict]:
             )
             or (
                 "in_flight_token" in item
-                and (
-                    item["state"] != "merging"
-                    or not isinstance(item["in_flight_token"], str)
-                    or not item["in_flight_token"]
-                )
+                and (item["state"] != "merging" or not isinstance(item["in_flight_token"], str) or not item["in_flight_token"])
             )
         ):
             raise ValueError("invalid merge queue item")
     return items
 
 
-def enqueue_merge(story_id, pr_number, queue_file, target_repository: str | None = None):
-    """Append a merge request to the durable FIFO."""
-    target = Path(queue_file)
+def enqueue_merge(
+    story_id: str,
+    pr_number: int,
+    target: Path,
+    target_repository: str | None = None,
+    authority_mode: str = "delegated_single_merge",
+) -> dict:
+    """Safely append a merge request to the queue under the lock."""
+    target = Path(target)
     if (
         not _valid_story_id(story_id)
         or not isinstance(pr_number, int)
@@ -355,6 +359,8 @@ def enqueue_merge(story_id, pr_number, queue_file, target_repository: str | None
         or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", target_repository)
     ):
         return {"state": "invalid_input"}
+    if authority_mode not in {"delegated_single_merge", "human_merge_only"}:
+        return {"state": "invalid_input"}
     resolved_repo = target_repository
     try:
         with _FileLock(target.with_name(target.name + ".lock")):
@@ -365,6 +371,7 @@ def enqueue_merge(story_id, pr_number, queue_file, target_repository: str | None
                 "story_id": story_id,
                 "pr_number": pr_number,
                 "target_repository": resolved_repo,
+                "authority_mode": authority_mode,
                 "state": "pending",
                 "enqueued_at": time.time(),
             }

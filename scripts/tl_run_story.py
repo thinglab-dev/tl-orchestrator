@@ -225,6 +225,37 @@ def merge_queue_head(
                 subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
             )
 
+        # Strict Authority Mode Binding: automated queue execution REQUIRES delegated_single_merge (AC13)
+        # Prevents any automated merge execution when authority_mode is human_merge_only across item, envelope, or receipt
+        item_mode = item.get("authority_mode")
+        envelope_mode = receipt.envelope.get("authority_mode") if isinstance(receipt.envelope, dict) else None
+        receipt_mode = getattr(receipt, "authority_mode", None)
+        if (
+            item_mode == "human_merge_only"
+            or envelope_mode == "human_merge_only"
+            or receipt_mode == "human_merge_only"
+            or (envelope_mode is not None and envelope_mode != "delegated_single_merge")
+            or (item_mode is not None and item_mode != "delegated_single_merge")
+            or (receipt_mode is not None and receipt_mode and receipt_mode != "delegated_single_merge")
+        ):
+            reason = "human_merge_only_mode_blocks_automated_merge: automated merge queue requires delegated_single_merge"
+            rejected_receipt = AuthorityReceipt(
+                status="REJECTED",
+                authorization_id=receipt.authorization_id,
+                target_pr=pr_number,
+                head_sha=receipt.head_sha,
+                base_sha=receipt.base_sha,
+                checker_commit=receipt.checker_commit,
+                candidate_commit=receipt.candidate_commit,
+                target_repository=expected_repo,
+                authority_mode="human_merge_only" if (item_mode == "human_merge_only" or envelope_mode == "human_merge_only" or receipt_mode == "human_merge_only") else str(envelope_mode or item_mode or receipt_mode),
+                reason=reason,
+            )
+            return (
+                rejected_receipt,
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
         # Strict Scope & Target PR Binding (Prevents Cross-PR Reuse)
         if int(receipt.target_pr) != pr_number:
             reason = f"cross_pr_authority_reuse_rejected: receipt target_pr={receipt.target_pr} does not match queued item pr_number={pr_number}"

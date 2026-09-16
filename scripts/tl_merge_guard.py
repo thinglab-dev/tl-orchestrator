@@ -293,9 +293,10 @@ def compute_receipt_token(
     base_sha: str,
     envelope_signature: str,
     target_repository: str = "",
+    authority_mode: str = "delegated_single_merge",
 ) -> str:
-    """Compute deterministic cryptographic receipt token binding authorization, repo, and commits."""
-    msg = f"{authorization_id}:{target_repository}:{target_pr}:{candidate_commit}:{checker_commit}:{head_sha}:{base_sha}:{envelope_signature}".encode("utf-8")
+    """Compute deterministic cryptographic receipt token binding authorization, repo, commits, and authority mode."""
+    msg = f"{authorization_id}:{target_repository}:{target_pr}:{candidate_commit}:{checker_commit}:{head_sha}:{base_sha}:{envelope_signature}:{authority_mode}".encode("utf-8")
     return "rcpt-" + hashlib.sha256(b"TL_AUTHORITY_RECEIPT_V1\0" + msg).hexdigest()
 
 
@@ -959,6 +960,7 @@ class AuthorityReceipt:
     checker_commit: str = ""
     candidate_commit: str = ""
     target_repository: str = ""
+    authority_mode: str = ""
     reason: str = ""
     envelope: dict[str, Any] | None = None
     degraded_mode: str | None = None
@@ -997,7 +999,13 @@ class AuthorityReceipt:
         if not is_schema_valid:
             return False
 
-        # 2. Scope bindings
+        # 2. Scope bindings & mode check (AC13: automated merge authority REQUIRES delegated_single_merge)
+        envelope_mode = self.envelope.get("authority_mode")
+        if envelope_mode != "delegated_single_merge":
+            return False
+        receipt_mode = getattr(self, "authority_mode", "")
+        if receipt_mode and receipt_mode != "delegated_single_merge":
+            return False
         if self.envelope.get("authorization_id") != self.authorization_id:
             return False
         if int(self.envelope.get("target_pr", 0)) != int(self.target_pr):
@@ -1060,6 +1068,7 @@ class AuthorityReceipt:
             base_sha=self.base_sha,
             envelope_signature=env_sig,
             target_repository=target_repo,
+            authority_mode=str(envelope_mode),
         )
         if self.receipt_token != expected_token:
             return False
@@ -1480,6 +1489,7 @@ class MergeAuthorityGate:
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
                 target_repository=expected_repo,
+                authority_mode="human_merge_only",
                 reason="human_merge_only_mode",
                 envelope=envelope,
             )
@@ -1495,6 +1505,7 @@ class MergeAuthorityGate:
                 checker_commit=checker_commit,
                 candidate_commit=candidate_commit,
                 target_repository=expected_repo,
+                authority_mode=enforce_mode,
                 reason="authorization_reservation_failed_concurrent_or_consumed",
                 envelope=envelope,
             )
@@ -1512,6 +1523,7 @@ class MergeAuthorityGate:
             base_sha=base_sha,
             envelope_signature=env_sig,
             target_repository=target_repo,
+            authority_mode="delegated_single_merge",
         )
 
         return AuthorityReceipt(
@@ -1523,6 +1535,7 @@ class MergeAuthorityGate:
             checker_commit=checker_commit,
             candidate_commit=candidate_commit,
             target_repository=target_repo,
+            authority_mode="delegated_single_merge",
             reason="AUTHORITY_CONFIRMED",
             envelope=envelope,
             receipt_token=receipt_tok,

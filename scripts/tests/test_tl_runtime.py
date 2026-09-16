@@ -1324,6 +1324,53 @@ class RuntimeTest(unittest.TestCase):
             ci3.checks(1)
         self.assertIn("missing_or_invalid_target_repository", str(ctx_ci3.exception))
 
+    def test_probe_human_merge_only_parks_unit_and_prevents_merge(self) -> None:
+        """Action Item R1: Unit or batch configured with human_merge_only must park immediately and never merge."""
+        import tl_merge_guard
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.batch["authorization"]["authority_mode"] = "human_merge_only"
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        res = fx.run_cli("run")
+        self.assertEqual(res.returncode, 3, res.stderr)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("human_merge_only", record.reason)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+
+        # Also verify receipt-level authenticity check rejecting human_merge_only
+        env = {
+            "schema_version": 1,
+            "authorization_id": "auth-test-human",
+            "target_repository": "thinglab-dev/tl-orchestrator",
+            "target_pr": 1,
+            "expected_head_sha": "a" * 40,
+            "expected_base_sha": "b" * 40,
+            "checker_approved_commit": "a" * 40,
+            "integration_candidate_commit": "a" * 40,
+            "authority_mode": "human_merge_only",
+            "issued_at": "2026-09-15T00:00:00Z",
+            "expires_at": "2029-01-01T00:00:00Z",
+            "nonce": "0123456789abcdef0123456789abcdef",
+            "provenance": {"signature": "sig", "mechanism": "dedicated_github_app"},
+        }
+        receipt = tl_merge_guard.AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id="auth-test-human",
+            target_pr=1,
+            head_sha="a" * 40,
+            base_sha="b" * 40,
+            checker_commit="a" * 40,
+            candidate_commit="a" * 40,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="human_merge_only",
+            envelope=env,
+        )
+        self.assertFalse(receipt.is_authentic())
+
 
 class CiSliceTest(unittest.TestCase):
     def test_go_failure_is_code_failure_with_stable_signature(self) -> None:

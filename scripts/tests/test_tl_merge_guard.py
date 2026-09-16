@@ -2052,6 +2052,71 @@ sys.exit(0)
             self.assertEqual(receipt_did.status, "REJECTED")
             self.assertIn("cross_repository_authority_reuse_rejected", receipt_did.reason)
 
+    def test_probe_36_authority_receipt_is_authentic_rejects_human_merge_only(self):
+        """
+        Probe 36: AC13 AuthorityReceipt.is_authentic strictly rejects envelopes and receipts
+        configured for human_merge_only or any non-delegated_single_merge mode.
+        """
+        head_sha = "c" * 40
+        claim = make_valid_claim(
+            repo="thinglab-dev/tl-orchestrator",
+            pr=55,
+            head_sha=head_sha,
+            base_sha=self.base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            authority_mode="human_merge_only",
+        )
+        env = make_envelope(claim)
+        auth_id = env["authorization_id"]
+        sig = env["provenance"]["signature"]
+
+        # 1. Cryptographic token for human_merge_only
+        tok = compute_receipt_token(
+            authorization_id=auth_id,
+            target_pr=55,
+            candidate_commit=head_sha,
+            checker_commit=head_sha,
+            head_sha=head_sha,
+            base_sha=self.base_sha,
+            envelope_signature=sig,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="human_merge_only",
+        )
+
+        # 2. Fabricated confirmed receipt with human_merge_only envelope
+        receipt = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id,
+            target_pr=55,
+            head_sha=head_sha,
+            base_sha=self.base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="human_merge_only",
+            envelope=env,
+            receipt_token=tok,
+        )
+        # Must fail authenticity because authority_mode is human_merge_only
+        self.assertFalse(receipt.is_authentic(self.trust_root, expected_repo="thinglab-dev/tl-orchestrator"))
+
+        # 3. Fabricated confirmed receipt claiming delegated_single_merge but envelope is human_merge_only
+        receipt_spoofed = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id,
+            target_pr=55,
+            head_sha=head_sha,
+            base_sha=self.base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
+            envelope=env,
+            receipt_token=tok,
+        )
+        self.assertFalse(receipt_spoofed.is_authentic(self.trust_root, expected_repo="thinglab-dev/tl-orchestrator"))
+
 
 if __name__ == "__main__":
     unittest.main()

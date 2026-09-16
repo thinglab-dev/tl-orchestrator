@@ -48,6 +48,7 @@ def mock_receipt(
     candidate_commit="a" * 40,
     target_repository="thinglab-dev/tl-orchestrator",
     nonce: str | None = None,
+    authority_mode: str = "delegated_single_merge",
 ):
     if nonce is None:
         import uuid
@@ -60,7 +61,7 @@ def mock_receipt(
         "expected_base_sha": base_sha,
         "checker_approved_commit": checker_commit,
         "integration_candidate_commit": candidate_commit,
-        "authority_mode": "delegated_single_merge",
+        "authority_mode": authority_mode,
         "issued_at": "2026-09-15T00:00:00Z",
         "expires_at": "2029-01-01T00:00:00Z",
         "nonce": nonce,
@@ -84,6 +85,7 @@ def mock_receipt(
         base_sha=base_sha,
         envelope_signature=env_sig,
         target_repository=target_repository,
+        authority_mode=authority_mode,
     )
     return AuthorityReceipt(
         status="CONFIRMED" if confirmed else "REJECTED",
@@ -94,6 +96,7 @@ def mock_receipt(
         checker_commit=checker_commit,
         candidate_commit=candidate_commit,
         target_repository=target_repository,
+        authority_mode=authority_mode,
         reason=reason,
         envelope=envelope,
         receipt_token=token,
@@ -609,6 +612,90 @@ class MergeQueueTest(SupervisorCase):
         )
         self.assertEqual(result["state"], "failed")
         self.assertIn("fabricated_authority_receipt_rejected", result["item"]["detail"])
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_human_merge_only_via_authority_receipt_without_merging(self, run):
+        """Action Item R1: Signed valid human_merge_only envelope supplied via authority_receipt must block merge, leave CAS unused, and invoke 0 gh merge calls."""
+        run.return_value = completed()
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        store = DurableExternalAuthorityStore(self.root / "external-authority-store.jsonl")
+
+        receipt = mock_receipt(
+            confirmed=True,
+            story_id="T001",
+            pr_number=11,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="human_merge_only",
+        )
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+            authority_store=store,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("human_merge_only_mode_blocks_automated_merge", result["item"]["detail"])
+        self.assertEqual(store.get_state(receipt.authorization_id), "unused")
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_human_merge_only_via_authority_validator_without_merging(self, run):
+        """Action Item R1: Signed valid human_merge_only envelope supplied via authority_validator must block merge, leave CAS unused, and invoke 0 gh merge calls."""
+        run.return_value = completed()
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        store = DurableExternalAuthorityStore(self.root / "external-authority-store.jsonl")
+
+        receipt = mock_receipt(
+            confirmed=True,
+            story_id="T001",
+            pr_number=11,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="human_merge_only",
+        )
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_validator=lambda item, live=None: receipt,
+            authority_store=store,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("human_merge_only_mode_blocks_automated_merge", result["item"]["detail"])
+        self.assertEqual(store.get_state(receipt.authorization_id), "unused")
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_human_merge_only_item_mode_without_merging(self, run):
+        """Action Item R1: Queued item with authority_mode='human_merge_only' must block merge, leave CAS unused, and invoke 0 gh merge calls."""
+        run.return_value = completed()
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        raw = json.loads(queue.read_text(encoding="utf-8"))
+        raw["items"][0]["authority_mode"] = "human_merge_only"
+        queue.write_text(json.dumps(raw), encoding="utf-8")
+
+        store = DurableExternalAuthorityStore(self.root / "external-authority-store.jsonl")
+        receipt = mock_receipt(
+            confirmed=True,
+            story_id="T001",
+            pr_number=11,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
+        )
+        result = tl_run_story.merge_queue_head(
+            queue,
+            authority_receipt=receipt,
+            authority_store=store,
+        )
+        self.assertEqual(result["state"], "failed")
+        self.assertIn("human_merge_only_mode_blocks_automated_merge", result["item"]["detail"])
+        self.assertEqual(store.get_state(receipt.authorization_id), "unused")
         for call_args in run.call_args_list:
             cmd = call_args[0][0]
             self.assertNotEqual(cmd[1:3], ["pr", "merge"])

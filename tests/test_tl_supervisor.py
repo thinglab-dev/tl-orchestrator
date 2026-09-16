@@ -344,6 +344,7 @@ class MergeQueueTest(SupervisorCase):
                             "story_id": "T001",
                             "pr_number": 11,
                             "target_repository": "thinglab-dev/tl-orchestrator",
+                            "authority_mode": "delegated_single_merge",
                             "state": "merging",
                             "enqueued_at": time.time() - 300,
                             "started_at": time.time() - 180,
@@ -353,6 +354,7 @@ class MergeQueueTest(SupervisorCase):
                             "story_id": "T002",
                             "pr_number": 12,
                             "target_repository": "thinglab-dev/tl-orchestrator",
+                            "authority_mode": "delegated_single_merge",
                             "state": "pending",
                             "enqueued_at": time.time() - 200,
                         },
@@ -388,6 +390,7 @@ class MergeQueueTest(SupervisorCase):
                             "story_id": "T001",
                             "pr_number": 11,
                             "target_repository": "thinglab-dev/tl-orchestrator",
+                            "authority_mode": "delegated_single_merge",
                             "state": "merging",
                             "enqueued_at": time.time() - 10,
                             "started_at": time.time(),
@@ -699,6 +702,76 @@ class MergeQueueTest(SupervisorCase):
         for call_args in run.call_args_list:
             cmd = call_args[0][0]
             self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_missing_or_empty_authority_mode_item_without_merging(self, run):
+        """Action Item R1 (r17): Queued item with missing or empty authority_mode fails closed on _read_queue and merge_queue_head."""
+        run.return_value = completed()
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+
+        # 1. Missing authority_mode
+        raw = json.loads(queue.read_text(encoding="utf-8"))
+        del raw["items"][0]["authority_mode"]
+        queue.write_text(json.dumps(raw), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            tl_supervisor._read_queue(queue)
+        res1 = tl_run_story.merge_queue_head(queue)
+        self.assertEqual(res1["state"], "unavailable")
+
+        # 2. Empty authority_mode
+        raw["items"][0]["authority_mode"] = ""
+        queue.write_text(json.dumps(raw), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            tl_supervisor._read_queue(queue)
+        res2 = tl_run_story.merge_queue_head(queue)
+        self.assertEqual(res2["state"], "unavailable")
+
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    @mock.patch("scripts.tl_run_story.subprocess.run")
+    def test_merge_queue_rejects_missing_or_empty_authority_mode_receipt_without_merging(self, run):
+        """Action Item R1 (r17): Receipt with missing or empty authority_mode fails closed in merge_queue_head."""
+        run.return_value = completed()
+        queue = self.root / "merge-queue.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+
+        store = DurableExternalAuthorityStore(self.root / "external-authority-store.jsonl")
+
+        # 1. Receipt authority_mode empty string
+        receipt_empty = mock_receipt(True, story_id="T001", pr_number=11, authority_mode="")
+        res1 = tl_run_story.merge_queue_head(queue, authority_receipt=receipt_empty, authority_store=store)
+        self.assertEqual(res1["state"], "failed")
+        self.assertIn("strict_authority_mode_required", res1["item"]["detail"])
+        self.assertEqual(store.get_state(receipt_empty.authorization_id), "unused")
+
+        # 2. Receipt authority_mode None
+        receipt_none = mock_receipt(True, story_id="T001", pr_number=11, authority_mode=None)
+        res2 = tl_run_story.merge_queue_head(queue, authority_receipt=receipt_none, authority_store=store, retry_failed=True)
+        self.assertEqual(res2["state"], "failed")
+        self.assertIn("strict_authority_mode_required", res2["item"]["detail"])
+        self.assertEqual(store.get_state(receipt_none.authorization_id), "unused")
+
+        # 3. Envelope authority_mode missing
+        receipt_no_env_mode = mock_receipt(True, story_id="T001", pr_number=11, authority_mode="delegated_single_merge")
+        receipt_no_env_mode.envelope.pop("authority_mode", None)
+        res3 = tl_run_story.merge_queue_head(queue, authority_receipt=receipt_no_env_mode, authority_store=store, retry_failed=True)
+        self.assertEqual(res3["state"], "failed")
+        self.assertIn("strict_authority_mode_required", res3["item"]["detail"])
+        self.assertEqual(store.get_state(receipt_no_env_mode.authorization_id), "unused")
+
+        for call_args in run.call_args_list:
+            cmd = call_args[0][0]
+            self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    def test_enqueue_merge_rejects_invalid_or_missing_authority_mode(self):
+        """Action Item R1 (r17): enqueue_merge rejects empty, invalid or None authority_mode."""
+        queue = self.root / "merge-queue.json"
+        self.assertEqual(tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", authority_mode="")["state"], "invalid_input")
+        self.assertEqual(tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", authority_mode="invalid_mode")["state"], "invalid_input")
+        self.assertEqual(tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", authority_mode=None)["state"], "invalid_input")
 
     @mock.patch("scripts.tl_run_story.subprocess.run")
     def test_merge_queue_toctou_view_command_failure_blocks_merge(self, run):

@@ -1004,7 +1004,7 @@ class AuthorityReceipt:
         if envelope_mode != "delegated_single_merge":
             return False
         receipt_mode = getattr(self, "authority_mode", "")
-        if receipt_mode and receipt_mode != "delegated_single_merge":
+        if receipt_mode != "delegated_single_merge":
             return False
         if self.envelope.get("authorization_id") != self.authorization_id:
             return False

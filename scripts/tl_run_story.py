@@ -225,38 +225,7 @@ def merge_queue_head(
                 subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
             )
 
-        # Strict Authority Mode Binding: automated queue execution REQUIRES delegated_single_merge (AC13)
-        # Prevents any automated merge execution when authority_mode is human_merge_only across item, envelope, or receipt
-        item_mode = item.get("authority_mode")
-        envelope_mode = receipt.envelope.get("authority_mode") if isinstance(receipt.envelope, dict) else None
-        receipt_mode = getattr(receipt, "authority_mode", None)
-        if (
-            item_mode == "human_merge_only"
-            or envelope_mode == "human_merge_only"
-            or receipt_mode == "human_merge_only"
-            or (envelope_mode is not None and envelope_mode != "delegated_single_merge")
-            or (item_mode is not None and item_mode != "delegated_single_merge")
-            or (receipt_mode is not None and receipt_mode and receipt_mode != "delegated_single_merge")
-        ):
-            reason = "human_merge_only_mode_blocks_automated_merge: automated merge queue requires delegated_single_merge"
-            rejected_receipt = AuthorityReceipt(
-                status="REJECTED",
-                authorization_id=receipt.authorization_id,
-                target_pr=pr_number,
-                head_sha=receipt.head_sha,
-                base_sha=receipt.base_sha,
-                checker_commit=receipt.checker_commit,
-                candidate_commit=receipt.candidate_commit,
-                target_repository=expected_repo,
-                authority_mode="human_merge_only" if (item_mode == "human_merge_only" or envelope_mode == "human_merge_only" or receipt_mode == "human_merge_only") else str(envelope_mode or item_mode or receipt_mode),
-                reason=reason,
-            )
-            return (
-                rejected_receipt,
-                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
-            )
-
-        # Strict Scope & Target PR Binding (Prevents Cross-PR Reuse)
+        # 2. Scope & Target PR Binding (Prevents Cross-PR Reuse)
         if int(receipt.target_pr) != pr_number:
             reason = f"cross_pr_authority_reuse_rejected: receipt target_pr={receipt.target_pr} does not match queued item pr_number={pr_number}"
             rejected_receipt = AuthorityReceipt(
@@ -295,7 +264,62 @@ def merge_queue_head(
                 subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
             )
 
-        # 3. Fabricated Receipt & Cryptographic Verification: verify authentic cryptographic envelope, token, and expected repository
+        # 3. Basic Envelope & Credential Presence (Prevents Fabricated Receipts)
+        if (
+            not receipt.authorization_id
+            or not receipt.candidate_commit
+            or not receipt.checker_commit
+            or not isinstance(receipt.envelope, dict)
+            or not receipt.envelope
+        ):
+            reason = "fabricated_authority_receipt_rejected: receipt lacks authentic cryptographic envelope, valid platform signature, matching verification token, or target repository binding"
+            rejected_receipt = AuthorityReceipt(
+                status="REJECTED",
+                authorization_id=receipt.authorization_id,
+                target_pr=pr_number,
+                head_sha=receipt.head_sha,
+                base_sha=receipt.base_sha,
+                checker_commit=receipt.checker_commit,
+                candidate_commit=receipt.candidate_commit,
+                target_repository=expected_repo,
+                reason=reason,
+            )
+            return (
+                rejected_receipt,
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        # Strict Authority Mode Binding: automated queue execution REQUIRES delegated_single_merge (AC13)
+        # Prevents any automated merge execution when authority_mode is missing, empty, human_merge_only, or not delegated_single_merge
+        item_mode = item.get("authority_mode")
+        envelope_mode = receipt.envelope.get("authority_mode") if isinstance(receipt.envelope, dict) else None
+        receipt_mode = getattr(receipt, "authority_mode", None)
+        if (
+            item_mode != "delegated_single_merge"
+            or envelope_mode != "delegated_single_merge"
+            or receipt_mode != "delegated_single_merge"
+        ):
+            is_human = (item_mode == "human_merge_only" or envelope_mode == "human_merge_only" or receipt_mode == "human_merge_only")
+            human_prefix = "human_merge_only_mode_blocks_automated_merge: " if is_human else ""
+            reason = f"{human_prefix}strict_authority_mode_required: automated merge requires delegated_single_merge (item_mode={item_mode!r}, envelope_mode={envelope_mode!r}, receipt_mode={receipt_mode!r})"
+            rejected_receipt = AuthorityReceipt(
+                status="REJECTED",
+                authorization_id=receipt.authorization_id,
+                target_pr=pr_number,
+                head_sha=receipt.head_sha,
+                base_sha=receipt.base_sha,
+                checker_commit=receipt.checker_commit,
+                candidate_commit=receipt.candidate_commit,
+                target_repository=expected_repo,
+                authority_mode="human_merge_only" if is_human else str(envelope_mode or item_mode or receipt_mode or "missing"),
+                reason=reason,
+            )
+            return (
+                rejected_receipt,
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
+
+        # Cryptographic Verification: verify authentic cryptographic envelope, token, and expected repository
         if not receipt.is_authentic(trust_root, expected_repo=expected_repo):
             reason = "fabricated_authority_receipt_rejected: receipt lacks authentic cryptographic envelope, valid platform signature, matching verification token, or target repository binding"
             rejected_receipt = AuthorityReceipt(

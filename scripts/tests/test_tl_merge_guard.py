@@ -1918,6 +1918,7 @@ sys.exit(0)
             checker_commit="a" * 40,
             candidate_commit="a" * 40,
             target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
             envelope=env,
             receipt_token=tok_ok,
         )
@@ -1936,6 +1937,7 @@ sys.exit(0)
             checker_commit="a" * 40,
             candidate_commit="a" * 40,
             target_repository="attacker/fork-repo",
+            authority_mode="delegated_single_merge",
             envelope=env,
             receipt_token=tok_ok,
         )
@@ -1953,6 +1955,7 @@ sys.exit(0)
             checker_commit="a" * 40,
             candidate_commit="a" * 40,
             target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
             envelope=env_no_repo,
             receipt_token=tok_ok,
         )
@@ -2116,6 +2119,96 @@ sys.exit(0)
             receipt_token=tok,
         )
         self.assertFalse(receipt_spoofed.is_authentic(self.trust_root, expected_repo="thinglab-dev/tl-orchestrator"))
+
+        # 4. Action Item R1 (r17): Authentic envelope with delegated_single_merge, but receipt authority_mode is empty string or None
+        claim_del = make_valid_claim(
+            repo="thinglab-dev/tl-orchestrator",
+            pr=55,
+            head_sha=head_sha,
+            base_sha=self.base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            authority_mode="delegated_single_merge",
+        )
+        env_del = make_envelope(claim_del)
+        auth_id_del = env_del["authorization_id"]
+        sig_del = env_del["provenance"]["signature"]
+        tok_del = compute_receipt_token(
+            authorization_id=auth_id_del,
+            target_pr=55,
+            candidate_commit=head_sha,
+            checker_commit=head_sha,
+            head_sha=head_sha,
+            base_sha=self.base_sha,
+            envelope_signature=sig_del,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
+        )
+
+        receipt_empty_mode = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id_del,
+            target_pr=55,
+            head_sha=head_sha,
+            base_sha=self.base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="",
+            envelope=env_del,
+            receipt_token=tok_del,
+        )
+        self.assertFalse(receipt_empty_mode.is_authentic(self.trust_root, expected_repo="thinglab-dev/tl-orchestrator"))
+
+        receipt_none_mode = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id_del,
+            target_pr=55,
+            head_sha=head_sha,
+            base_sha=self.base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode=None,
+            envelope=env_del,
+            receipt_token=tok_del,
+        )
+        self.assertFalse(receipt_none_mode.is_authentic(self.trust_root, expected_repo="thinglab-dev/tl-orchestrator"))
+
+        # 5. Envelope missing authority_mode or with empty authority_mode
+        env_no_mode = dict(env_del)
+        env_no_mode.pop("authority_mode", None)
+        receipt_env_no_mode = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id_del,
+            target_pr=55,
+            head_sha=head_sha,
+            base_sha=self.base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
+            envelope=env_no_mode,
+            receipt_token=tok_del,
+        )
+        self.assertFalse(receipt_env_no_mode.is_authentic(self.trust_root, expected_repo="thinglab-dev/tl-orchestrator"))
+
+        env_empty_mode = dict(env_del)
+        env_empty_mode["authority_mode"] = ""
+        receipt_env_empty = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id_del,
+            target_pr=55,
+            head_sha=head_sha,
+            base_sha=self.base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
+            envelope=env_empty_mode,
+            receipt_token=tok_del,
+        )
+        self.assertFalse(receipt_env_empty.is_authentic(self.trust_root, expected_repo="thinglab-dev/tl-orchestrator"))
 
 
 if __name__ == "__main__":

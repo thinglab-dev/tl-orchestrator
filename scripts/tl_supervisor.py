@@ -292,7 +292,7 @@ def _read_queue(path: Path) -> list[dict]:
         raise ValueError("invalid merge queue")
     items = value["items"]
     for item in items:
-        required = {"story_id", "pr_number", "state", "enqueued_at", "target_repository"}
+        required = {"story_id", "pr_number", "state", "enqueued_at", "target_repository", "authority_mode"}
         if (
             not isinstance(item, dict)
             or not required.issubset(item)
@@ -318,7 +318,7 @@ def _read_queue(path: Path) -> list[dict]:
             or not isinstance(item.get("target_repository"), str)
             or not item.get("target_repository")
             or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", item["target_repository"])
-            or ("authority_mode" in item and item["authority_mode"] not in {"delegated_single_merge", "human_merge_only"})
+            or item.get("authority_mode") not in {"delegated_single_merge", "human_merge_only"}
             or (
                 "started_at" in item
                 and (

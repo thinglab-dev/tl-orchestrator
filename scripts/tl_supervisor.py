@@ -292,22 +292,51 @@ def _read_queue(path: Path) -> list[dict]:
         raise ValueError("invalid merge queue")
     items = value["items"]
     for item in items:
-        required = {"story_id", "pr_number", "state", "enqueued_at", "target_repository", "authority_mode"}
-        if (
-            not isinstance(item, dict)
-            or not required.issubset(item)
-            or set(item)
-            - {
+        if not isinstance(item, dict):
+            raise ValueError("invalid merge queue item")
+        mode = item.get("authority_mode")
+        if mode == "delegated_single_merge":
+            required = {
                 "story_id",
                 "pr_number",
                 "state",
                 "enqueued_at",
-                "detail",
-                "in_flight_token",
-                "started_at",
+                "target_repository",
+                "authority_mode",
+                "checker_approved_commit",
+                "integration_candidate_commit",
+            }
+        elif mode == "human_merge_only":
+            required = {
+                "story_id",
+                "pr_number",
+                "state",
+                "enqueued_at",
                 "target_repository",
                 "authority_mode",
             }
+        else:
+            raise ValueError("invalid merge queue item: invalid or missing authority_mode")
+
+        allowed_keys = {
+            "story_id",
+            "pr_number",
+            "state",
+            "enqueued_at",
+            "detail",
+            "in_flight_token",
+            "started_at",
+            "target_repository",
+            "authority_mode",
+            "checker_approved_commit",
+            "integration_candidate_commit",
+        }
+        checker_sha = item.get("checker_approved_commit")
+        candidate_sha = item.get("integration_candidate_commit")
+        if (
+            not isinstance(item, dict)
+            or not required.issubset(item)
+            or set(item) - allowed_keys
             or not _valid_story_id(item.get("story_id"))
             or not isinstance(item.get("pr_number"), int)
             or isinstance(item.get("pr_number"), bool)
@@ -319,6 +348,22 @@ def _read_queue(path: Path) -> list[dict]:
             or not item.get("target_repository")
             or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", item["target_repository"])
             or item.get("authority_mode") not in {"delegated_single_merge", "human_merge_only"}
+            or (
+                item.get("authority_mode") == "delegated_single_merge"
+                and (
+                    not isinstance(checker_sha, str)
+                    or not re.match(r"^[0-9a-f]{40}$", checker_sha)
+                    or not isinstance(candidate_sha, str)
+                    or not re.match(r"^[0-9a-f]{40}$", candidate_sha)
+                )
+            )
+            or (
+                item.get("authority_mode") == "human_merge_only"
+                and (
+                    (checker_sha is not None and (not isinstance(checker_sha, str) or not re.match(r"^[0-9a-f]{40}$", checker_sha)))
+                    or (candidate_sha is not None and (not isinstance(candidate_sha, str) or not re.match(r"^[0-9a-f]{40}$", candidate_sha)))
+                )
+            )
             or (
                 "started_at" in item
                 and (
@@ -343,6 +388,8 @@ def enqueue_merge(
     target: Path,
     target_repository: str | None = None,
     authority_mode: str = "delegated_single_merge",
+    checker_approved_commit: str | None = None,
+    integration_candidate_commit: str | None = None,
 ) -> dict:
     """Safely append a merge request to the queue under the lock."""
     target = Path(target)
@@ -361,6 +408,26 @@ def enqueue_merge(
         return {"state": "invalid_input"}
     if authority_mode not in {"delegated_single_merge", "human_merge_only"}:
         return {"state": "invalid_input"}
+    if authority_mode == "delegated_single_merge":
+        if (
+            not isinstance(checker_approved_commit, str)
+            or not re.match(r"^[0-9a-f]{40}$", checker_approved_commit)
+            or not isinstance(integration_candidate_commit, str)
+            or not re.match(r"^[0-9a-f]{40}$", integration_candidate_commit)
+        ):
+            return {"state": "invalid_input"}
+    elif authority_mode == "human_merge_only":
+        if checker_approved_commit is not None and (
+            not isinstance(checker_approved_commit, str)
+            or not re.match(r"^[0-9a-f]{40}$", checker_approved_commit)
+        ):
+            return {"state": "invalid_input"}
+        if integration_candidate_commit is not None and (
+            not isinstance(integration_candidate_commit, str)
+            or not re.match(r"^[0-9a-f]{40}$", integration_candidate_commit)
+        ):
+            return {"state": "invalid_input"}
+
     resolved_repo = target_repository
     try:
         with _FileLock(target.with_name(target.name + ".lock")):
@@ -375,6 +442,10 @@ def enqueue_merge(
                 "state": "pending",
                 "enqueued_at": time.time(),
             }
+            if checker_approved_commit is not None:
+                item["checker_approved_commit"] = checker_approved_commit
+            if integration_candidate_commit is not None:
+                item["integration_candidate_commit"] = integration_candidate_commit
             items.append(item)
             _atomic_write_json(target, {"items": items})
             return {"state": "enqueued", "position": len(items) - 1, "item": item}
@@ -415,8 +486,12 @@ def _merge_succeeded(result: object, dispatch_item: dict | None = None) -> tuple
         expected_pr = int(dispatch_item.get("pr_number", 0))
         if expected_pr and int(receipt.target_pr) != expected_pr:
             return False, f"cross_pr_receipt_mismatch: receipt target_pr={receipt.target_pr} != item pr_number={expected_pr}"
-        if "candidate_commit" in dispatch_item and dispatch_item["candidate_commit"] != receipt.candidate_commit:
-            return False, f"candidate_commit_mismatch: receipt candidate_commit={receipt.candidate_commit} != item candidate_commit={dispatch_item['candidate_commit']}"
+        expected_checker = dispatch_item.get("checker_approved_commit")
+        if expected_checker and receipt.checker_commit != expected_checker:
+            return False, f"checker_commit_mismatch: receipt checker_commit={receipt.checker_commit} != item checker_approved_commit={expected_checker}"
+        expected_candidate = dispatch_item.get("integration_candidate_commit")
+        if expected_candidate and receipt.candidate_commit != expected_candidate:
+            return False, f"candidate_commit_mismatch: receipt candidate_commit={receipt.candidate_commit} != item integration_candidate_commit={expected_candidate}"
         if "base_sha" in dispatch_item and dispatch_item["base_sha"] != receipt.base_sha:
             return False, f"base_sha_mismatch: receipt base_sha={receipt.base_sha} != item base_sha={dispatch_item['base_sha']}"
 

@@ -237,8 +237,8 @@ class ScopeArbiterTest(SupervisorCase):
 class MergeQueueTest(SupervisorCase):
     def test_fifo_and_failed_head_blocks_automatic_advance(self):
         queue = self.root / "merge-queue.json"
-        self.assertEqual(tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")["position"], 0)
-        self.assertEqual(tl_supervisor.enqueue_merge("T002", 12, queue, target_repository="thinglab-dev/tl-orchestrator")["position"], 1)
+        self.assertEqual(tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)["position"], 0)
+        self.assertEqual(tl_supervisor.enqueue_merge("T002", 12, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)["position"], 1)
         called = []
         first = tl_supervisor.advance_merge_queue(
             queue, lambda item: called.append(item["story_id"]) or mock_receipt(False, "operator_rejected", item["story_id"], item["pr_number"])
@@ -262,7 +262,7 @@ class MergeQueueTest(SupervisorCase):
 
         def enqueue(story_id, pr_number):
             barrier.wait()
-            positions[story_id] = tl_supervisor.enqueue_merge(story_id, pr_number, queue, target_repository="thinglab-dev/tl-orchestrator")["position"]
+            positions[story_id] = tl_supervisor.enqueue_merge(story_id, pr_number, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)["position"]
 
         threads = [
             threading.Thread(target=enqueue, args=("T001", 11)),
@@ -302,7 +302,7 @@ class MergeQueueTest(SupervisorCase):
 
     def test_concurrent_enqueue_succeeds_during_slow_merge_runner(self):
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         runner_started = threading.Event()
         allow_runner_to_finish = threading.Event()
         advance_result = {}
@@ -317,7 +317,7 @@ class MergeQueueTest(SupervisorCase):
             advance_result.update(tl_supervisor.advance_merge_queue(queue, slow_merge))
 
         def enqueue():
-            enqueue_result.update(tl_supervisor.enqueue_merge("T002", 12, queue, target_repository="thinglab-dev/tl-orchestrator"))
+            enqueue_result.update(tl_supervisor.enqueue_merge("T002", 12, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40))
 
         advance_thread = threading.Thread(target=advance)
         enqueue_thread = threading.Thread(target=enqueue)
@@ -345,6 +345,8 @@ class MergeQueueTest(SupervisorCase):
                             "pr_number": 11,
                             "target_repository": "thinglab-dev/tl-orchestrator",
                             "authority_mode": "delegated_single_merge",
+                            "checker_approved_commit": "a" * 40,
+                            "integration_candidate_commit": "a" * 40,
                             "state": "merging",
                             "enqueued_at": time.time() - 300,
                             "started_at": time.time() - 180,
@@ -355,6 +357,8 @@ class MergeQueueTest(SupervisorCase):
                             "pr_number": 12,
                             "target_repository": "thinglab-dev/tl-orchestrator",
                             "authority_mode": "delegated_single_merge",
+                            "checker_approved_commit": "a" * 40,
+                            "integration_candidate_commit": "a" * 40,
                             "state": "pending",
                             "enqueued_at": time.time() - 200,
                         },
@@ -391,6 +395,8 @@ class MergeQueueTest(SupervisorCase):
                             "pr_number": 11,
                             "target_repository": "thinglab-dev/tl-orchestrator",
                             "authority_mode": "delegated_single_merge",
+                            "checker_approved_commit": "a" * 40,
+                            "integration_candidate_commit": "a" * 40,
                             "state": "merging",
                             "enqueued_at": time.time() - 10,
                             "started_at": time.time(),
@@ -412,7 +418,7 @@ class MergeQueueTest(SupervisorCase):
 
     def test_terminal_state_lock_acquisition_retries_after_timeout(self):
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         original_lock = tl_supervisor._FileLock
         queue_lock_attempts = 0
 
@@ -460,8 +466,8 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
-        tl_supervisor.enqueue_merge("T002", 12, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
+        tl_supervisor.enqueue_merge("T002", 12, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         result = tl_run_story.merge_queue_head(
             queue,
             authority_validator=lambda item: mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"]),
@@ -484,7 +490,7 @@ class MergeQueueTest(SupervisorCase):
     def test_merge_queue_rejects_cross_pr_receipt_reuse_without_merging(self, run):
         """Cross-PR authority reuse in the merge queue must be blocked before invoking gh pr merge."""
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         stolen_receipt = mock_receipt(True, story_id="T000", pr_number=10)
         result = tl_run_story.merge_queue_head(
             queue,
@@ -500,7 +506,7 @@ class MergeQueueTest(SupervisorCase):
     def test_merge_queue_rejects_cross_repository_receipt_reuse_without_merging(self, run):
         """Action Item R1: Cross-repository/fork authority reuse in the merge queue must be blocked before invoking gh pr merge."""
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         fork_receipt = mock_receipt(
             True,
             story_id="T001",
@@ -524,7 +530,7 @@ class MergeQueueTest(SupervisorCase):
     def test_merge_queue_rejects_fabricated_receipt_without_merging(self, run):
         """Fabricated receipt with missing commits or authorization ID must be blocked."""
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         fake_receipt = AuthorityReceipt(
             status="CONFIRMED",
             authorization_id="",
@@ -556,7 +562,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         result = tl_run_story.merge_queue_head(
             queue,
@@ -578,7 +584,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         result = tl_run_story.merge_queue_head(
             queue,
@@ -594,7 +600,7 @@ class MergeQueueTest(SupervisorCase):
     def test_merge_queue_rejects_fully_populated_fabricated_receipt_without_merging(self, run):
         """A fully populated but auto-fabricated receipt without authentic cryptographic envelope must be blocked."""
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         # Fully populated receipt but without valid platform envelope or authentic token
         fabricated_receipt = AuthorityReceipt(
             status="CONFIRMED",
@@ -624,7 +630,7 @@ class MergeQueueTest(SupervisorCase):
         """Action Item R1: Signed valid human_merge_only envelope supplied via authority_receipt must block merge, leave CAS unused, and invoke 0 gh merge calls."""
         run.return_value = completed()
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         store = DurableExternalAuthorityStore(self.root / "external-authority-store.jsonl")
 
         receipt = mock_receipt(
@@ -651,7 +657,7 @@ class MergeQueueTest(SupervisorCase):
         """Action Item R1: Signed valid human_merge_only envelope supplied via authority_validator must block merge, leave CAS unused, and invoke 0 gh merge calls."""
         run.return_value = completed()
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         store = DurableExternalAuthorityStore(self.root / "external-authority-store.jsonl")
 
         receipt = mock_receipt(
@@ -678,7 +684,7 @@ class MergeQueueTest(SupervisorCase):
         """Action Item R1: Queued item with authority_mode='human_merge_only' must block merge, leave CAS unused, and invoke 0 gh merge calls."""
         run.return_value = completed()
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         raw = json.loads(queue.read_text(encoding="utf-8"))
         raw["items"][0]["authority_mode"] = "human_merge_only"
         queue.write_text(json.dumps(raw), encoding="utf-8")
@@ -708,7 +714,7 @@ class MergeQueueTest(SupervisorCase):
         """Action Item R1 (r17): Queued item with missing or empty authority_mode fails closed on _read_queue and merge_queue_head."""
         run.return_value = completed()
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
 
         # 1. Missing authority_mode
         raw = json.loads(queue.read_text(encoding="utf-8"))
@@ -736,7 +742,7 @@ class MergeQueueTest(SupervisorCase):
         """Action Item R1 (r17): Receipt with missing or empty authority_mode fails closed in merge_queue_head."""
         run.return_value = completed()
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
 
         store = DurableExternalAuthorityStore(self.root / "external-authority-store.jsonl")
 
@@ -783,7 +789,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         result = tl_run_story.merge_queue_head(
             queue,
@@ -805,7 +811,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         result = tl_run_story.merge_queue_head(
             queue,
@@ -827,7 +833,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         result = tl_run_story.merge_queue_head(
             queue,
@@ -857,7 +863,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         result = tl_run_story.merge_queue_head(
             queue,
             authority_validator=lambda item, live: mock_receipt(True, story_id=item["story_id"], pr_number=item["pr_number"]),
@@ -871,7 +877,7 @@ class MergeQueueTest(SupervisorCase):
     def test_supervisor_merge_succeeded_rejects_cross_pr_receipt_mismatch(self):
         """Supervisor _merge_succeeded rejects a receipt issued for a different PR."""
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         result = tl_supervisor.advance_merge_queue(
             queue, lambda item: mock_receipt(True, story_id=item["story_id"], pr_number=99)
         )
@@ -881,7 +887,7 @@ class MergeQueueTest(SupervisorCase):
     def test_supervisor_merge_succeeded_rejects_cross_repo_receipt_mismatch(self):
         """Action Item R1: Supervisor _merge_succeeded rejects a receipt issued for a different repository."""
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         fork_receipt = mock_receipt(
             True,
             story_id="T001",
@@ -896,14 +902,14 @@ class MergeQueueTest(SupervisorCase):
 
     def test_uninspected_callback_without_authority_receipt_is_rejected(self):
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         result = tl_supervisor.advance_merge_queue(queue, lambda _item: True)
         self.assertEqual(result["state"], "failed")
         self.assertIn("AuthorityReceipt", result["item"]["detail"])
 
     def test_unconfirmed_authority_receipt_blocks_merge_and_marks_failed(self):
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         result = tl_supervisor.advance_merge_queue(
             queue, lambda item: mock_receipt(False, "missing_merge_authorization", item["story_id"], item["pr_number"])
         )
@@ -913,7 +919,7 @@ class MergeQueueTest(SupervisorCase):
     @mock.patch("scripts.tl_run_story.subprocess.run", return_value=completed())
     def test_story_runner_rejects_missing_authority_without_invoking_gh(self, run):
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         result = tl_run_story.merge_queue_head(queue)
         self.assertEqual(result["state"], "failed")
         self.assertIn("missing_authority_receipt", result["item"]["detail"])
@@ -928,7 +934,7 @@ class MergeQueueTest(SupervisorCase):
         self._anchor_ctx.__exit__(None, None, None)
         try:
             queue = self.root / "merge-queue.json"
-            tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+            tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
             # mock_receipt signs with TEST_FIXTURE_SECRET_KEY / key-test-fixture-v1
             fixture_receipt = mock_receipt(True, story_id="T001", pr_number=11)
             result = tl_run_story.merge_queue_head(queue, authority_receipt=fixture_receipt)
@@ -945,7 +951,7 @@ class MergeQueueTest(SupervisorCase):
     def test_merge_queue_rejects_arbitrary_caller_supplied_trust_root(self, run):
         """Merge queue must reject receipts accompanied by arbitrary caller-supplied trust root."""
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         rogue_root = TrustRoot(
             trusted_app_id=TEST_FIXTURE_APP_ID,
@@ -964,7 +970,7 @@ class MergeQueueTest(SupervisorCase):
     def test_merge_queue_rejects_when_store_unavailable_without_merging(self, run):
         """When external authority store cannot be initialized, merge must fail closed without calling gh pr merge."""
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         with mock.patch("scripts.tl_run_story.DurableExternalAuthorityStore", side_effect=RuntimeError("filesystem lock failure")):
             result = tl_run_story.merge_queue_head(queue, authority_receipt=receipt)
@@ -978,7 +984,7 @@ class MergeQueueTest(SupervisorCase):
     def test_merge_queue_rejects_when_store_read_fails_without_merging(self, run):
         """When reading authority state from store raises an exception, merge must fail closed without calling gh pr merge."""
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         mock_store = mock.Mock()
         mock_store.get_state.side_effect = IOError("CAS file corrupted")
@@ -993,7 +999,7 @@ class MergeQueueTest(SupervisorCase):
     def test_merge_queue_rejects_when_store_reserve_fails_without_merging(self, run):
         """When CAS reservation returns False (concurrent conflict), merge must fail closed without calling gh pr merge."""
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         mock_store = mock.Mock()
         mock_store.get_state.return_value = "unused"
@@ -1009,7 +1015,7 @@ class MergeQueueTest(SupervisorCase):
     def test_merge_queue_rejects_when_store_already_consumed_without_merging(self, run):
         """When authority token was already consumed, merge must fail closed without calling gh pr merge."""
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         mock_store = mock.Mock()
         mock_store.get_state.return_value = "consumed"
@@ -1033,7 +1039,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         mock_store = mock.Mock()
         mock_store.get_state.return_value = "unused"
@@ -1063,7 +1069,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         mock_store = mock.Mock()
         mock_store.get_state.return_value = "unused"
@@ -1093,7 +1099,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         mock_store = mock.Mock()
         mock_store.get_state.return_value = "unused"
@@ -1122,7 +1128,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         mock_store = mock.Mock()
         mock_store.get_state.return_value = "unused"
@@ -1151,7 +1157,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         mock_store = mock.Mock()
         mock_store.get_state.return_value = "unused"
@@ -1181,7 +1187,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         mock_store = mock.Mock()
         mock_store.get_state.return_value = "unused"
@@ -1199,7 +1205,7 @@ class MergeQueueTest(SupervisorCase):
         store_dir = self.root / "auth_store_r2"
         store = DurableExternalAuthorityStore(store_dir=store_dir)
         queue = self.root / "merge-queue-r2.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
 
         claim = {
             "schema_version": 1,
@@ -1300,7 +1306,7 @@ class MergeQueueTest(SupervisorCase):
         store_dir = self.root / "cli_auth_store"
         store = DurableExternalAuthorityStore(store_dir=store_dir)
         queue = self.root / "cli-merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
 
         claim = {
             "schema_version": 1,
@@ -1390,7 +1396,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_view")
 
@@ -1416,7 +1422,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_json")
 
@@ -1442,7 +1448,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_closed")
 
@@ -1468,7 +1474,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_shas")
 
@@ -1494,7 +1500,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_hdrift")
 
@@ -1520,7 +1526,7 @@ class MergeQueueTest(SupervisorCase):
 
         run.side_effect = fake_run
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_bdrift")
 
@@ -1541,7 +1547,7 @@ class MergeQueueTest(SupervisorCase):
         """Action Item R3: Unexpected exception post-reservation must defensively mark store indeterminate and not merge."""
         run.side_effect = OSError("simulated post-reservation I/O error")
         queue = self.root / "merge-queue.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator")
+        tl_supervisor.enqueue_merge("T001", 11, queue, target_repository="thinglab-dev/tl-orchestrator", checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         receipt = mock_receipt(True, story_id="T001", pr_number=11)
         store = DurableExternalAuthorityStore(store_dir=self.root / "store_r3_exc")
 
@@ -1600,7 +1606,7 @@ class MergeQueueTest(SupervisorCase):
         auth_id = envelope["authorization_id"]
 
         queue1 = self.root / "queue-cf1.json"
-        tl_supervisor.enqueue_merge("T001", 11, queue1, target_repository=expected_repo)
+        tl_supervisor.enqueue_merge("T001", 11, queue1, target_repository=expected_repo, checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
 
         merge_invoked = False
         captured_calls = []
@@ -1675,7 +1681,7 @@ class MergeQueueTest(SupervisorCase):
                 self.assertEqual(kw.get("cwd"), self.root)
 
         queue2 = self.root / "queue-cf2.json"
-        tl_supervisor.enqueue_merge("T002", 12, queue2, target_repository=expected_repo)
+        tl_supervisor.enqueue_merge("T002", 12, queue2, target_repository=expected_repo, checker_approved_commit="a" * 40, integration_candidate_commit="a" * 40)
         foreign_receipt = AuthorityReceipt(
             status="CONFIRMED",
             authorization_id="auth-foreign-repo-attack-1234",
@@ -1760,6 +1766,405 @@ class MergeQueueTest(SupervisorCase):
 
         enqueue_res = tl_supervisor.enqueue_merge("T004", 14, queue4, target_repository="invalid_repo_no_slash")
         self.assertEqual(enqueue_res["state"], "invalid_input")
+
+    def test_counterfactual_r1_missing_checker_commit_fails_closed_before_cas(self):
+        """Probe 1: Missing checker_approved_commit fails closed in enqueue, _read_queue, and merge_queue_head before CAS."""
+        queue = self.root / "queue-r1-probe1.json"
+        expected_repo = "thinglab-dev/tl-orchestrator"
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_p1")
+
+        # enqueue_merge fails closed
+        res_enq = tl_supervisor.enqueue_merge(
+            "T001", 11, queue, target_repository=expected_repo,
+            checker_approved_commit=None, integration_candidate_commit="b" * 40
+        )
+        self.assertEqual(res_enq["state"], "invalid_input")
+
+        # Handcrafted queue item missing checker_approved_commit fails closed in _read_queue
+        queue.write_text(json.dumps({
+            "items": [{
+                "story_id": "T001",
+                "pr_number": 11,
+                "target_repository": expected_repo,
+                "authority_mode": "delegated_single_merge",
+                "integration_candidate_commit": "b" * 40,
+                "state": "pending",
+                "enqueued_at": time.time(),
+            }]
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError) as ctx:
+            tl_supervisor._read_queue(queue)
+        self.assertIn("invalid merge queue item", str(ctx.exception))
+
+        # merge_queue_head fails closed without CAS or merge
+        with mock.patch("scripts.tl_run_story.subprocess.run") as mock_run:
+            res_merge = tl_run_story.merge_queue_head(queue, repo_root=self.root, authority_store=store)
+            self.assertEqual(res_merge["state"], "unavailable")
+            for call_args in mock_run.call_args_list:
+                cmd = call_args[0][0]
+                self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    def test_counterfactual_r1_missing_candidate_commit_fails_closed_before_cas(self):
+        """Probe 2: Missing integration_candidate_commit fails closed in enqueue, _read_queue, and merge_queue_head before CAS."""
+        queue = self.root / "queue-r1-probe2.json"
+        expected_repo = "thinglab-dev/tl-orchestrator"
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_p2")
+
+        # enqueue_merge fails closed
+        res_enq = tl_supervisor.enqueue_merge(
+            "T001", 11, queue, target_repository=expected_repo,
+            checker_approved_commit="a" * 40, integration_candidate_commit=None
+        )
+        self.assertEqual(res_enq["state"], "invalid_input")
+
+        # Handcrafted queue item missing integration_candidate_commit fails closed in _read_queue
+        queue.write_text(json.dumps({
+            "items": [{
+                "story_id": "T001",
+                "pr_number": 11,
+                "target_repository": expected_repo,
+                "authority_mode": "delegated_single_merge",
+                "checker_approved_commit": "a" * 40,
+                "state": "pending",
+                "enqueued_at": time.time(),
+            }]
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError) as ctx:
+            tl_supervisor._read_queue(queue)
+        self.assertIn("invalid merge queue item", str(ctx.exception))
+
+        # merge_queue_head fails closed without CAS or merge
+        with mock.patch("scripts.tl_run_story.subprocess.run") as mock_run:
+            res_merge = tl_run_story.merge_queue_head(queue, repo_root=self.root, authority_store=store)
+            self.assertEqual(res_merge["state"], "unavailable")
+            for call_args in mock_run.call_args_list:
+                cmd = call_args[0][0]
+                self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    def test_counterfactual_r1_invalid_commit_format_fails_closed(self):
+        """Probe 3: Non-40-hex commit formats are rejected in enqueue, _read_queue, and merge_queue_head."""
+        queue = self.root / "queue-r1-probe3.json"
+        expected_repo = "thinglab-dev/tl-orchestrator"
+        invalid_shas = [
+            "a" * 39,          # 39 chars (short)
+            "a" * 41,          # 41 chars (long)
+            "g" * 40,          # non-hex
+            "A" * 40,          # uppercase (strict lowercase required)
+            "",                # empty
+            12345,             # integer
+            True,              # bool
+        ]
+        for bad_sha in invalid_shas:
+            with self.subTest(bad_sha=bad_sha):
+                res_enq1 = tl_supervisor.enqueue_merge(
+                    "T001", 11, queue, target_repository=expected_repo,
+                    checker_approved_commit=bad_sha, integration_candidate_commit="b" * 40
+                )
+                self.assertEqual(res_enq1["state"], "invalid_input")
+
+                res_enq2 = tl_supervisor.enqueue_merge(
+                    "T001", 11, queue, target_repository=expected_repo,
+                    checker_approved_commit="a" * 40, integration_candidate_commit=bad_sha
+                )
+                self.assertEqual(res_enq2["state"], "invalid_input")
+
+                # _read_queue rejection
+                queue.write_text(json.dumps({
+                    "items": [{
+                        "story_id": "T001",
+                        "pr_number": 11,
+                        "target_repository": expected_repo,
+                        "authority_mode": "delegated_single_merge",
+                        "checker_approved_commit": bad_sha,
+                        "integration_candidate_commit": "b" * 40,
+                        "state": "pending",
+                        "enqueued_at": time.time(),
+                    }]
+                }), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    tl_supervisor._read_queue(queue)
+
+    def test_counterfactual_r1_divergent_candidate_from_live_head_fails_closed(self):
+        """Probe 4: integration_candidate_commit divergent from live head fails closed without platform merge."""
+        queue = self.root / "queue-r1-probe4.json"
+        expected_repo = "thinglab-dev/tl-orchestrator"
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_p4")
+
+        # Enqueue with candidate "b" * 40
+        tl_supervisor.enqueue_merge(
+            "T001", 11, queue, target_repository=expected_repo,
+            checker_approved_commit="a" * 40, integration_candidate_commit="b" * 40
+        )
+        # Receipt for candidate "b" * 40
+        receipt = mock_receipt(
+            True, story_id="T001", pr_number=11,
+            head_sha="b" * 40, checker_commit="a" * 40, candidate_commit="b" * 40
+        )
+
+        # But live PR headRefOid is "c" * 40 (divergence!)
+        def fake_run(args, *a, **kw):
+            cmd = list(args)
+            if len(cmd) >= 3 and cmd[1:3] == ["pr", "view"]:
+                return subprocess.CompletedProcess(
+                    cmd, 0, json.dumps({"state": "OPEN", "headRefOid": "c" * 40, "baseRefOid": "b" * 40}), ""
+                )
+            return completed()
+
+        with mock.patch("scripts.tl_run_story.subprocess.run", side_effect=fake_run) as mock_run:
+            res = tl_run_story.merge_queue_head(
+                queue,
+                authority_receipt=receipt,
+                authority_store=store,
+                repo_root=self.root,
+                expected_repo=expected_repo,
+            )
+            self.assertEqual(res["state"], "failed")
+            self.assertIn("merge_queue_toctou_head_drift", res["item"]["detail"])
+            # Ensure gh pr merge was NEVER called
+            for call_args in mock_run.call_args_list:
+                cmd = call_args[0][0]
+                self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    def test_counterfactual_r1_queue_commits_divergent_from_authority_receipt_fails_closed_before_cas(self):
+        """Probe 5: Merge queue commits divergent from AuthorityReceipt fail closed before CAS reservation."""
+        queue = self.root / "queue-r1-probe5.json"
+        expected_repo = "thinglab-dev/tl-orchestrator"
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_p5")
+
+        # 5A: checker commit mismatch
+        tl_supervisor.enqueue_merge(
+            "T001", 11, queue, target_repository=expected_repo,
+            checker_approved_commit="a" * 40, integration_candidate_commit="b" * 40
+        )
+        divergent_checker_receipt = mock_receipt(
+            True, story_id="T001", pr_number=11,
+            checker_commit="f" * 40, candidate_commit="b" * 40, head_sha="b" * 40
+        )
+        with mock.patch("scripts.tl_run_story.subprocess.run") as mock_run:
+            res = tl_run_story.merge_queue_head(
+                queue,
+                authority_receipt=divergent_checker_receipt,
+                authority_store=store,
+                repo_root=self.root,
+                expected_repo=expected_repo,
+            )
+            self.assertEqual(res["state"], "failed")
+            self.assertIn("checker_commit_mismatch", res["item"]["detail"])
+            # CAS must NOT be reserved
+            self.assertEqual(store.get_state(divergent_checker_receipt.authorization_id), "unused")
+            for call_args in mock_run.call_args_list:
+                cmd = call_args[0][0]
+                self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+        # 5B: candidate commit mismatch
+        queue2 = self.root / "queue-r1-probe5b.json"
+        tl_supervisor.enqueue_merge(
+            "T002", 12, queue2, target_repository=expected_repo,
+            checker_approved_commit="a" * 40, integration_candidate_commit="b" * 40
+        )
+        divergent_candidate_receipt = mock_receipt(
+            True, story_id="T002", pr_number=12,
+            checker_commit="a" * 40, candidate_commit="f" * 40, head_sha="f" * 40
+        )
+        with mock.patch("scripts.tl_run_story.subprocess.run") as mock_run:
+            res = tl_run_story.merge_queue_head(
+                queue2,
+                authority_receipt=divergent_candidate_receipt,
+                authority_store=store,
+                repo_root=self.root,
+                expected_repo=expected_repo,
+            )
+            self.assertEqual(res["state"], "failed")
+            self.assertIn("candidate_commit_mismatch", res["item"]["detail"])
+            # CAS must NOT be reserved
+            self.assertEqual(store.get_state(divergent_candidate_receipt.authorization_id), "unused")
+            for call_args in mock_run.call_args_list:
+                cmd = call_args[0][0]
+                self.assertNotEqual(cmd[1:3], ["pr", "merge"])
+
+    def test_counterfactual_r1_legacy_queue_item_without_bindings_or_with_aliases_rejected_never_migrated(self):
+        """Probe 6: Legacy queue item without bindings or using legacy alias keys is rejected and never migrated."""
+        queue = self.root / "queue-r1-probe6.json"
+        expected_repo = "thinglab-dev/tl-orchestrator"
+
+        # Case 1: Legacy queue item without bindings
+        legacy_content = json.dumps({
+            "items": [{
+                "story_id": "T001",
+                "pr_number": 11,
+                "target_repository": expected_repo,
+                "authority_mode": "delegated_single_merge",
+                "state": "pending",
+                "enqueued_at": 1000.0,
+            }]
+        })
+        queue.write_text(legacy_content, encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            tl_supervisor._read_queue(queue)
+        self.assertIn("invalid merge queue item", str(ctx.exception))
+
+        res = tl_run_story.merge_queue_head(queue, repo_root=self.root)
+        self.assertEqual(res["state"], "unavailable")
+        # Ensure file was not mutated or implicitly migrated
+        self.assertEqual(queue.read_text(encoding="utf-8"), legacy_content)
+
+        # Case 2: Legacy queue item with legacy alias keys (checker_commit, candidate_commit)
+        alias_content = json.dumps({
+            "items": [{
+                "story_id": "T001",
+                "pr_number": 11,
+                "target_repository": expected_repo,
+                "authority_mode": "delegated_single_merge",
+                "checker_commit": "a" * 40,
+                "candidate_commit": "b" * 40,
+                "state": "pending",
+                "enqueued_at": 1000.0,
+            }]
+        })
+        queue.write_text(alias_content, encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            tl_supervisor._read_queue(queue)
+        self.assertIn("invalid merge queue item", str(ctx.exception))
+
+        res_alias = tl_run_story.merge_queue_head(queue, repo_root=self.root)
+        self.assertEqual(res_alias["state"], "unavailable")
+        self.assertEqual(queue.read_text(encoding="utf-8"), alias_content)
+
+    def test_counterfactual_r1_queue_re_read_preserves_immutable_bindings(self):
+        """Probe 7: Re-reading and permuting queue preserves exact immutable commit bindings."""
+        queue = self.root / "queue-r1-probe7.json"
+        expected_repo = "thinglab-dev/tl-orchestrator"
+
+        tl_supervisor.enqueue_merge(
+            "T001", 11, queue, target_repository=expected_repo,
+            checker_approved_commit="1" * 40, integration_candidate_commit="2" * 40
+        )
+        tl_supervisor.enqueue_merge(
+            "T002", 12, queue, target_repository=expected_repo,
+            checker_approved_commit="3" * 40, integration_candidate_commit="4" * 40
+        )
+
+        for _ in range(5):
+            items = tl_supervisor._read_queue(queue)
+            self.assertEqual(items[0]["checker_approved_commit"], "1" * 40)
+            self.assertEqual(items[0]["integration_candidate_commit"], "2" * 40)
+            self.assertEqual(items[1]["checker_approved_commit"], "3" * 40)
+            self.assertEqual(items[1]["integration_candidate_commit"], "4" * 40)
+
+    def test_counterfactual_r1_binding_failure_guaranteed_before_cas_reservation_and_merge_runner(self):
+        """Probe 8: Incomplete or mismatched binding guarantees failure before CAS reservation and before merge runner."""
+        queue = self.root / "queue-r1-probe8.json"
+        expected_repo = "thinglab-dev/tl-orchestrator"
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_p8")
+
+        tl_supervisor.enqueue_merge(
+            "T001", 11, queue, target_repository=expected_repo,
+            checker_approved_commit="a" * 40, integration_candidate_commit="b" * 40
+        )
+        # Divergent receipt
+        receipt = mock_receipt(
+            True, story_id="T001", pr_number=11,
+            checker_commit="a" * 40, candidate_commit="c" * 40, head_sha="c" * 40
+        )
+        merge_runner_called = False
+
+        def fake_runner(args, *a, **kw):
+            nonlocal merge_runner_called
+            cmd = list(args)
+            if len(cmd) >= 3 and cmd[1:3] == ["pr", "merge"]:
+                merge_runner_called = True
+            return completed()
+
+        with mock.patch("scripts.tl_run_story.subprocess.run", side_effect=fake_runner):
+            res = tl_run_story.merge_queue_head(
+                queue,
+                authority_receipt=receipt,
+                authority_store=store,
+                repo_root=self.root,
+                expected_repo=expected_repo,
+            )
+
+        self.assertEqual(res["state"], "failed")
+        self.assertFalse(merge_runner_called)
+        # CAS was NEVER reserved
+        self.assertEqual(store.get_state(receipt.authorization_id), "unused")
+
+    def test_counterfactual_r1_happy_path_requires_exact_bindings_through_to_merge_effect(self):
+        """Probe 9: Happy path requires exact bindings matched through to platform merge effect."""
+        queue = self.root / "queue-r1-probe9.json"
+        expected_repo = "thinglab-dev/tl-orchestrator"
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_p9")
+        checker_sha = "1" * 40
+        candidate_sha = "2" * 40
+
+        tl_supervisor.enqueue_merge(
+            "T001", 11, queue, target_repository=expected_repo,
+            checker_approved_commit=checker_sha, integration_candidate_commit=candidate_sha
+        )
+        receipt = mock_receipt(
+            True, story_id="T001", pr_number=11,
+            head_sha=candidate_sha, base_sha="b" * 40,
+            checker_commit=checker_sha, candidate_commit=candidate_sha,
+            target_repository=expected_repo
+        )
+
+        merge_invoked = False
+        merge_calls = []
+
+        def fake_run(args, *a, **kw):
+            nonlocal merge_invoked
+            cmd = list(args)
+            if len(cmd) >= 3 and cmd[1:3] == ["pr", "view"]:
+                if merge_invoked:
+                    return subprocess.CompletedProcess(
+                        cmd, 0, json.dumps({"state": "MERGED", "headRefOid": candidate_sha, "baseRefOid": "b" * 40}), ""
+                    )
+                else:
+                    return subprocess.CompletedProcess(
+                        cmd, 0, json.dumps({"state": "OPEN", "headRefOid": candidate_sha, "baseRefOid": "b" * 40}), ""
+                    )
+            if len(cmd) >= 3 and cmd[1:3] == ["pr", "merge"]:
+                merge_invoked = True
+                merge_calls.append((cmd, dict(kw)))
+                return subprocess.CompletedProcess(cmd, 0, "merged", "")
+            return completed()
+
+        with mock.patch("scripts.tl_run_story.subprocess.run", side_effect=fake_run):
+            res = tl_run_story.merge_queue_head(
+                queue,
+                authority_receipt=receipt,
+                authority_store=store,
+                repo_root=self.root,
+                expected_repo=expected_repo,
+            )
+
+        self.assertEqual(res["state"], "merged")
+        self.assertEqual(store.get_state(receipt.authorization_id), "consumed")
+        self.assertEqual(len(merge_calls), 1)
+        merge_cmd = merge_calls[0][0]
+        self.assertIn("--match-head-commit", merge_cmd)
+        self.assertEqual(merge_cmd[merge_cmd.index("--match-head-commit") + 1], candidate_sha)
+
+    def test_counterfactual_r1_hostile_environment_zero_residual_fallback(self):
+        """Probe 10: Negative search probe - hostile ambient environment variables cannot fill missing bindings."""
+        queue = self.root / "queue-r1-probe10.json"
+        expected_repo = "thinglab-dev/tl-orchestrator"
+        hostile_env = {
+            "GH_REPO": "attacker/gh-repo",
+            "TL_TARGET_REPOSITORY": "attacker/env-repo",
+            "HEAD_COMMIT": "c" * 40,
+            "ORIGIN": "attacker/origin",
+            "CHECKER_APPROVED_COMMIT": "e" * 40,
+            "INTEGRATION_CANDIDATE_COMMIT": "e" * 40,
+        }
+        with mock.patch.dict(os.environ, hostile_env):
+            res = tl_supervisor.enqueue_merge(
+                "T001", 11, queue, target_repository=expected_repo,
+                checker_approved_commit=None, integration_candidate_commit=None
+            )
+            self.assertEqual(res["state"], "invalid_input")
 
 
 

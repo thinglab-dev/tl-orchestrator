@@ -119,6 +119,23 @@ def merge_queue_head(
                 subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
             )
 
+        # Precondition: validate item authority_mode and commit bindings before any evaluation or reservation
+        item_mode = item.get("authority_mode")
+        item_checker = item.get("checker_approved_commit")
+        item_candidate = item.get("integration_candidate_commit")
+        if item_mode == "delegated_single_merge":
+            if (
+                not isinstance(item_checker, str)
+                or not re.match(r"^[0-9a-f]{40}$", item_checker)
+                or not isinstance(item_candidate, str)
+                or not re.match(r"^[0-9a-f]{40}$", item_candidate)
+            ):
+                reason = "missing_or_invalid_queue_commit_bindings: delegated_single_merge item missing valid 40-hex checker_approved_commit or integration_candidate_commit"
+                return (
+                    AuthorityReceipt(status="REJECTED", target_pr=pr_number, target_repository=expected_repo, reason=reason),
+                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+                )
+
         # 1. Resolve AuthorityReceipt
         receipt = None
         live_pr = None
@@ -187,13 +204,12 @@ def merge_queue_head(
                         live_pr = json.loads(proc_view.stdout)
                 if live_pr is not None:
                     comments = live_pr.get("comments", [])
-                    head_commit = str(live_pr.get("headRefOid", ""))
                     receipt = MergeAuthorityGate.evaluate(
                         repo_root=active_repo_root,
                         pr_number=pr_number,
                         live_pr_info=live_pr,
-                        checker_commit=item.get("checker_commit", head_commit),
-                        candidate_commit=item.get("candidate_commit", head_commit),
+                        checker_commit=item_checker,
+                        candidate_commit=item_candidate,
                         authority_store=active_store,
                         expected_repo=expected_repo,
                         comments=comments,
@@ -288,6 +304,45 @@ def merge_queue_head(
                 rejected_receipt,
                 subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
             )
+
+        # 4. Strict Queued Item Commit Binding (Prevents divergence / fallback)
+        item_checker = item.get("checker_approved_commit")
+        item_candidate = item.get("integration_candidate_commit")
+        if item.get("authority_mode") == "delegated_single_merge":
+            if not item_checker or receipt.checker_commit != item_checker:
+                reason = f"checker_commit_mismatch: receipt checker_commit='{receipt.checker_commit}' does not match queued item checker_approved_commit='{item_checker}'"
+                rejected_receipt = AuthorityReceipt(
+                    status="REJECTED",
+                    authorization_id=receipt.authorization_id,
+                    target_pr=pr_number,
+                    head_sha=receipt.head_sha,
+                    base_sha=receipt.base_sha,
+                    checker_commit=receipt.checker_commit,
+                    candidate_commit=receipt.candidate_commit,
+                    target_repository=expected_repo,
+                    reason=reason,
+                )
+                return (
+                    rejected_receipt,
+                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+                )
+            if not item_candidate or receipt.candidate_commit != item_candidate:
+                reason = f"candidate_commit_mismatch: receipt candidate_commit='{receipt.candidate_commit}' does not match queued item integration_candidate_commit='{item_candidate}'"
+                rejected_receipt = AuthorityReceipt(
+                    status="REJECTED",
+                    authorization_id=receipt.authorization_id,
+                    target_pr=pr_number,
+                    head_sha=receipt.head_sha,
+                    base_sha=receipt.base_sha,
+                    checker_commit=receipt.checker_commit,
+                    candidate_commit=receipt.candidate_commit,
+                    target_repository=expected_repo,
+                    reason=reason,
+                )
+                return (
+                    rejected_receipt,
+                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+                )
 
         # Strict Authority Mode Binding: automated queue execution REQUIRES delegated_single_merge (AC13)
         # Prevents any automated merge execution when authority_mode is missing, empty, human_merge_only, or not delegated_single_merge
@@ -678,6 +733,9 @@ def parser() -> argparse.ArgumentParser:
     enqueue.add_argument("--pr-number", required=True, type=int)
     enqueue.add_argument("--queue-file", required=True, type=Path)
     enqueue.add_argument("--target-repository", default=None)
+    enqueue.add_argument("--authority-mode", default="delegated_single_merge")
+    enqueue.add_argument("--checker-approved-commit", default=None)
+    enqueue.add_argument("--integration-candidate-commit", default=None)
     advance = commands.add_parser("advance")
     advance.add_argument("--queue-file", required=True, type=Path)
     advance.add_argument("--gh", default="gh")
@@ -707,6 +765,9 @@ def main(argv=None) -> int:
             arguments.pr_number,
             arguments.queue_file,
             target_repository=arguments.target_repository,
+            authority_mode=arguments.authority_mode,
+            checker_approved_commit=arguments.checker_approved_commit,
+            integration_candidate_commit=arguments.integration_candidate_commit,
         )
         success = result.get("state") in {"enqueued", "already_queued"}
     else:

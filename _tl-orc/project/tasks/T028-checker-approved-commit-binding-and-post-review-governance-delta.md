@@ -5,14 +5,14 @@ deliverable: none
 standalone: true
 method: native
 status: in_progress
-state_revision: 14
+state_revision: 15
 depends_on: [T027]
 blocked_by: []
 origin: instrução normativa do mantenedor em 2026-09-14 (ratificação B004) e extensão formal ratificada em 2026-09-15 após auditoria do incidente de merge do PR #55
 decisions: []
 spec_author: orchestrator
 spec_revision: 765a1c3333c85d00
-rework_round: 14
+rework_round: 15
 affects_context: []
 effective_authors: [google]
 checker_independence: required
@@ -29,6 +29,7 @@ content_paths:
   - scripts/tl_supervisor.py
   - scripts/tests/test_tl_merge_guard.py
   - tests/test_tl_supervisor.py
+  - scripts/tests/test_tl_runtime.py
   - scripts/fixtures/runtime/fake_gh.py
   - _tl-orc/project/STATUS.md
   - _tl-orc/project/tasks/T028-checker-approved-commit-binding-and-post-review-governance-delta.md
@@ -70,7 +71,8 @@ dedup: T024 reconciliou linhagens de v0.11 com T018; T030 reconciliou T025-T029 
 - `scripts/tl_run_story.py`: integração de `merge_queue_head` ao `MergeAuthorityGate`.
 - `scripts/tl_supervisor.py`: imposição de que `merge_runner` comprove posse de `AuthorityReceipt` válido (Regra B).
 - `scripts/tests/test_tl_merge_guard.py`: suíte contrafactual completa cobrindo todas as 16 sondas mandatórias e a regressão exata do PR #55.
-- `tests/test_tl_supervisor.py`: atualização dos testes de supervisor para respeitar a exigência de `AuthorityReceipt`.
+- `tests/test_tl_supervisor.py`: atualização dos testes de supervisor para respeitar a exigência de `AuthorityReceipt` e isolamento de target repository.
+- `scripts/tests/test_tl_runtime.py`: sonda contrafactual de isolamento de repositório e fallbacks fail-closed no Runtime e CI.
 - `docs/WORK_MODEL.md` e `docs/RUNTIME.md`: documentação normativa das regras de autoridade, modos operacionais e distinção capacidade vs autorização.
 - `prompts/orchestrator-playbook.md`: atualização do playbook do orquestrador vedando avanço sem fechamento formal de autoridade.
 - `_tl-orc/project/STATUS.md`: registro de T028 e sincronização de CAS.

@@ -37,6 +37,36 @@ try:
 except ImportError:  # executed from the repository root
     from scripts import tl_ci_slice, tl_job  # type: ignore[no-redef]
 
+try:
+    from tl_merge_guard import (
+        IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG,
+        AuthorityReceipt,
+        LocalLedgerAuthorityStore,
+        MergeAuthorityGate,
+        TrustRoot,
+        validate_post_review_delta,
+    )
+except ImportError:
+    try:
+        from scripts.tl_merge_guard import (
+            IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG,
+            AuthorityReceipt,
+            LocalLedgerAuthorityStore,
+            MergeAuthorityGate,
+            TrustRoot,
+            validate_post_review_delta,
+        )
+    except ImportError:
+        IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG = "thinglab-merge-authority"
+        AuthorityReceipt = None
+        LocalLedgerAuthorityStore = None
+        MergeAuthorityGate = None
+        TrustRoot = None
+        def validate_post_review_delta(*_a, **_kw):
+            return False, "merge_guard_unavailable"
+
+
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RUNTIME_VERSION = "0.17.0"
 JOURNAL_FORMAT = 1
 STATE_DIR_NAME = "_tl-orc/runtime"
@@ -265,6 +295,9 @@ class UnitRecord:
     started_at: str = ""
     finished_at: str = ""
     decision: dict = field(default_factory=dict)
+    checker_commit: str = ""
+    candidate_commit: str = ""
+
 
 
 @dataclass
@@ -647,6 +680,11 @@ class Unit:
     verification: list
     title: str
     spec_digest: str
+    checker_approved_commit: str = ""
+    integration_candidate_commit: str = ""
+    authority_mode: str = ""
+    authorization_id: str = ""
+    target_repository: str = ""
 
 
 def load_unit(batch_unit: dict, repo: Path, tasks_dir: str) -> Unit:
@@ -676,6 +714,11 @@ def load_unit(batch_unit: dict, repo: Path, tasks_dir: str) -> Unit:
         kind=str(front.get("type") or front.get("kind") or "code"), acceptance=[str(a) for a in (front.get("acceptance") or [])],
         verification=[str(v) for v in (front.get("verification") or [])], title=str(front.get("title") or unit_id),
         spec_digest=digest,
+        checker_approved_commit=str(batch_unit.get("checker_approved_commit") or ""),
+        integration_candidate_commit=str(batch_unit.get("integration_candidate_commit") or ""),
+        authority_mode=str(batch_unit.get("authority_mode") or ""),
+        authorization_id=str(batch_unit.get("authorization_id") or ""),
+        target_repository=str(batch_unit.get("target_repository") or ""),
     )
 
 
@@ -1055,14 +1098,22 @@ def run_gate(gate: dict, repo: Path, env: dict, output_cap: int, values: dict | 
 
 
 class CI:
-    def __init__(self, config: dict, repo: Path, artifacts: Path):
-        self.config = config["ci"]
-        self.gh = config["gh_argv"]
+    def __init__(self, config: dict, repo: Path, artifacts: Path, target_repository: str | None = None):
+        self.config = config.get("ci", {}) if isinstance(config.get("ci"), dict) else {}
+        self.gh = config.get("gh_argv", ["gh"])
         self.repo = repo
         self.artifacts = artifacts
+        raw_repo = target_repository if target_repository is not None else config.get("target_repository")
+        self.target_repository = str(raw_repo).strip() if raw_repo is not None else ""
+
+    def _resolve_target_repo(self) -> str:
+        if not self.target_repository or not isinstance(self.target_repository, str) or not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", self.target_repository):
+            raise Refusal("missing_or_invalid_target_repository", 2)
+        return self.target_repository
 
     def checks(self, pr_number: int) -> dict:
-        record = run_argv([*self.gh, "pr", "checks", str(pr_number), "--json", "name,state,link,workflow"], self.repo, 120)
+        target_repo = self._resolve_target_repo()
+        record = run_argv([*self.gh, "pr", "checks", str(pr_number), "--repo", target_repo, "--json", "name,state,link,workflow"], self.repo, 120)
         if record["exit_code"] != 0:
             # gh exits 8 when checks are pending and 1 when some failed; both still print JSON.
             pass
@@ -1084,7 +1135,8 @@ class CI:
         return {"state": state, "rows": rows}
 
     def _runs(self, branch: str, commit: str) -> list:
-        argv = [*self.gh, "run", "list", "--branch", branch, "--json", "databaseId,conclusion,status,headSha", "--limit", "10"]
+        target_repo = self._resolve_target_repo()
+        argv = [*self.gh, "run", "list", "--repo", target_repo, "--branch", branch, "--json", "databaseId,conclusion,status,headSha", "--limit", "10"]
         if commit:
             argv += ["--commit", commit]
         runs = run_argv(argv, self.repo, 120)
@@ -1095,6 +1147,7 @@ class CI:
         return [r for r in rows if isinstance(r, dict) and (not commit or not r.get("headSha") or r.get("headSha") == commit)]
 
     def failed_log(self, pr_number: int, branch: str, commit: str = "") -> tuple[str, str]:
+        target_repo = self._resolve_target_repo()
         run_id = None
         try:
             for row in self._runs(branch, commit):
@@ -1105,17 +1158,18 @@ class CI:
             pass
         if run_id is None:
             return "", ""
-        log = run_argv([*self.gh, "run", "view", str(run_id), "--log-failed"], self.repo, 300, cap=5_000_000)
+        log = run_argv([*self.gh, "run", "view", str(run_id), "--repo", target_repo, "--log-failed"], self.repo, 300, cap=5_000_000)
         raw = self.artifacts / f"ci-{run_id}.log"
         raw.parent.mkdir(parents=True, exist_ok=True)
         raw.write_text(log["stdout"], encoding="utf-8")
         return log["stdout"], raw.as_posix()
 
     def rerun_failed(self, branch: str, commit: str = "") -> bool:
+        target_repo = self._resolve_target_repo()
         try:
             for row in self._runs(branch, commit):
                 if str(row.get("conclusion", "")).lower() == "failure":
-                    return run_argv([*self.gh, "run", "rerun", str(row["databaseId"]), "--failed"], self.repo, 120)["exit_code"] == 0
+                    return run_argv([*self.gh, "run", "rerun", str(row["databaseId"]), "--repo", target_repo, "--failed"], self.repo, 120)["exit_code"] == 0
         except (ValueError, KeyError):
             return False
         return False
@@ -1199,7 +1253,8 @@ class Runtime:
         self.policy = Policy(self.config, self.batch)
         self.harness = Harness(self.config, self.repo, self.state_dir / "jobs", self.policy)
         self.compiler = ContextCompiler(self.config, self.repo, self.git)
-        self.ci = CI(self.config, self.repo, self.state_dir / "artifacts")
+        target_repo = self.config.get("target_repository") or self.batch.get("authorization", {}).get("target_repository")
+        self.ci = CI(self.config, self.repo, self.state_dir / "artifacts", target_repository=target_repo)
         self.units: dict[str, Unit] = {}
         for batch_unit in self.batch["frozen_scope"]["units"]:
             self.units[batch_unit["work_ref"]] = load_unit(batch_unit, self.repo, self.config.get("tasks_dir", ""))
@@ -1897,7 +1952,7 @@ class Runtime:
                 title = f"{uid}: {unit.title}"[:120]
 
                 def pr(intent: dict) -> dict:
-                    rows = self._find_pr(record.branch)
+                    rows = self._find_pr(record.branch, uid)
                     if rows is None:
                         return {"_status": "failed", "detail": "gh pr list failed before create"}
                     if rows:
@@ -1910,8 +1965,9 @@ class Runtime:
                         if state != "OPEN":
                             return {"_status": "failed", "detail": f"pull request {row.get('number')} for this branch is {state}"}
                         return {"url": row.get("url"), "number": row.get("number"), "existing": True}
+                    expected_repo = self._resolve_target_repository(uid)
                     body = f"Batch {self.batch_id}, unit {uid}. Spec {unit.spec_path.relative_to(self.repo).as_posix()} @ {unit.spec_revision}.\n\nGenerated by tl_runtime {RUNTIME_VERSION}."
-                    out = run_argv([*self.config["gh_argv"], "pr", "create", "--head", record.branch, "--base", base, "--title", title, "--body", body], self.repo, 300)
+                    out = run_argv([*self.config["gh_argv"], "pr", "create", "--repo", expected_repo, "--head", record.branch, "--base", base, "--title", title, "--body", body], self.repo, 300)
                     if out["exit_code"] != 0:
                         return {"_status": "failed", "detail": out["stderr"][-400:]}
                     url = out["stdout"].strip().splitlines()[-1] if out["stdout"].strip() else ""
@@ -1945,47 +2001,204 @@ class Runtime:
                 if self.config["ci"].get("enabled") and record.ci.get("state") != "success":
                     self.note(f"{uid}: merge skipped, CI state {record.ci.get('state') or 'unknown'}")
                 else:
+                    view = self._pr_view(record.pr["number"], uid)
+                    if view is None:
+                        raise UnitPark("awaiting_operator", f"gh pr view failed before merge evaluation for PR {record.pr['number']}", decision={"options": ["retry", "skip"]})
+                    if str(view.get("state", "")).upper() == "MERGED" and view.get("baseRefName") == self.base_branch and view.get("headRefOid") == record.commit:
+                        self.unit_state(uid, "running", "", phase="complete", merged=True)
+                        return
+
+                    authority_mode = getattr(unit, "authority_mode", "") or self.batch.get("authorization", {}).get("authority_mode", "")
+                    if not authority_mode:
+                        raise UnitPark("awaiting_operator", f"missing_authority_mode: unit {uid} must declare authority_mode to execute merge", decision={"options": ["retry", "skip"]})
+
+                    if authority_mode == "delegated_single_merge":
+                        checker_commit = getattr(unit, "checker_approved_commit", "")
+                        candidate_commit = getattr(unit, "integration_candidate_commit", "")
+                        if not checker_commit or not candidate_commit:
+                            raise UnitPark("awaiting_operator", f"missing_commit_bindings: unit {uid} in delegated_single_merge must declare checker_approved_commit and integration_candidate_commit", decision={"options": ["retry", "skip"]})
+                        if not _COMMIT_RE.match(checker_commit) or not _COMMIT_RE.match(candidate_commit):
+                            raise UnitPark("awaiting_operator", f"invalid_commit_bindings: unit {uid} in delegated_single_merge requires 40-hex lowercase commits", decision={"options": ["skip"]})
+                        if candidate_commit != record.commit:
+                            raise UnitPark("awaiting_operator", f"candidate_commit_mismatch: unit {uid} candidate {candidate_commit} != record.commit {record.commit}", decision={"options": ["retry", "skip"]})
+                        delta_ok, delta_reason = validate_post_review_delta(self.repo, checker_commit, candidate_commit)
+                        if not delta_ok:
+                            raise UnitPark("awaiting_operator", f"unapproved_post_review_delta: {delta_reason}", decision={"options": ["skip"]})
+                    elif authority_mode in ("human_merge_only.enforced", "human_merge_only.policy_only", "human_merge_only"):
+                        raise UnitPark("awaiting_operator", f"human_merge_only: unit {uid} configured for {authority_mode}", decision={"options": ["retry", "skip"]})
+                    else:
+                        raise UnitPark("awaiting_operator", f"unsupported_authority_mode: {authority_mode}", decision={"options": ["skip"]})
+                    expected_repo = self._resolve_target_repository(uid)
+                    comments = view.get("comments") or []
+
+                    store = getattr(self, "authority_store", None)
+                    if store is None:
+                        store = LocalLedgerAuthorityStore(self.repo / "_tl-orc" / "project" / "consumption-ledger.jsonl")
+                        self.authority_store = store
+
+                    trust_root = getattr(self, "trust_root", None)
+                    gh_cmd = list(self.config.get("gh_argv", ["gh"]))
+                    if trust_root is None and TrustRoot is not None:
+                        try:
+                            trust_root = TrustRoot.from_platform(
+                                app_slug=IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG,
+                                gh_executable=gh_cmd,
+                            )
+                        except Exception:
+                            trust_root = TrustRoot.from_env()
+                        self.trust_root = trust_root
+
+                    if MergeAuthorityGate is not None:
+                        receipt = MergeAuthorityGate.evaluate(
+                            repo_root=self.repo,
+                            pr_number=record.pr["number"],
+                            live_pr_info=view,
+                            checker_commit=checker_commit,
+                            candidate_commit=candidate_commit,
+                            authority_store=store,
+                            expected_repo=expected_repo,
+                            comments=comments,
+                            enforce_mode=authority_mode,
+                            trust_root=trust_root,
+                            gh_executable=gh_cmd,
+                        )
+                        if not receipt.is_confirmed:
+                            if receipt.degraded_mode:
+                                raise UnitPark("awaiting_operator", f"human_merge_only: {receipt.reason}", decision={"options": ["retry", "skip"]})
+                            raise UnitPark("awaiting_operator", f"merge_authority_not_confirmed: {receipt.reason}", decision={"options": ["retry", "skip"]})
+
+                        receipt_mode = getattr(receipt, "authority_mode", "")
+                        env_mode = receipt.envelope.get("authority_mode") if isinstance(receipt.envelope, dict) else None
+                        if receipt_mode != "delegated_single_merge" or env_mode != "delegated_single_merge":
+                            raise UnitPark(
+                                "awaiting_operator",
+                                f"strict_authority_mode_required: automated merge requires delegated_single_merge (receipt_mode={receipt_mode!r}, env_mode={env_mode!r})",
+                                decision={"options": ["retry", "skip"]},
+                            )
+                        if not receipt.is_authentic(trust_root, expected_repo=expected_repo):
+                            raise UnitPark(
+                                "awaiting_operator",
+                                "fabricated_authority_receipt_rejected: receipt failed authenticity check against trust root",
+                                decision={"options": ["retry", "skip"]},
+                            )
+                    else:
+                        raise UnitPark("awaiting_operator", "merge_authority_unavailable: MergeAuthorityGate could not be loaded", decision={"options": ["skip"]})
+
                     def merge(intent: dict) -> dict:
-                        view = self._pr_view(record.pr["number"])
-                        if view is None:
+                        curr_view = self._pr_view(record.pr["number"], uid)
+                        if curr_view is None:
                             return {"_status": "failed", "detail": "gh pr view failed before merge"}
-                        if str(view.get("state", "")).upper() == "MERGED" and view.get("baseRefName") == intent["base"] and view.get("headRefOid") == record.commit:
+                        if str(curr_view.get("state", "")).upper() == "MERGED" and curr_view.get("baseRefName") == intent["base"] and curr_view.get("headRefOid") == record.commit:
+                            if receipt and receipt.base_sha and curr_view.get("baseRefOid") != receipt.base_sha:
+                                return {"_status": "failed", "base_sha_mismatch": curr_view.get("baseRefOid"), "detail": f"already merged into unexpected base SHA {curr_view.get('baseRefOid')} != {receipt.base_sha}"}
                             return {"merged": True, "detail": "already merged with the reviewed base and head (merge queue or operator)"}
-                        if view.get("baseRefName") != intent["base"] or view.get("headRefOid") != record.commit or str(view.get("state", "")).upper() != "OPEN":
-                            return {"_status": "failed", "detail": f"pull request {record.pr['number']} is {view.get('state')} against {view.get('baseRefName')} at {str(view.get('headRefOid'))[:12]}; reviewed: {intent['base']} at {record.commit[:12]}"}
-                        out = run_argv([*self.config["gh_argv"], "pr", "merge", str(record.pr["number"]), "--merge", "--delete-branch=false", "--match-head-commit", record.commit], self.repo, 300)
+
+                        # Strict TOCTOU revalidation immediately before invoking gh pr merge
+                        if receipt is not None and receipt.is_confirmed:
+                            curr_base = curr_view.get("baseRefOid")
+                            curr_head = curr_view.get("headRefOid")
+                            if not curr_base or curr_base != receipt.base_sha:
+                                return {"_status": "failed", "detail": f"toctou_base_drift: base moved from {receipt.base_sha} to {curr_base}"}
+                            if not curr_head or curr_head != receipt.head_sha:
+                                return {"_status": "failed", "detail": f"toctou_head_drift: head moved from {receipt.head_sha} to {curr_head}"}
+
+                        if curr_view.get("baseRefName") != intent["base"] or curr_view.get("headRefOid") != record.commit or str(curr_view.get("state", "")).upper() != "OPEN":
+                            return {"_status": "failed", "detail": f"pull request {record.pr['number']} is {curr_view.get('state')} against {curr_view.get('baseRefName')} at {str(curr_view.get('headRefOid'))[:12]}; reviewed: {intent['base']} at {record.commit[:12]}"}
+
+                        # Defense-in-depth: strict authority revalidation immediately prior to execution
+                        if (
+                            receipt is None
+                            or not receipt.is_confirmed
+                            or getattr(receipt, "authority_mode", "") != "delegated_single_merge"
+                            or not isinstance(receipt.envelope, dict)
+                            or receipt.envelope.get("authority_mode") != "delegated_single_merge"
+                            or not receipt.is_authentic(trust_root, expected_repo=expected_repo)
+                        ):
+                            return {
+                                "_status": "failed",
+                                "detail": "strict_authority_verification_failed: merge aborted without authentic delegated_single_merge receipt",
+                            }
+
+                        out = run_argv([*self.config["gh_argv"], "pr", "merge", str(record.pr["number"]), "--repo", expected_repo, "--merge", "--delete-branch=false", "--match-head-commit", record.commit], self.repo, 300)
                         self._fault_point("after_call:pull_request_merge")
                         if out["exit_code"] != 0:
                             return {"_status": "failed", "detail": out["stderr"][-400:]}
-                        # gh has no base precondition and returns success on enqueue: only a terminal MERGED
-                        # state with the reviewed base and head counts as merged.
-                        after = self._pr_view(record.pr["number"])
+                        after = self._pr_view(record.pr["number"], uid)
                         if after is None:
                             return {"_status": "ambiguous", "merged": False, "queued": True, "detail": "gh pr merge returned success but gh pr view failed afterwards; verify and retry"}
                         if str(after.get("state", "")).upper() != "MERGED":
                             return {"_status": "ambiguous", "merged": False, "queued": True, "detail": f"gh pr merge returned success but the pull request is still {after.get('state')} (merge queue or delayed merge); verify and retry"}
+                        
+                        term_head = after.get("headRefOid")
+                        term_base = after.get("baseRefOid")
+                        if not term_head or not term_base:
+                            return {
+                                "_status": "failed",
+                                "terminal_missing_commit_bindings": True,
+                                "detail": f"terminal_missing_commit_bindings: headRefOid={term_head}, baseRefOid={term_base}",
+                            }
+
                         if after.get("baseRefName") != intent["base"]:
                             return {"merged": True, "base_mismatch": after.get("baseRefName")}
-                        if after.get("headRefOid") != record.commit:
-                            return {"merged": True, "base_mismatch": None, "head_mismatch": after.get("headRefOid")}
+                        expected_head = receipt.candidate_commit if (receipt and receipt.candidate_commit) else record.commit
+                        if term_head != expected_head:
+                            return {"merged": True, "head_mismatch": term_head}
+                        if receipt and receipt.base_sha and term_base != receipt.base_sha:
+                            return {"merged": True, "base_sha_mismatch": term_base}
                         return {"merged": True}
+
                     result = self.step(f"{uid}:merge:{record.commit}", "pull_request_merge", uid, "merge", {"type": "pull_request_merge", "pr": record.pr["number"], "commit": record.commit, "base": self.base_branch}, merge)
                     if result.get("queued"):
+                        if receipt and receipt.authorization_id:
+                            store.mark_indeterminate(receipt.authorization_id)
                         raise UnitPark("awaiting_operator", "merge_queued: " + str(result.get("detail", ""))[:200], decision={"options": ["retry", "skip"]})
+                    if result.get("terminal_missing_commit_bindings"):
+                        if receipt and receipt.authorization_id:
+                            store.mark_indeterminate(receipt.authorization_id)
+                        raise UnitPark("awaiting_operator", f"terminal_missing_commit_bindings: pull request {record.pr['number']} terminal view missing headRefOid or baseRefOid",
+                                       decision={"options": ["retry", "skip"]})
                     if result.get("merged") and result.get("head_mismatch"):
+                        if receipt and receipt.authorization_id:
+                            store.mark_indeterminate(receipt.authorization_id)
                         self.unit_state(uid, "running", "", phase="complete", merged=True)
                         raise UnitPark("awaiting_operator", f"merged_unexpected_head: pull request {record.pr['number']} merged at {str(result['head_mismatch'])[:12]}, not the reviewed {record.commit[:12]}",
                                        decision={"options": ["skip"]})
                     if result.get("merged") and result.get("base_mismatch"):
+                        if receipt and receipt.authorization_id:
+                            store.mark_indeterminate(receipt.authorization_id)
                         self.unit_state(uid, "running", "", phase="complete", merged=True)
                         raise UnitPark("awaiting_operator", f"merged_into_unexpected_base: pull request {record.pr['number']} was retargeted to {result['base_mismatch']} between the check and the merge",
                                        decision={"options": ["skip"]})
+                    if result.get("merged") and result.get("base_sha_mismatch"):
+                        if receipt and receipt.authorization_id:
+                            store.mark_indeterminate(receipt.authorization_id)
+                        self.unit_state(uid, "running", "", phase="complete", merged=True)
+                        raise UnitPark("awaiting_operator", f"merged_into_unexpected_base_sha: pull request {record.pr['number']} merged into base SHA {str(result['base_sha_mismatch'])[:12]}, not the authorized {str(receipt.base_sha)[:12]}",
+                                       decision={"options": ["skip"]})
                     if result.get("merged"):
+                        if receipt and receipt.authorization_id:
+                            consumed_ok = False
+                            try:
+                                consumed_ok = store.commit_consumed(receipt.authorization_id)
+                            except Exception:
+                                consumed_ok = False
+                            if not consumed_ok:
+                                try:
+                                    store.mark_indeterminate(receipt.authorization_id)
+                                except Exception:
+                                    pass
+                                raise UnitPark("awaiting_operator", f"authority_commit_consumed_failed: pull request {record.pr['number']} authority token could not be consumed (CAS state conflict or indeterminate)",
+                                               decision={"options": ["skip"]})
                         self.unit_state(uid, "running", "", phase="complete", merged=True)
                     else:
+                        if receipt and receipt.authorization_id:
+                            store.mark_indeterminate(receipt.authorization_id)
                         raise UnitPark("awaiting_operator", "merge_failed: " + result.get("detail", "")[:200], decision={"options": ["retry", "skip"]})
             elif not record.pr.get("number") and effects.effect_allowed("local_merge") and self.base_branch:
                 base = self.base_branch
+                protected_bases = set(self.config.get("protected_bases", self.config.get("protected_branches", [])))
+                if base in protected_bases:
+                    raise UnitPark("awaiting_operator", f"merge_authority_not_confirmed: local_merge_to_protected_base_{base}_not_authorized", decision={"options": ["retry", "skip"]})
 
                 def local_merge(intent: dict) -> dict:
                     tip = self.git.rev(record.branch)
@@ -2006,6 +2219,7 @@ class Runtime:
 
     def ci_loop(self, unit: Unit) -> str:
         uid = unit.id
+        self.ci.target_repository = self._resolve_target_repository(uid)
         record = self.fold.units[uid]
         number = record.pr["number"]
         deadline = time.time() + float(self.config["ci"]["timeout_seconds"])
@@ -2075,17 +2289,32 @@ class Runtime:
                 self.unit_state(uid, "retryable", "resumed after restart", phase=record.phase)
         self.refold()
 
-    def _pr_view(self, number) -> dict | None:
-        out = run_argv([*self.config["gh_argv"], "pr", "view", str(number), "--json", "state,mergedAt,headRefOid,baseRefName"], self.repo, 120)
+    def _pr_view(self, number, unit_id: str | None = None) -> dict | None:
+        expected_repo = self._resolve_target_repository(unit_id)
+        out = run_argv([*self.config["gh_argv"], "pr", "view", str(number), "--repo", expected_repo, "--json", "state,mergedAt,headRefOid,baseRefName,baseRefOid,comments"], self.repo, 120)
         try:
             view = json.loads(out["stdout"] or "{}") if out["exit_code"] == 0 else None
         except ValueError:
             view = None
         return view if isinstance(view, dict) else None
 
-    def _find_pr(self, branch: str) -> list | None:
+    def _resolve_target_repository(self, unit_id: str | None = None) -> str:
+        repo = ""
+        if unit_id and unit_id in self.units and getattr(self.units[unit_id], "target_repository", ""):
+            repo = self.units[unit_id].target_repository
+        if not repo:
+            repo = self.config.get("target_repository") or self.batch.get("authorization", {}).get("target_repository")
+        if not repo or not isinstance(repo, str):
+            raise Refusal("missing_or_invalid_target_repository", 2)
+        repo_str = repo.strip()
+        if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo_str):
+            raise Refusal(f"missing_or_invalid_target_repository: '{repo}'", 2)
+        return repo_str
+
+    def _find_pr(self, branch: str, unit_id: str | None = None) -> list | None:
         """Open or merged pull requests whose head is `branch`; None when gh failed."""
-        out = run_argv([*self.config["gh_argv"], "pr", "list", "--head", branch, "--state", "all", "--json", "number,url,baseRefName,headRefOid,state", "--limit", "1"], self.repo, 120)
+        expected_repo = self._resolve_target_repository(unit_id)
+        out = run_argv([*self.config["gh_argv"], "pr", "list", "--repo", expected_repo, "--head", branch, "--state", "all", "--json", "number,url,baseRefName,headRefOid,state", "--limit", "1"], self.repo, 120)
         try:
             rows = json.loads(out["stdout"] or "[]") if out["exit_code"] == 0 else None
         except ValueError:
@@ -2152,8 +2381,9 @@ class Runtime:
             if before is None and not remote_sha:
                 return "released", {"detail": "remote branch absent; push will run"}
             return "ambiguous", {"detail": f"remote at {remote_sha[:12] or 'absent'}: neither the pushed commit {commit[:12]} nor the pre-push state {str(before)[:12] or 'absent'}"}
+        uid = intent.get("unit", "")
         if effect == "pull_request":
-            rows = self._find_pr(payload.get("branch", ""))
+            rows = self._find_pr(payload.get("branch", ""), uid)
             if rows is None:
                 return "ambiguous", {"detail": "gh pr list failed"}
             if rows:
@@ -2169,7 +2399,7 @@ class Runtime:
                 return "ok", {"url": row.get("url"), "number": row.get("number"), "detail": "pull request already exists"}
             return "released", {"detail": "no pull request for branch; create will run"}
         if effect == "pull_request_merge":
-            view = self._pr_view(payload.get("pr", ""))
+            view = self._pr_view(payload.get("pr", ""), uid)
             if view is None:
                 return "ambiguous", {"detail": "gh pr view failed"}
             if str(view.get("state", "")).upper() == "MERGED" or view.get("mergedAt"):

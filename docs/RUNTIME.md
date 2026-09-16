@@ -64,9 +64,9 @@ falso é recusa: sem ele não há Maker. As seções mutáveis `budget` e `execu
 reescreve a partir do journal para que leitores do Modo Automático vejam consumo, chamada
 pendente e unidade corrente; as seções congeladas nunca são tocadas.
 
-`permitted_effects` ganha as chaves opcionais `pull_request_merge` e `ci_rerun` (v0.17.0):
-sem a primeira, o runtime abre o PR e para ali; sem a segunda, nunca reexecuta CI. `local_merge` faz merge `--no-ff` na branch base quando não há
-PR. `continue_independent_after_block` decide se unidades independentes continuam depois
+`permitted_effects` ganha as chaves opcionais `pull_request_merge` e `ci_rerun` (v0.17.0 / T028):
+a flag `pull_request_merge` declara unicamente a **capacidade técnica** de merge, **não autorização** (`capability != authorization`). Mesmo com a flag ativa, o merge para a base protegida exige estritamente autorização out-of-band confirmada via `MergeAuthorityGate` (`scripts/tl_merge_guard.py`) e apresentação de `AuthorityReceipt`; sem essa autorização, a unidade estaciona em `awaiting_operator` (ou para em `human_merge_only`). Sem `ci_rerun`, nunca reexecuta CI. `local_merge` faz merge `--no-ff` na branch base quando não há
+PR (também condicionado ao guard de autoridade quando a base é protegida). `continue_independent_after_block` decide se unidades independentes continuam depois
 de uma unidade parada; o padrão do schema continua `false`.
 
 ### Especificação da unidade
@@ -217,7 +217,7 @@ achados do Checker em rodadas consecutivas → `stagnation` (a regra da fila seq
 | Em todo comando git do runtime | `core.hooksPath` aponta para um diretório vazio (git ≥ 2.31): hooks do repositório (`post-checkout`, `pre-push`, ...) não rodam dentro de checkout, commit, merge ou push do runtime; a verificação é dos portões | workers e portões não herdam essa variável e podem acionar hooks por conta própria |
 | Antes de cada pack | todo pack passa por redação dos mesmos padrões de segredo (`[REDACTED:...]`), inclusive saída de portão e fatia de CI; o manifesto registra `redactions` | redação por padrão, não prova |
 | Antes de cada commit | a árvore de trabalho tem de ser exatamente a árvore aprovada pelo Checker; edição feita durante uma parada vai para `refs/tl/...` e a unidade fica em `awaiting_operator` | — |
-| Antes de cada efeito externo | `permitted_effects` do lote; merge remoto só com CI `success` quando CI está ativa e sempre com `--match-head-commit <commit revisado>`; merge local só se a branch ainda aponta para o commit revisado | `gh` autenticado é do operador; o runtime não gerencia credenciais |
+| Antes de cada efeito externo | `permitted_effects` do lote; merge remoto só com CI `success` quando CI está ativa e sempre com `--match-head-commit <commit revisado>`; merge local só se a branch ainda aponta para o commit revisado; merge para base protegida exige estritamente `AuthorityReceipt` emitido por `MergeAuthorityGate` (T028) | `gh` autenticado é do operador; o runtime não gerencia credenciais; autorização de merge é validada out-of-band |
 | Orçamento | reserva antes do Maker; contagem de despachos, relógio de parede, teto em dólar sobre custo observado | uma invocação do harness pode conter várias requisições de API; o runtime conta invocações e repassa uso observado |
 
 A worktree **não** é sandbox de segurança. O worker nunca recebe o journal, o lote ou o
@@ -292,8 +292,9 @@ rerun de infraestrutura e reconciliação de merge.
   o mesmo head logo depois: PR ainda aberto vira `merge_queued` (step `ambiguous`,
   `awaiting_operator`; o retry adota o merge feito pela fila sem nova chamada) e base ou
   head diferentes viram `merged_into_unexpected_base` / `merged_unexpected_head`, não um
-  merge silencioso. Fechar essa janela é governança do
-  repositório (proteção de branch), não do runtime.
+  merge silencioso. Na v2 (T028), o `MergeAuthorityGate` fecha a janela de base drift invalidando
+  o envelope se o base SHA divergir de `expected_base_sha`, e a proteção no GitHub exige Ruleset
+  com branch estritamente atualizada e status check `Merge Authority` emitido pela Dedicated GitHub App.
 
 - Concorrência 1. Worktrees em paralelo dependem do pool/árbitro do `tl_supervisor.py` e de
   medição; não entram nesta versão.

@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +18,19 @@ sys.path.insert(0, str(SCRIPTS))
 
 import tl_ci_slice  # noqa: E402
 import tl_runtime  # noqa: E402
+from tl_merge_guard import (  # noqa: E402
+    temporary_platform_anchor_for_testing,
+    AuthorityReceipt,
+    TrustRoot,
+    InMemoryAuthorityStore,
+    compute_receipt_token,
+    IMMUTABLE_PLATFORM_AUTHORITY_APP_ID,
+    IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG,
+)
+try:
+    from fixtures.runtime.fake_gh import TEST_FIXTURE_KEY_ID, TEST_FIXTURE_PUBLIC_KEY, TEST_FIXTURE_SECRET_KEY, TEST_FIXTURE_APP_ID, TEST_FIXTURE_APP_SLUG  # noqa: E402
+except Exception:
+    from scripts.fixtures.runtime.fake_gh import TEST_FIXTURE_KEY_ID, TEST_FIXTURE_PUBLIC_KEY, TEST_FIXTURE_SECRET_KEY, TEST_FIXTURE_APP_ID, TEST_FIXTURE_APP_SLUG  # noqa: E402
 
 FAKE_HARNESS = SCRIPTS / "fixtures" / "runtime" / "fake_harness.py"
 FAKE_GH = SCRIPTS / "fixtures" / "runtime" / "fake_gh.py"
@@ -41,6 +55,12 @@ SPEC_B = SPEC_A.replace("T001", "T002").replace("greeting", "farewell").replace(
 
 def git(cwd: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=True, encoding="utf-8").stdout.strip()
+
+
+def run_cli_entry() -> None:
+    with temporary_platform_anchor_for_testing({TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()}):
+        from scripts.tl_runtime import main
+        sys.exit(main(sys.argv[1:]))
 
 
 class Fixture:
@@ -83,7 +103,8 @@ class Fixture:
         self.batch = {
             "id": "B001", "status": "in_progress", "batch_revision": 1,
             "authorization": {"proposal_id": "P1", "proposal_digest": "d" * 16, "authority_source": "test", "authorized_at": "2026-01-01T00:00:00Z",
-                              "permitted_effects": permitted, "continue_independent_after_block": continue_after_block},
+                              "permitted_effects": permitted, "continue_independent_after_block": continue_after_block,
+                              "target_repository": "thinglab-dev/tl-orchestrator"},
             "frozen_scope": scope,
             "budget": {"max_model_calls": max_calls, "consumed_model_calls": 0, "reserved_model_calls": 0, "max_rework_rounds_per_unit": max_rework,
                        "max_advisor_calls": 0, "consumed_advisor_calls": 0, "pending_call": None},
@@ -103,6 +124,7 @@ class Fixture:
                       "checker": {"adapter": "fake-checker", "model": "c1", "effort": "low", "timeout_seconds": 120}},
             "gates": {"always": gates if gates is not None else [{"id": "compile", "argv": [sys.executable, "-c", "import pkg"]}], "by_flag": {}, "canonical": []},
             "limits": base_limits, "base_branch": "main", "gh_executable": [sys.executable, str(FAKE_GH)],
+            "target_repository": "thinglab-dev/tl-orchestrator",
             "ci": {"enabled": ci, "poll_seconds": 0, "timeout_seconds": 5, "flaky_reruns": 1},
             "sensitive_paths": ["secrets/"], "env_allowlist": ["TL_FAKE_GH_STATE"], "accept_unisolated_worker": True,
         }
@@ -120,7 +142,7 @@ class Fixture:
         env = dict(os.environ, TL_FAKE_GH_STATE=str(self.gh_state), PYTHONIOENCODING="utf-8")
         if fault:
             env["TL_RUNTIME_FAULT"] = fault
-        return subprocess.run([sys.executable, str(SCRIPTS / "tl_runtime.py"), *args, "--batch", str(self.batch_path), "--config", str(self.config_path),
+        return subprocess.run([sys.executable, "-c", "from scripts.tests.test_tl_runtime import run_cli_entry; run_cli_entry()", *args, "--batch", str(self.batch_path), "--config", str(self.config_path),
                                "--repo", str(self.repo), "--state-dir", str(self.state_dir)], capture_output=True, text=True, env=env, encoding="utf-8")
 
     def journal(self) -> list[dict]:
@@ -129,6 +151,17 @@ class Fixture:
 
     def fold(self) -> tl_runtime.Fold:
         return tl_runtime.Journal(self.state_dir / "journal.jsonl").fold()
+
+    def bind_unit_commits(self, unit_id: str, checker_commit: str, candidate_commit: str, authority_mode: str = "delegated_single_merge") -> None:
+        for u in self.batch["frozen_scope"]["units"]:
+            if u["work_ref"] == unit_id:
+                u["authority_mode"] = authority_mode
+                u["checker_approved_commit"] = checker_commit
+                u["integration_candidate_commit"] = candidate_commit
+                u["target_repository"] = "thinglab-dev/tl-orchestrator"
+        self.batch["authorization"]["authority_mode"] = authority_mode
+        self.batch["frozen_scope"]["immutable_digest"] = tl_runtime.frozen_scope_digest(self.batch["frozen_scope"])
+        self.batch_path.write_text(json.dumps(self.batch), encoding="utf-8")
 
 
 MAKER_OK = [{"files": {"pkg/greet.py": "def greet():\n    return 'hi'\n"}}, {"files": {"pkg/bye.py": "def bye():\n    return 'bye'\n"}}]
@@ -140,8 +173,14 @@ class RuntimeTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         os.environ["TL_FAKE_GH_STATE"] = str(self.root / "gh.json")
+        self._anchor_ctx = temporary_platform_anchor_for_testing({
+            TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex(),
+        })
+        self._anchor_ctx.__enter__()
 
     def tearDown(self) -> None:
+        if hasattr(self, "_anchor_ctx"):
+            self._anchor_ctx.__exit__(None, None, None)
         os.environ.pop("TL_FAKE_GH_STATE", None)
         self.tmp.cleanup()
 
@@ -475,6 +514,9 @@ class RuntimeTest(unittest.TestCase):
         fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
         fx.script("maker", MAKER_OK)
         fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_result:pull_request").returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
         self.assertEqual(fx.run_cli("run", fault="after_intent:pull_request_merge").returncode, 70)
         state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
         pr = next(iter(state["prs"].values()))
@@ -632,6 +674,9 @@ class RuntimeTest(unittest.TestCase):
         fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
         fx.script("maker", MAKER_OK)
         fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_result:pull_request").returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
         self.assertEqual(fx.run_cli("run", fault="after_effect:ci_poll").returncode, 70)
         state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
         next(iter(state["prs"].values()))["base"] = "release"
@@ -649,6 +694,9 @@ class RuntimeTest(unittest.TestCase):
         fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
         fx.script("maker", MAKER_OK)
         fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_result:pull_request").returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
         self.assertEqual(fx.run_cli("run", fault="after_effect:pull_request_merge").returncode, 70)
         state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
         next(iter(state["prs"].values()))["base"] = "release"
@@ -719,6 +767,9 @@ class RuntimeTest(unittest.TestCase):
         fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"], "retarget_on_merge": "release"}), encoding="utf-8")
         fx.script("maker", MAKER_OK)
         fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_result:pull_request").returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
         self.assertEqual(fx.runtime().run(), "blocked")
         record = fx.fold().units["T001"]
         self.assertEqual(record.state, "awaiting_operator")
@@ -730,6 +781,9 @@ class RuntimeTest(unittest.TestCase):
         fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"], "merge_queues": True}), encoding="utf-8")
         fx.script("maker", MAKER_OK)
         fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_result:pull_request").returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
         self.assertEqual(fx.run_cli("run").returncode, 3)
         fold = fx.fold()
         record = fold.units["T001"]
@@ -755,6 +809,9 @@ class RuntimeTest(unittest.TestCase):
         fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"], "merge_queues": True}), encoding="utf-8")
         fx.script("maker", MAKER_OK)
         fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.run_cli("run", fault="after_result:pull_request").returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
         self.assertEqual(fx.run_cli("run", fault="after_call:pull_request_merge").returncode, 70)
         second = fx.run_cli("run")
         self.assertEqual(second.returncode, 3, second.stderr)
@@ -1202,6 +1259,13 @@ class RuntimeTest(unittest.TestCase):
                                            "failed_log": "test\tRun go test\t2026-01-01T00:00:00Z --- FAIL: TestGreet (0.00s)\ntest\tRun go test\t    greet_test.go:12: expected hello\ntest\tRun go test\t##[error]Process completed with exit code 1."}), encoding="utf-8")
         fx.script("maker", [{"files": {"pkg/greet.py": "x = 1\n"}}, {"files": {"pkg/greet.py": "x = 2\n"}}])
         fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "blocked")
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("missing_authority_mode", record.reason)
+        commit_sha = record.commit
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
+        self.assertEqual(fx.run_cli("decide", "--unit", "T001", "--option", "retry").returncode, 0)
         self.assertEqual(fx.runtime().run(), "done")
         fold = fx.fold()
         record = fold.units["T001"]
@@ -1257,6 +1321,402 @@ class RuntimeTest(unittest.TestCase):
         calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
         self.assertEqual(sum(1 for c in calls if c[:2] == ["pr", "create"]), 1)
         self.assertIn("REVIEW\n\n- T001: PR https://example.invalid/pr/100 open, not merged", (fx.state_dir / "report.md").read_text(encoding="utf-8"))
+
+    def test_probe_target_repository_fail_closed_and_hostile_env_isolation(self) -> None:
+        """Action Item R1 counterfactual probe:
+        1. When target_repository is missing, Runtime._resolve_target_repository and CI fail closed (Refusal)
+           even if origin has a GitHub remote and hostile TL_TARGET_REPOSITORY or GH_REPO are in os.environ.
+        2. When target_repository is explicitly provided, hostile env variables do not override it.
+        3. Invalid regex format fails closed.
+        4. CI.checks and CI._runs never invoke gh when target_repository is missing.
+        """
+        fx = Fixture(self.root, units=1)
+        # Point origin to a deceptive remote URL
+        subprocess.run(["git", "remote", "set-url", "origin", "https://github.com/hostile-org/hostile-repo.git"], cwd=fx.repo, check=True)
+
+        # 1. Missing target repository with hostile env
+        fx.config.pop("target_repository", None)
+        fx.batch["authorization"].pop("target_repository", None)
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+
+        hostile_env = {
+            "TL_TARGET_REPOSITORY": "attacker/env-repo",
+            "GH_REPO": "attacker/gh-repo",
+        }
+        with mock.patch.dict(os.environ, hostile_env):
+            rt = fx.runtime()
+            with self.assertRaises(tl_runtime.Refusal) as ctx:
+                rt._resolve_target_repository()
+            self.assertIn("missing_or_invalid_target_repository", str(ctx.exception))
+
+            # CI checks also fails closed without executing gh
+            ci = tl_runtime.CI(fx.config, fx.repo, fx.state_dir / "artifacts")
+            with self.assertRaises(tl_runtime.Refusal) as ctx_ci:
+                ci.checks(1)
+            self.assertIn("missing_or_invalid_target_repository", str(ctx_ci.exception))
+
+            with self.assertRaises(tl_runtime.Refusal) as ctx_ci2:
+                ci._runs("feat/branch", "abc1234")
+            self.assertIn("missing_or_invalid_target_repository", str(ctx_ci2.exception))
+
+        # 2. Hostile env cannot override authorized target repository
+        fx.config["target_repository"] = "thinglab-dev/tl-orchestrator"
+        fx.batch["authorization"]["target_repository"] = "thinglab-dev/tl-orchestrator"
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        with mock.patch.dict(os.environ, hostile_env):
+            rt2 = fx.runtime()
+            resolved = rt2._resolve_target_repository()
+            self.assertEqual(resolved, "thinglab-dev/tl-orchestrator")
+            ci2 = tl_runtime.CI(fx.config, fx.repo, fx.state_dir / "artifacts", target_repository="thinglab-dev/tl-orchestrator")
+            self.assertEqual(ci2._resolve_target_repo(), "thinglab-dev/tl-orchestrator")
+
+        # 3. Invalid target repository format fails closed
+        fx.config["target_repository"] = "invalid_repo_no_slash"
+        fx.config_path.write_text(json.dumps(fx.config), encoding="utf-8")
+        rt3 = fx.runtime()
+        with self.assertRaises(tl_runtime.Refusal) as ctx3:
+            rt3._resolve_target_repository()
+        self.assertIn("missing_or_invalid_target_repository", str(ctx3.exception))
+
+        ci3 = tl_runtime.CI(fx.config, fx.repo, fx.state_dir / "artifacts", target_repository="invalid_repo_no_slash")
+        with self.assertRaises(tl_runtime.Refusal) as ctx_ci3:
+            ci3.checks(1)
+        self.assertIn("missing_or_invalid_target_repository", str(ctx_ci3.exception))
+
+    def test_probe_human_merge_only_parks_unit_and_prevents_merge(self) -> None:
+        """Action Item R1: Unit or batch configured with human_merge_only must park immediately and never merge."""
+        import tl_merge_guard
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.batch["authorization"]["authority_mode"] = "human_merge_only"
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        res = fx.run_cli("run")
+        self.assertEqual(res.returncode, 3, res.stderr)
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("human_merge_only", record.reason)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+
+        # Also verify receipt-level authenticity check rejecting human_merge_only
+        env = {
+            "schema_version": 1,
+            "authorization_id": "auth-test-human",
+            "target_repository": "thinglab-dev/tl-orchestrator",
+            "target_pr": 1,
+            "expected_head_sha": "a" * 40,
+            "expected_base_sha": "b" * 40,
+            "checker_approved_commit": "a" * 40,
+            "integration_candidate_commit": "a" * 40,
+            "authority_mode": "human_merge_only",
+            "issued_at": "2026-09-15T00:00:00Z",
+            "expires_at": "2029-01-01T00:00:00Z",
+            "nonce": "0123456789abcdef0123456789abcdef",
+            "provenance": {"signature": "sig", "mechanism": "dedicated_github_app"},
+        }
+        receipt = tl_merge_guard.AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id="auth-test-human",
+            target_pr=1,
+            head_sha="a" * 40,
+            base_sha="b" * 40,
+            checker_commit="a" * 40,
+            candidate_commit="a" * 40,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="human_merge_only",
+            envelope=env,
+        )
+        self.assertFalse(receipt.is_authentic())
+
+    def test_probe_missing_or_empty_authority_mode_in_receipt_parks_unit_and_prevents_merge(self) -> None:
+        """Action Item R1: AuthorityReceipt with missing/empty authority_mode must park unit, execute zero gh pr merge, and keep CAS unused."""
+        from tl_merge_guard import InMemoryAuthorityStore, AuthorityReceipt
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+
+        res = fx.run_cli("run", fault="after_result:pull_request")
+        self.assertEqual(res.returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        pr_number = fx.fold().steps["T001:pr"]["result"]["number"]
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
+
+        store = InMemoryAuthorityStore()
+        rt = fx.runtime()
+        rt.authority_store = store
+
+        head_sha = commit_sha
+        base_sha = "0" * 40
+        auth_id = "auth-counterfactual-1"
+        dummy_receipt = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id,
+            target_pr=pr_number,
+            head_sha=head_sha,
+            base_sha=base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="",
+            reason="AUTHORITY_CONFIRMED",
+            envelope={
+                "authorization_id": auth_id,
+                "target_repository": "thinglab-dev/tl-orchestrator",
+                "target_pr": pr_number,
+                "checker_approved_commit": head_sha,
+                "integration_candidate_commit": head_sha,
+                "authority_mode": "delegated_single_merge",
+            },
+        )
+
+        with mock.patch("scripts.tl_runtime.MergeAuthorityGate.evaluate", return_value=dummy_receipt):
+            rt.run()
+
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("strict_authority_mode_required", record.reason)
+        self.assertFalse(record.merged)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+        self.assertNotEqual(store.get_state(auth_id), "consumed")
+
+    def test_probe_missing_or_empty_authority_mode_in_envelope_parks_unit_and_prevents_merge(self) -> None:
+        """Action Item R1: Envelope with missing/empty authority_mode must park unit, execute zero gh pr merge, and keep CAS unused."""
+        from tl_merge_guard import InMemoryAuthorityStore, AuthorityReceipt
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+
+        res = fx.run_cli("run", fault="after_result:pull_request")
+        self.assertEqual(res.returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        pr_number = fx.fold().steps["T001:pr"]["result"]["number"]
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
+
+        store = InMemoryAuthorityStore()
+        rt = fx.runtime()
+        rt.authority_store = store
+
+        head_sha = commit_sha
+        base_sha = "0" * 40
+        auth_id = "auth-counterfactual-2"
+        dummy_receipt = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id,
+            target_pr=pr_number,
+            head_sha=head_sha,
+            base_sha=base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
+            reason="AUTHORITY_CONFIRMED",
+            envelope={
+                "authorization_id": auth_id,
+                "target_repository": "thinglab-dev/tl-orchestrator",
+                "target_pr": pr_number,
+                "checker_approved_commit": head_sha,
+                "integration_candidate_commit": head_sha,
+                "authority_mode": "",
+            },
+        )
+
+        with mock.patch("scripts.tl_runtime.MergeAuthorityGate.evaluate", return_value=dummy_receipt):
+            rt.run()
+
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("strict_authority_mode_required", record.reason)
+        self.assertFalse(record.merged)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+        self.assertNotEqual(store.get_state(auth_id), "consumed")
+
+    def test_probe_unauthentic_or_fabricated_receipt_parks_unit_and_prevents_merge(self) -> None:
+        """Action Item R1: Unauthentic or fabricated receipt must park unit, execute zero gh pr merge, and keep CAS unused."""
+        from tl_merge_guard import InMemoryAuthorityStore, AuthorityReceipt
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+
+        res = fx.run_cli("run", fault="after_result:pull_request")
+        self.assertEqual(res.returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        pr_number = fx.fold().steps["T001:pr"]["result"]["number"]
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
+
+        store = InMemoryAuthorityStore()
+        rt = fx.runtime()
+        rt.authority_store = store
+
+        head_sha = commit_sha
+        base_sha = "0" * 40
+        auth_id = "auth-counterfactual-3"
+        dummy_receipt = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id,
+            target_pr=pr_number,
+            head_sha=head_sha,
+            base_sha=base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
+            reason="AUTHORITY_CONFIRMED",
+            envelope={
+                "authorization_id": auth_id,
+                "target_repository": "thinglab-dev/tl-orchestrator",
+                "target_pr": pr_number,
+                "checker_approved_commit": head_sha,
+                "integration_candidate_commit": head_sha,
+                "authority_mode": "delegated_single_merge",
+                "provenance": {"key_id": "key-forged-999", "signature": "0" * 128},
+            },
+        )
+
+        with mock.patch("scripts.tl_runtime.MergeAuthorityGate.evaluate", return_value=dummy_receipt):
+            rt.run()
+
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("fabricated_authority_receipt_rejected", record.reason)
+        self.assertFalse(record.merged)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+        self.assertNotEqual(store.get_state(auth_id), "consumed")
+
+    def test_probe_missing_receipt_parks_unit_and_prevents_merge(self) -> None:
+        """Action Item R1: Unconfirmed or missing receipt must park unit, execute zero gh pr merge, and keep CAS unused."""
+        from tl_merge_guard import InMemoryAuthorityStore, AuthorityReceipt
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+
+        res = fx.run_cli("run", fault="after_result:pull_request")
+        self.assertEqual(res.returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        pr_number = fx.fold().steps["T001:pr"]["result"]["number"]
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
+
+        store = InMemoryAuthorityStore()
+        rt = fx.runtime()
+        rt.authority_store = store
+
+        rejected_receipt = AuthorityReceipt(
+            status="REJECTED",
+            authorization_id="auth-rejected-4",
+            target_pr=pr_number,
+            head_sha=commit_sha,
+            base_sha="0" * 40,
+            checker_commit=commit_sha,
+            candidate_commit=commit_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
+            reason="REJECTED_SIGNATURE_INVALID",
+        )
+
+        with mock.patch("scripts.tl_runtime.MergeAuthorityGate.evaluate", return_value=rejected_receipt):
+            rt.run()
+
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("merge_authority_not_confirmed", record.reason)
+        self.assertFalse(record.merged)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+        self.assertNotEqual(store.get_state("auth-rejected-4"), "consumed")
+
+    def test_probe_runtime_authority_source_test_with_missing_bindings_fails_closed(self) -> None:
+        """Action Item R1 (Checker r20): authority_source="test" without explicit bindings in frozen scope
+        must fail closed into awaiting_operator, execute zero gh pr merge, and reserve/consume zero CAS."""
+        from tl_merge_guard import InMemoryAuthorityStore
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        self.assertEqual(fx.batch["authorization"]["authority_source"], "test")
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+
+        store = InMemoryAuthorityStore()
+        rt = fx.runtime()
+        rt.authority_store = store
+        state = rt.run()
+
+        self.assertEqual(state, "blocked")
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("missing_authority_mode", record.reason)
+        self.assertFalse(record.merged)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+        self.assertEqual(len(store._states), 0)
+
+        # Probe when authority_mode is declared but checker_approved_commit / candidate_commit are missing
+        dir2 = self.root / "fx2"
+        dir2.mkdir()
+        fx2 = Fixture(dir2, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx2.batch["authorization"]["authority_mode"] = "delegated_single_merge"
+        fx2.batch_path.write_text(json.dumps(fx2.batch), encoding="utf-8")
+        fx2.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx2.script("maker", MAKER_OK)
+        fx2.script("checker", CHECKER_OK)
+
+        store2 = InMemoryAuthorityStore()
+        rt2 = fx2.runtime()
+        rt2.authority_store = store2
+        state2 = rt2.run()
+
+        self.assertEqual(state2, "blocked")
+        record2 = fx2.fold().units["T001"]
+        self.assertEqual(record2.state, "awaiting_operator")
+        self.assertIn("missing_commit_bindings", record2.reason)
+        self.assertFalse(record2.merged)
+        calls2 = json.loads(fx2.gh_state.read_text(encoding="utf-8")).get("calls", [])
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls2))
+        self.assertEqual(len(store2._states), 0)
+
+        # Probe non-40-hex commit bindings fail closed
+        dir3 = self.root / "fx3"
+        dir3.mkdir()
+        fx3 = Fixture(dir3, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx3.bind_unit_commits("T001", "not_a_valid_sha", "not_a_valid_sha")
+        fx3.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx3.script("maker", MAKER_OK)
+        fx3.script("checker", CHECKER_OK)
+        store3 = InMemoryAuthorityStore()
+        rt3 = fx3.runtime()
+        rt3.authority_store = store3
+        self.assertEqual(rt3.run(), "blocked")
+        record3 = fx3.fold().units["T001"]
+        self.assertEqual(record3.state, "awaiting_operator")
+        self.assertIn("invalid_commit_bindings", record3.reason)
+        self.assertFalse(record3.merged)
+        self.assertEqual(len(store3._states), 0)
+
+        # Probe candidate commit mismatch fails closed
+        dir4 = self.root / "fx4"
+        dir4.mkdir()
+        fx4 = Fixture(dir4, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx4.bind_unit_commits("T001", "1" * 40, "2" * 40)
+        fx4.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx4.script("maker", MAKER_OK)
+        fx4.script("checker", CHECKER_OK)
+        store4 = InMemoryAuthorityStore()
+        rt4 = fx4.runtime()
+        rt4.authority_store = store4
+        self.assertEqual(rt4.run(), "blocked")
+        record4 = fx4.fold().units["T001"]
+        self.assertEqual(record4.state, "awaiting_operator")
+        self.assertIn("candidate_commit_mismatch", record4.reason)
+        self.assertFalse(record4.merged)
+        self.assertEqual(len(store4._states), 0)
 
 
 class CiSliceTest(unittest.TestCase):

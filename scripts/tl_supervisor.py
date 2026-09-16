@@ -25,6 +25,14 @@ try:
 except ImportError:  # Imported as scripts.tl_supervisor from the repository root.
     from scripts.tl_job import lock_exclusive, unlock_exclusive
 
+try:
+    from tl_merge_guard import AuthorityReceipt
+except ImportError:
+    try:
+        from scripts.tl_merge_guard import AuthorityReceipt
+    except ImportError:
+        AuthorityReceipt = None
+
 
 LOCK_TIMEOUT_SECONDS = 10.0
 LOCK_RETRY_SECONDS = 0.01
@@ -284,20 +292,51 @@ def _read_queue(path: Path) -> list[dict]:
         raise ValueError("invalid merge queue")
     items = value["items"]
     for item in items:
-        required = {"story_id", "pr_number", "state", "enqueued_at"}
-        if (
-            not isinstance(item, dict)
-            or not required.issubset(item)
-            or set(item)
-            - {
+        if not isinstance(item, dict):
+            raise ValueError("invalid merge queue item")
+        mode = item.get("authority_mode")
+        if mode == "delegated_single_merge":
+            required = {
                 "story_id",
                 "pr_number",
                 "state",
                 "enqueued_at",
-                "detail",
-                "in_flight_token",
-                "started_at",
+                "target_repository",
+                "authority_mode",
+                "checker_approved_commit",
+                "integration_candidate_commit",
             }
+        elif mode == "human_merge_only":
+            required = {
+                "story_id",
+                "pr_number",
+                "state",
+                "enqueued_at",
+                "target_repository",
+                "authority_mode",
+            }
+        else:
+            raise ValueError("invalid merge queue item: invalid or missing authority_mode")
+
+        allowed_keys = {
+            "story_id",
+            "pr_number",
+            "state",
+            "enqueued_at",
+            "detail",
+            "in_flight_token",
+            "started_at",
+            "target_repository",
+            "authority_mode",
+            "checker_approved_commit",
+            "integration_candidate_commit",
+        }
+        checker_sha = item.get("checker_approved_commit")
+        candidate_sha = item.get("integration_candidate_commit")
+        if (
+            not isinstance(item, dict)
+            or not required.issubset(item)
+            or set(item) - allowed_keys
             or not _valid_story_id(item.get("story_id"))
             or not isinstance(item.get("pr_number"), int)
             or isinstance(item.get("pr_number"), bool)
@@ -305,6 +344,26 @@ def _read_queue(path: Path) -> list[dict]:
             or not isinstance(item.get("enqueued_at"), (int, float))
             or isinstance(item.get("enqueued_at"), bool)
             or ("detail" in item and not isinstance(item["detail"], str))
+            or not isinstance(item.get("target_repository"), str)
+            or not item.get("target_repository")
+            or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", item["target_repository"])
+            or item.get("authority_mode") not in {"delegated_single_merge", "human_merge_only"}
+            or (
+                item.get("authority_mode") == "delegated_single_merge"
+                and (
+                    not isinstance(checker_sha, str)
+                    or not re.match(r"^[0-9a-f]{40}$", checker_sha)
+                    or not isinstance(candidate_sha, str)
+                    or not re.match(r"^[0-9a-f]{40}$", candidate_sha)
+                )
+            )
+            or (
+                item.get("authority_mode") == "human_merge_only"
+                and (
+                    (checker_sha is not None and (not isinstance(checker_sha, str) or not re.match(r"^[0-9a-f]{40}$", checker_sha)))
+                    or (candidate_sha is not None and (not isinstance(candidate_sha, str) or not re.match(r"^[0-9a-f]{40}$", candidate_sha)))
+                )
+            )
             or (
                 "started_at" in item
                 and (
@@ -316,20 +375,24 @@ def _read_queue(path: Path) -> list[dict]:
             )
             or (
                 "in_flight_token" in item
-                and (
-                    item["state"] != "merging"
-                    or not isinstance(item["in_flight_token"], str)
-                    or not item["in_flight_token"]
-                )
+                and (item["state"] != "merging" or not isinstance(item["in_flight_token"], str) or not item["in_flight_token"])
             )
         ):
             raise ValueError("invalid merge queue item")
     return items
 
 
-def enqueue_merge(story_id, pr_number, queue_file):
-    """Append a merge request to the durable FIFO."""
-    target = Path(queue_file)
+def enqueue_merge(
+    story_id: str,
+    pr_number: int,
+    target: Path,
+    target_repository: str | None = None,
+    authority_mode: str = "delegated_single_merge",
+    checker_approved_commit: str | None = None,
+    integration_candidate_commit: str | None = None,
+) -> dict:
+    """Safely append a merge request to the queue under the lock."""
+    target = Path(target)
     if (
         not _valid_story_id(story_id)
         or not isinstance(pr_number, int)
@@ -337,6 +400,35 @@ def enqueue_merge(story_id, pr_number, queue_file):
         or pr_number < 1
     ):
         return {"state": "invalid_input"}
+    if (
+        not isinstance(target_repository, str)
+        or not target_repository
+        or not re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", target_repository)
+    ):
+        return {"state": "invalid_input"}
+    if authority_mode not in {"delegated_single_merge", "human_merge_only"}:
+        return {"state": "invalid_input"}
+    if authority_mode == "delegated_single_merge":
+        if (
+            not isinstance(checker_approved_commit, str)
+            or not re.match(r"^[0-9a-f]{40}$", checker_approved_commit)
+            or not isinstance(integration_candidate_commit, str)
+            or not re.match(r"^[0-9a-f]{40}$", integration_candidate_commit)
+        ):
+            return {"state": "invalid_input"}
+    elif authority_mode == "human_merge_only":
+        if checker_approved_commit is not None and (
+            not isinstance(checker_approved_commit, str)
+            or not re.match(r"^[0-9a-f]{40}$", checker_approved_commit)
+        ):
+            return {"state": "invalid_input"}
+        if integration_candidate_commit is not None and (
+            not isinstance(integration_candidate_commit, str)
+            or not re.match(r"^[0-9a-f]{40}$", integration_candidate_commit)
+        ):
+            return {"state": "invalid_input"}
+
+    resolved_repo = target_repository
     try:
         with _FileLock(target.with_name(target.name + ".lock")):
             items = _read_queue(target)
@@ -345,9 +437,15 @@ def enqueue_merge(story_id, pr_number, queue_file):
             item = {
                 "story_id": story_id,
                 "pr_number": pr_number,
+                "target_repository": resolved_repo,
+                "authority_mode": authority_mode,
                 "state": "pending",
                 "enqueued_at": time.time(),
             }
+            if checker_approved_commit is not None:
+                item["checker_approved_commit"] = checker_approved_commit
+            if integration_candidate_commit is not None:
+                item["integration_candidate_commit"] = integration_candidate_commit
             items.append(item)
             _atomic_write_json(target, {"items": items})
             return {"state": "enqueued", "position": len(items) - 1, "item": item}
@@ -355,18 +453,64 @@ def enqueue_merge(story_id, pr_number, queue_file):
         return {"state": "unavailable"}
 
 
-def _merge_succeeded(result: object) -> tuple[bool, str]:
-    if isinstance(result, bool):
-        return result, ""
-    if isinstance(result, int):
-        return result == 0, f"exit code {result}"
-    returncode = getattr(result, "returncode", None)
+def _merge_succeeded(result: object, dispatch_item: dict | None = None) -> tuple[bool, str]:
+    """Inspect merge runner outcome and enforce valid AuthorityReceipt presentation (Rule B)."""
+    receipt = None
+    outcome = None
+    if AuthorityReceipt is not None and isinstance(result, AuthorityReceipt):
+        receipt = result
+        outcome = True
+    elif isinstance(result, tuple) and len(result) == 2:
+        receipt, outcome = (
+            (result[0], result[1])
+            if AuthorityReceipt is not None and isinstance(result[0], AuthorityReceipt)
+            else (result[1], result[0])
+            if AuthorityReceipt is not None and isinstance(result[1], AuthorityReceipt)
+            else (None, None)
+        )
+    elif isinstance(result, dict) and "receipt" in result:
+        receipt = result["receipt"] if (AuthorityReceipt is not None and isinstance(result["receipt"], AuthorityReceipt)) else None
+        outcome = result.get("merged", True)
+
+    if receipt is None or not isinstance(receipt, AuthorityReceipt):
+        raise ValueError("merge runner must present a valid AuthorityReceipt; uninspected merge callbacks are rejected (Rule B)")
+
+    if not receipt.is_confirmed:
+        return False, f"authority_not_confirmed: {receipt.reason}"
+
+    # Scope binding validation against dispatch_item
+    if dispatch_item is not None:
+        expected_repo = dispatch_item.get("target_repository")
+        if expected_repo and getattr(receipt, "target_repository", None) != expected_repo:
+            return False, f"cross_repository_receipt_mismatch: receipt target_repository={getattr(receipt, 'target_repository', None)} != item target_repository={expected_repo}"
+        expected_pr = int(dispatch_item.get("pr_number", 0))
+        if expected_pr and int(receipt.target_pr) != expected_pr:
+            return False, f"cross_pr_receipt_mismatch: receipt target_pr={receipt.target_pr} != item pr_number={expected_pr}"
+        expected_checker = dispatch_item.get("checker_approved_commit")
+        if expected_checker and receipt.checker_commit != expected_checker:
+            return False, f"checker_commit_mismatch: receipt checker_commit={receipt.checker_commit} != item checker_approved_commit={expected_checker}"
+        expected_candidate = dispatch_item.get("integration_candidate_commit")
+        if expected_candidate and receipt.candidate_commit != expected_candidate:
+            return False, f"candidate_commit_mismatch: receipt candidate_commit={receipt.candidate_commit} != item integration_candidate_commit={expected_candidate}"
+        if "base_sha" in dispatch_item and dispatch_item["base_sha"] != receipt.base_sha:
+            return False, f"base_sha_mismatch: receipt base_sha={receipt.base_sha} != item base_sha={dispatch_item['base_sha']}"
+
+    expected_repo = dispatch_item.get("target_repository") if dispatch_item else None
+    if not receipt.is_authentic(expected_repo=expected_repo):
+        return False, f"unverified_or_fabricated_receipt: {receipt.reason}"
+
+    if isinstance(outcome, bool):
+        return outcome, receipt.reason if outcome else f"merge_failed: {receipt.reason}"
+    if isinstance(outcome, int):
+        return outcome == 0, f"exit code {outcome}"
+    returncode = getattr(outcome, "returncode", None)
     if isinstance(returncode, int):
-        detail = getattr(result, "stderr", "") or getattr(result, "stdout", "") or ""
+        detail = getattr(outcome, "stderr", "") or getattr(outcome, "stdout", "") or ""
         return returncode == 0, str(detail).strip()
-    if isinstance(result, str) and result in {"merged", "failed"}:
-        return result == "merged", ""
-    raise ValueError("merge runner returned an unsupported result")
+    if isinstance(outcome, str) and outcome in {"merged", "failed"}:
+        return outcome == "merged", ""
+    raise ValueError(f"unsupported outcome type in merge result tuple: {type(outcome)}")
+
 
 
 def advance_merge_queue(
@@ -424,7 +568,7 @@ def advance_merge_queue(
                 _atomic_write_json(target, {"items": items})
 
             try:
-                succeeded, detail = _merge_succeeded(merge_runner(dispatch_item))
+                succeeded, detail = _merge_succeeded(merge_runner(dispatch_item), dispatch_item)
             except Exception as exc:
                 succeeded, detail = False, f"{type(exc).__name__}: {exc}"
 

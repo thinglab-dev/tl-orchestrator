@@ -10,9 +10,33 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+
+import hashlib
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_SCRIPTS_DIR = Path(__file__).resolve().parents[2]
+for _p in (_REPO_ROOT, _SCRIPTS_DIR):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
+TEST_FIXTURE_SECRET_KEY = hashlib.sha256(b"thinglab-test-fixture-seed-v1").digest()
+TEST_FIXTURE_KEY_ID = "key-test-fixture-v1"
+TEST_FIXTURE_APP_ID = 998811
+TEST_FIXTURE_APP_SLUG = "thinglab-merge-authority"
+
+try:
+    from scripts.tl_merge_guard import ed25519_sign
+    TEST_FIXTURE_PUBLIC_KEY, fixture_sig = ed25519_sign(TEST_FIXTURE_SECRET_KEY, b"")
+except Exception:
+    try:
+        from tl_merge_guard import ed25519_sign  # type: ignore[no-redef]
+        TEST_FIXTURE_PUBLIC_KEY, fixture_sig = ed25519_sign(TEST_FIXTURE_SECRET_KEY, b"")
+    except Exception:
+        TEST_FIXTURE_PUBLIC_KEY = b"\x00" * 32
 
 
 def main(argv: list[str]) -> int:
@@ -25,6 +49,20 @@ def main(argv: list[str]) -> int:
     state["calls"].append(argv)
     out = ""
     code = 0
+
+    if "--repo" in argv:
+        passed_repo = argv[argv.index("--repo") + 1]
+        state["last_repo_arg"] = passed_repo
+        expected_target = state.get("target_repository")
+        if expected_target and passed_repo != expected_target:
+            sys.stderr.write(f"fake gh: repo mismatch: '{passed_repo}' != '{expected_target}'\n")
+            state_path.write_text(json.dumps(state, indent=1), encoding="utf-8")
+            return 1
+    elif state.get("require_repo_flag", False):
+        sys.stderr.write("fake gh: missing required --repo flag\n")
+        state_path.write_text(json.dumps(state, indent=1), encoding="utf-8")
+        return 1
+
     if argv[:2] == ["pr", "create"]:
         head = argv[argv.index("--head") + 1]
         number = len(state["prs"]) + 100
@@ -39,15 +77,101 @@ def main(argv: list[str]) -> int:
             pr["head_oid"] = subprocess.run(["git", "rev-parse", head], capture_output=True, text=True).stdout.strip() or pr.get("head_oid")
         out = json.dumps([{"number": pr["number"], "url": pr["url"], "baseRefName": pr.get("base"), "headRefOid": pr.get("head_oid"), "state": pr["state"]}] if pr else [])
     elif argv[:2] == ["pr", "view"]:
-        number = int(argv[2])
+        number = int(next(a for a in argv[2:] if a.isdigit()))
         pr = next((p for p in state["prs"].values() if p["number"] == number), None)
         if pr and pr["state"] == "OPEN":
             head = next(h for h, p in state["prs"].items() if p is pr)
             pr["head_oid"] = subprocess.run(["git", "rev-parse", head], capture_output=True, text=True).stdout.strip() or pr.get("head_oid")
-        out = json.dumps({"state": pr["state"], "mergedAt": pr["mergedAt"], "headRefOid": pr.get("head_oid"), "baseRefName": pr.get("base")} if pr else {})
+        base_name = pr.get("base", "main") if pr else "main"
+        base_oid = subprocess.run(["git", "rev-parse", base_name], capture_output=True, text=True).stdout.strip() if pr else ""
+
+        # TOCTOU simulation support for runtime integration testing
+        view_count = state.get("pr_view_count", 0) + 1
+        state["pr_view_count"] = view_count
+        if state.get("toctou_base_drift") and view_count >= 2:
+            base_oid = state.get("toctou_base_oid", "9" * 40)
+        if state.get("toctou_missing_base_oid") and view_count >= 2:
+            base_oid = ""
+        if state.get("toctou_head_drift") and view_count >= 2:
+            if pr:
+                pr["head_oid"] = state.get("toctou_head_oid", "8" * 40)
+
+        comments = []
+        if "comments" in state:
+            comments = state["comments"]
+        elif pr and "comments" in pr:
+            comments = pr["comments"]
+        elif state.get("auto_authorize_merge", True) and pr:
+            head_sha = pr.get("head_oid") or ""
+            target_repo = state.get("target_repository")
+            if not target_repo and "--repo" in argv:
+                target_repo = argv[argv.index("--repo") + 1]
+            if not target_repo:
+                try:
+                    origin_url = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True).stdout.strip()
+                    m = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$", origin_url)
+                    target_repo = m.group(1) if m else "thinglab-dev/tl-orchestrator"
+                except Exception:
+                    target_repo = "thinglab-dev/tl-orchestrator"
+            claim = {
+                "schema_version": 1,
+                "target_repository": target_repo,
+                "target_pr": pr["number"],
+                "expected_head_sha": head_sha,
+                "expected_base_sha": base_oid,
+                "checker_approved_commit": head_sha,
+                "integration_candidate_commit": head_sha,
+                "authority_mode": "delegated_single_merge",
+                "issued_at": "2026-09-15T00:00:00Z",
+                "expires_at": "2029-09-15T00:00:00Z",
+                "nonce": "0123456789abcdef0123456789abcdef",
+            }
+            try:
+                from scripts.tl_merge_guard import sign_authorization_envelope
+                env = sign_authorization_envelope(
+                    claim,
+                    secret_key=TEST_FIXTURE_SECRET_KEY,
+                    key_id=TEST_FIXTURE_KEY_ID,
+                    mechanism="dedicated_github_app",
+                    integration_id=TEST_FIXTURE_APP_ID,
+                    issuer=f"{TEST_FIXTURE_APP_SLUG}[bot]",
+                )
+            except Exception:
+                import hashlib
+                auth_id = "auth-" + hashlib.sha256(json.dumps(claim, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
+                env = dict(claim)
+                env["authorization_id"] = auth_id
+                env["provenance"] = {
+                    "issuer": f"{TEST_FIXTURE_APP_SLUG}[bot]",
+                    "mechanism": "dedicated_github_app",
+                    "integration_id": TEST_FIXTURE_APP_ID,
+                    "key_id": TEST_FIXTURE_KEY_ID,
+                    "signature": "0" * 128,
+                }
+            comment_body = f"```json:tl-merge-authorization\n{json.dumps(env, indent=2)}\n```"
+            comments = [{"id": 1, "body": comment_body, "author": {"login": f"{TEST_FIXTURE_APP_SLUG}[bot]"}}]
+
+        effective_base_oid = base_oid
+        term_head = pr.get("head_oid") if pr else ""
+        if pr and pr.get("state") == "MERGED":
+            if state.get("terminal_base_drift"):
+                effective_base_oid = state["terminal_base_drift"]
+            if state.get("terminal_missing_head"):
+                term_head = ""
+            if state.get("terminal_missing_base"):
+                effective_base_oid = ""
+
+        out = json.dumps({
+            "state": pr.get("state", "OPEN"),
+            "mergedAt": pr.get("mergedAt"),
+            "headRefOid": term_head,
+            "baseRefName": pr.get("base"),
+            "baseRefOid": effective_base_oid,
+            "comments": comments,
+        } if pr else {})
         code = 0 if pr else 1
     elif argv[:2] == ["pr", "merge"]:
-        number = int(argv[2])
+        number = int(next(a for a in argv[2:] if a.isdigit()))
         pr = next((p for p in state["prs"].values() if p["number"] == number), None)
         expected = argv[argv.index("--match-head-commit") + 1] if "--match-head-commit" in argv else None
         head_now = subprocess.run(["git", "rev-parse", next(h for h, p in state["prs"].items() if p is pr)], capture_output=True, text=True).stdout.strip() if pr else ""
@@ -76,6 +200,20 @@ def main(argv: list[str]) -> int:
         out = state["failed_log"]
     elif argv[:2] == ["run", "rerun"]:
         state["reruns"] = state.get("reruns", 0) + 1
+    elif len(argv) > 0 and argv[0] == "api":
+        endpoint = argv[1] if len(argv) > 1 else ""
+        clean_endpoint = endpoint.lstrip("/")
+        if clean_endpoint in {f"apps/{TEST_FIXTURE_APP_SLUG}", "app"}:
+            out = json.dumps({
+                "id": TEST_FIXTURE_APP_ID,
+                "slug": TEST_FIXTURE_APP_SLUG,
+                "name": "ThingLab Merge Authority",
+                "public_keys": {TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
+            })
+            code = 0
+        else:
+            out = json.dumps({"message": "Not Found", "status": "404"})
+            code = 1
     else:
         code = 2
         sys.stderr.write("unsupported fake gh call\n")

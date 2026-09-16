@@ -231,7 +231,7 @@ sucesso para todas as stories candidatas** e houver vaga retornada por `acquire_
 Dependência no DAG, `scope_conflict`, estado ilegível ou pool esgotado mantém a candidata serializada;
 nunca abra primeiro o worktree para arbitrar depois. PRs concluídos com merge expressamente autorizado entram por `enqueue_merge` e
 somente o topo da Merge Queue Serializada pode chamar `gh pr merge`; o item seguinte aguarda o
-registro terminal do anterior, e um `failed` exige intervenção explícita na fila. A Merge Queue ordena merges já autorizados, mas nunca concede autoridade para merge em `main`: merge em `main` exige autorização humana explícita ou autorização prévia por `permitted_effects` do lote.
+registro terminal do anterior, e um `failed` exige intervenção explícita na fila. A Merge Queue ordena merges já autorizados, mas nunca concede autoridade para merge em `main`: merge em `main` exige autorização out-of-band confirmada do operador avaliada por `MergeAuthorityGate` (`AuthorityReceipt`, T028). Aprovação por Checker independente, CI verde e `permitted_effects.pull_request_merge: true` representam apenas preparação técnica e capacidade operacional, jamais autorização de execução (`capability != authorization`).
 
 ## Modo Automático: condução operacional de batches
 
@@ -340,6 +340,15 @@ Calcule: `required_call_reserve = todas as chamadas obrigatórias ainda não con
    um `integration_group` ou se a próxima unidade pertence a outro grupo de integração.
 2. Havendo transição de `integration_group`, execute obrigatoriamente o `canonical_full_gate` oficial na
    fronteira do grupo encerrado. Falha no portão bloqueia a execução com `STOP: canonical_full_gate_failure`.
+
+#### E. Vinculação pós-revisão e fronteira de autoridade de merge (T028)
+1. **Diferenciação estrita:** `technical_merge_validity != operator_authority`. O parecer favorável do Checker independente e a conclusão com sucesso dos portões de CI conferem apenas validade técnica para preparação de integração, jamais autorização para executar merge.
+2. **Vinculação de commits e delta de governança:**
+   - O commit aprovado pelo Checker (`checker_approved_commit`) só pode divergir do commit final candidato à integração (`integration_candidate_commit`) pelas alterações documentais e de governança estritamente permitidas na allowlist normalizada `post_review_governance_delta_only` (`_tl-orc/project/tasks/*.md`, `_tl-orc/project/evidence/*.md`, `_tl-orc/project/STATUS.md`).
+   - Qualquer mutação de código-fonte, testes ou scripts pós-revisão invalida a aprovação e exige nova rodada completa de revisão por Checker independente.
+3. **Execução de merge condicionada a autorização out-of-band:**
+   - A chamada a `gh pr merge` ou `git merge` para a branch base protegida (`main`) exige estritamente um envelope de autorização out-of-band confirmado (`AuthorityReceipt`) avaliado pelo primitive `MergeAuthorityGate` (`scripts/tl_merge_guard.py`).
+   - Na ausência de autorização formal confirmada (modo `human_merge_only` ou falta de envelope válido), o Orquestrador/runtime DEVE interromper o fluxo automatizado e estacionar a unidade em `awaiting_operator` (ou parar com `STOP: external_effect_not_authorized`), nunca forçar merge unilateral.
 
 ### 6. Interrupções, Stop conditions e recuperação pós-crash
 

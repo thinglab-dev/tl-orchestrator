@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tl-orchestrator Out-of-Band Merge Authorization Schema",
+  "description": "Validates the out-of-band merge authorization claim and envelope under T028.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authorization_id",
+    "target_repository",
+    "target_pr",
+    "expected_head_sha",
+    "expected_base_sha",
+    "checker_approved_commit",
+    "integration_candidate_commit",
+    "authority_mode",
+    "issued_at",
+    "expires_at",
+    "nonce",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "authorization_id": {
+      "type": "string",
+      "pattern": "^auth-[0-9a-f]{32}$"
+    },
+    "target_repository": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$"
+    },
+    "target_pr": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "expected_head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "expected_base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "checker_approved_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "integration_candidate_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "authority_mode": {
+      "type": "string",
+      "enum": [
+        "delegated_single_merge",
+        "human_merge_only"
+      ]
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|\\+00:00)$"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|\\+00:00)$"
+    },
+    "nonce": {
+      "type": "string",
+      "minLength": 16
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issuer",
+        "mechanism",
+        "key_id",
+        "signature"
+      ],
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mechanism": {
+          "type": "string",
+          "enum": [
+            "dedicated_github_app",
+            "operator_ed25519",
+            "operator_webauthn"
+          ]
+        },
+        "integration_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "key_id": {
+          "type": "string",
+          "pattern": "^key-[a-zA-Z0-9_.-]+$"
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 16
+        }
+      }
+    }
+  },
+  "$defs": {
+    "authorization_claim_v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "target_repository",
+        "target_pr",
+        "expected_head_sha",
+        "expected_base_sha",
+        "checker_approved_commit",
+        "integration_candidate_commit",
+        "authority_mode",
+        "issued_at",
+        "expires_at",
+        "nonce"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "target_repository": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$"
+        },
+        "target_pr": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expected_head_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "expected_base_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "checker_approved_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "integration_candidate_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "authority_mode": {
+          "type": "string",
+          "enum": [
+            "delegated_single_merge",
+            "human_merge_only"
+          ]
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "nonce": {
+          "type": "string",
+          "minLength": 16
+        }
+      }
+    }
+  }
+}

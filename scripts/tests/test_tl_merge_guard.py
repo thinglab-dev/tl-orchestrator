@@ -36,6 +36,7 @@ from unittest import mock
 from scripts.tl_merge_guard import (
     AUTHORIZATION_SIGNING_DOMAIN,
     IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS,
+    AuthorityReceipt,
     DurableExternalAuthorityStore,
     InMemoryAuthorityStore,
     LocalLedgerAuthorityStore,
@@ -44,6 +45,7 @@ from scripts.tl_merge_guard import (
     TrustRoot,
     canonicalize_payload,
     compute_claim_digest,
+    compute_receipt_token,
     derive_authorization_id,
     ed25519_sign,
     ed25519_verify,
@@ -718,20 +720,28 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
         fx.script("maker", MAKER_OK)
         fx.script("checker", CHECKER_OK)
 
-        res = fx.run_cli("run")
-        self.assertNotEqual(res.returncode, 0)
-        record = fx.fold().units["T001"]
-        self.assertEqual(record.state, "awaiting_operator")
-        self.assertIn("toctou_base_drift", record.reason)
+        old_fake = os.environ.get("TL_FAKE_GH_STATE")
+        os.environ["TL_FAKE_GH_STATE"] = str(fx.gh_state)
+        try:
+            rt = fx.runtime()
+            self.assertEqual(rt.run(), "blocked")
+            record = fx.fold().units["T001"]
+            self.assertEqual(record.state, "awaiting_operator")
+            self.assertIn("toctou_base_drift", record.reason)
 
-        gh_state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
-        calls = gh_state.get("calls", [])
-        # Verify that at least 2 view calls occurred (view 1 for authority evaluation, view 2 for TOCTOU revalidation)
-        view_calls = [c for c in calls if c[:2] == ["pr", "view"]]
-        self.assertGreaterEqual(len(view_calls), 2)
-        # Verify gh pr merge was NEVER executed
-        merge_calls = [c for c in calls if c[:2] == ["pr", "merge"]]
-        self.assertEqual(len(merge_calls), 0)
+            gh_state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
+            calls = gh_state.get("calls", [])
+            # Verify that at least 2 view calls occurred (view 1 for authority evaluation, view 2 for TOCTOU revalidation)
+            view_calls = [c for c in calls if c[:2] == ["pr", "view"]]
+            self.assertGreaterEqual(len(view_calls), 2)
+            # Verify gh pr merge was NEVER executed
+            merge_calls = [c for c in calls if c[:2] == ["pr", "merge"]]
+            self.assertEqual(len(merge_calls), 0)
+        finally:
+            if old_fake is not None:
+                os.environ["TL_FAKE_GH_STATE"] = old_fake
+            else:
+                os.environ.pop("TL_FAKE_GH_STATE", None)
 
     def test_probe_18b_toctou_missing_base_oid_blocks_merge_execution(self):
         """
@@ -749,16 +759,24 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
         fx.script("maker", MAKER_OK)
         fx.script("checker", CHECKER_OK)
 
-        res = fx.run_cli("run")
-        self.assertNotEqual(res.returncode, 0)
-        record = fx.fold().units["T001"]
-        self.assertEqual(record.state, "awaiting_operator")
-        self.assertIn("toctou_base_drift", record.reason)
+        old_fake = os.environ.get("TL_FAKE_GH_STATE")
+        os.environ["TL_FAKE_GH_STATE"] = str(fx.gh_state)
+        try:
+            rt = fx.runtime()
+            self.assertEqual(rt.run(), "blocked")
+            record = fx.fold().units["T001"]
+            self.assertEqual(record.state, "awaiting_operator")
+            self.assertIn("toctou_base_drift", record.reason)
 
-        gh_state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
-        calls = gh_state.get("calls", [])
-        merge_calls = [c for c in calls if c[:2] == ["pr", "merge"]]
-        self.assertEqual(len(merge_calls), 0)
+            gh_state = json.loads(fx.gh_state.read_text(encoding="utf-8"))
+            calls = gh_state.get("calls", [])
+            merge_calls = [c for c in calls if c[:2] == ["pr", "merge"]]
+            self.assertEqual(len(merge_calls), 0)
+        finally:
+            if old_fake is not None:
+                os.environ["TL_FAKE_GH_STATE"] = old_fake
+            else:
+                os.environ.pop("TL_FAKE_GH_STATE", None)
 
     def test_probe_19_fail_closed_schema_resolution_and_validation(self):
         """
@@ -1465,15 +1483,26 @@ sys.exit(0)
                     pass
             self.assertIn("strictly forbidden outside an authorized test harness", str(ctx.exception))
 
-        # 3. Production anchor strictly rejects fixture keys when TL_FAKE_GH_STATE is absent
+        # 3. With TL_FAKE_GH_STATE present AND a runtime frame in the call stack:
+        # get_platform_root_public_keys() strictly returns IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS
+        # TrustRoot and AuthorityReceipt strictly reject envelopes signed by fixture
         self._anchor_ctx.__exit__(None, None, None)
+        fake_state_file = self.root / "fake_state_probe23i.json"
+        fake_state_file.write_text("{}", encoding="utf-8")
+        old_fake = os.environ.get("TL_FAKE_GH_STATE")
+        os.environ["TL_FAKE_GH_STATE"] = str(fake_state_file)
         try:
-            old_fake = os.environ.pop("TL_FAKE_GH_STATE", None)
-            try:
-                prod_roots = get_platform_root_public_keys()
-                self.assertNotIn(TEST_FIXTURE_KEY_ID, prod_roots)
-                self.assertEqual(prod_roots, IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS)
+            with mock.patch("inspect.stack") as mock_stack:
+                mock_frame = mock.Mock()
+                mock_frame.filename = "/Users/albertiano/thinglab/tl-orchestrator/scripts/tl_runtime.py"
+                mock_stack.return_value = [mock_frame]
 
+                # Anchor never includes fixture key in runtime, even with TL_FAKE_GH_STATE set
+                keys_in_runtime = get_platform_root_public_keys()
+                self.assertNotIn(TEST_FIXTURE_KEY_ID, keys_in_runtime)
+                self.assertEqual(keys_in_runtime, IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS)
+
+                # TrustRoot with fixture keys is rejected
                 fixture_script = self.root / "fixture_gh_probe23i.py"
                 fixture_script.write_text(
                     f"""#!/usr/bin/env python3
@@ -1497,10 +1526,55 @@ sys.exit(0)
                         gh_executable=fixture_cli,
                     )
                 self.assertIn("does not match immutable platform trust anchor", str(err_ctx.exception))
-            finally:
-                if old_fake is not None:
-                    os.environ["TL_FAKE_GH_STATE"] = old_fake
+
+                # AuthorityReceipt signed by fixture seed is strictly rejected
+                claim = {
+                    "schema_version": 1,
+                    "target_repository": "thinglab-dev/tl-orchestrator",
+                    "target_pr": 100,
+                    "expected_head_sha": "a" * 40,
+                    "expected_base_sha": "b" * 40,
+                    "checker_approved_commit": "a" * 40,
+                    "integration_candidate_commit": "a" * 40,
+                    "authority_mode": "delegated_single_merge",
+                    "issued_at": "2026-09-15T00:00:00Z",
+                    "expires_at": "2029-09-15T00:00:00Z",
+                    "nonce": "0123456789abcdef0123456789abcdef",
+                }
+                env = sign_authorization_envelope(
+                    claim,
+                    secret_key=TEST_FIXTURE_SECRET_KEY,
+                    key_id=TEST_FIXTURE_KEY_ID,
+                    mechanism="dedicated_github_app",
+                    integration_id=TEST_FIXTURE_APP_ID,
+                    issuer=f"{TEST_FIXTURE_APP_SLUG}[bot]",
+                )
+                receipt = AuthorityReceipt(
+                    status="CONFIRMED",
+                    authorization_id=env["authorization_id"],
+                    target_pr=100,
+                    head_sha="a" * 40,
+                    base_sha="b" * 40,
+                    checker_commit="a" * 40,
+                    candidate_commit="a" * 40,
+                    envelope=env,
+                    receipt_token=compute_receipt_token(
+                        authorization_id=env["authorization_id"],
+                        target_pr=100,
+                        candidate_commit="a" * 40,
+                        checker_commit="a" * 40,
+                        head_sha="a" * 40,
+                        base_sha="b" * 40,
+                        envelope_signature=env["provenance"]["signature"],
+                    ),
+                )
+                # Must be rejected because runtime anchor does NOT trust fixture key
+                self.assertFalse(receipt.is_authentic())
         finally:
+            if old_fake is not None:
+                os.environ["TL_FAKE_GH_STATE"] = old_fake
+            else:
+                os.environ.pop("TL_FAKE_GH_STATE", None)
             self._anchor_ctx = temporary_platform_anchor_for_testing({
                 TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()
             })
@@ -1600,7 +1674,64 @@ sys.exit(0)
             finally:
                 os.environ.pop("TL_FAKE_GH_STATE", None)
 
+    def test_probe_26_atomic_cas_serialization_and_indeterminate_priority(self):
+        """
+        Probe 26 (R2): External store atomic CAS serialization and fail-closed indeterminate priority.
+        1. An authorization marked indeterminate can NEVER transition to consumed.
+        2. Serialization under _lock_auth prevents race conditions between mark_indeterminate and commit_consumed.
+        3. Multithreaded race verifies priority fail-closed for indeterminate.
+        4. Temporary files are unique per operation and cleaned up safely.
+        """
+        import threading
+        with tempfile.TemporaryDirectory() as td:
+            store = DurableExternalAuthorityStore(Path(td))
+            auth_id = "auth-interleaving-probe-26"
+
+            # 1. State must start as unused
+            self.assertEqual(store.get_state(auth_id), "unused")
+
+            # 2. Reserve transitions unused -> reserved
+            self.assertTrue(store.reserve(auth_id))
+            self.assertEqual(store.get_state(auth_id), "reserved")
+
+            # 3. Interleaving mark_indeterminate sets indeterminate
+            store.mark_indeterminate(auth_id)
+            self.assertEqual(store.get_state(auth_id), "indeterminate")
+
+            # 4. commit_consumed MUST return False when state is indeterminate (priority fail-closed)
+            self.assertFalse(store.commit_consumed(auth_id))
+            self.assertEqual(store.get_state(auth_id), "indeterminate")
+
+            # 5. Multithreaded race test: mark_indeterminate vs commit_consumed
+            for trial in range(10):
+                trial_auth_id = f"auth-race-trial-{trial}"
+                self.assertTrue(store.reserve(trial_auth_id))
+
+                def worker_indeterminate():
+                    store.mark_indeterminate(trial_auth_id)
+
+                def worker_consumed(res_box):
+                    res_box.append(store.commit_consumed(trial_auth_id))
+
+                consumed_res = []
+                t1 = threading.Thread(target=worker_indeterminate)
+                t2 = threading.Thread(target=worker_consumed, args=(consumed_res,))
+
+                t1.start()
+                t2.start()
+                t1.join()
+                t2.join()
+
+                final_state = store.get_state(trial_auth_id)
+                # Once mark_indeterminate was executed, the state must NEVER remain consumed.
+                self.assertEqual(final_state, "indeterminate")
+
+            # 6. Verify temp files are cleaned up
+            tmp_files = list(Path(td).glob("*.tmp.*"))
+            self.assertEqual(len(tmp_files), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

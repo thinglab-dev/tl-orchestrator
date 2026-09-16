@@ -14,6 +14,7 @@ import argparse
 import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import fcntl
 import fnmatch
 import hashlib
 import json
@@ -21,7 +22,17 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 from typing import Any
+import uuid
+
+# Canonicalize sys.modules so 'scripts.tl_merge_guard' and 'tl_merge_guard' share single module state
+_self_mod = sys.modules.get(__name__)
+if _self_mod is not None:
+    if __name__ == "scripts.tl_merge_guard":
+        sys.modules.setdefault("tl_merge_guard", _self_mod)
+    elif __name__ == "tl_merge_guard":
+        sys.modules.setdefault("scripts.tl_merge_guard", _self_mod)
 
 try:
     from scripts.tl_usage import validate_against_schema
@@ -236,24 +247,8 @@ def get_platform_root_public_keys() -> dict[str, str]:
     """Return active platform root public keys (strictly IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS in production)."""
     if _active_platform_root_keys != IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS:
         return dict(_active_platform_root_keys)
-    # Check if executed under authorized test fixture environment (e.g. fake_gh runner)
-    if "TL_FAKE_GH_STATE" in os.environ:
-        gh_state = os.environ.get("TL_FAKE_GH_STATE", "")
-        if gh_state and os.path.exists(gh_state):
-            try:
-                from scripts.fixtures.runtime.fake_gh import TEST_FIXTURE_KEY_ID, TEST_FIXTURE_PUBLIC_KEY
-                keys = dict(IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS)
-                keys[TEST_FIXTURE_KEY_ID] = TEST_FIXTURE_PUBLIC_KEY.hex()
-                return keys
-            except Exception:
-                try:
-                    from fixtures.runtime.fake_gh import TEST_FIXTURE_KEY_ID, TEST_FIXTURE_PUBLIC_KEY
-                    keys = dict(IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS)
-                    keys[TEST_FIXTURE_KEY_ID] = TEST_FIXTURE_PUBLIC_KEY.hex()
-                    return keys
-                except Exception:
-                    pass
     return dict(IMMUTABLE_PLATFORM_ROOT_PUBLIC_KEYS)
+
 
 
 @contextlib.contextmanager
@@ -766,6 +761,8 @@ class InMemoryAuthorityStore(AuthorityStore):
         return False
 
     def commit_consumed(self, auth_id: str) -> bool:
+        if self._states.get(auth_id) == "indeterminate":
+            return False
         if self._states.get(auth_id) == "reserved":
             self._states[auth_id] = "consumed"
             return True
@@ -797,6 +794,16 @@ class DurableExternalAuthorityStore(AuthorityStore):
     def _state_file(self, auth_id: str) -> Path:
         return self.store_dir / f"{auth_id}.cas"
 
+    @contextlib.contextmanager
+    def _lock_auth(self, auth_id: str):
+        lock_path = self.store_dir / f"{auth_id}.lock"
+        with open(lock_path, "a") as lock_fd:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+
     def get_state(self, auth_id: str) -> str:
         f = self._state_file(auth_id)
         if not f.exists():
@@ -808,50 +815,75 @@ class DurableExternalAuthorityStore(AuthorityStore):
             return "indeterminate"
 
     def reserve(self, auth_id: str) -> bool:
-        f = self._state_file(auth_id)
-        payload = {
-            "authorization_id": auth_id,
-            "state": "reserved",
-            "reserved_at": datetime.now(timezone.utc).isoformat(),
-            "pid": os.getpid(),
-        }
-        try:
-            fd = os.open(str(f), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as fp:
-                json.dump(payload, fp)
-            return True
-        except FileExistsError:
-            return False
+        with self._lock_auth(auth_id):
+            curr = self.get_state(auth_id)
+            if curr != "unused":
+                return False
+            payload = {
+                "authorization_id": auth_id,
+                "state": "reserved",
+                "reserved_at": datetime.now(timezone.utc).isoformat(),
+                "pid": os.getpid(),
+            }
+            tmp = self.store_dir / f"{auth_id}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+            try:
+                with open(tmp, "w", encoding="utf-8") as fp:
+                    json.dump(payload, fp)
+                os.replace(tmp, self._state_file(auth_id))
+                return True
+            finally:
+                if tmp.exists():
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
 
     def commit_consumed(self, auth_id: str) -> bool:
-        f = self._state_file(auth_id)
-        curr = self.get_state(auth_id)
-        if curr != "reserved":
-            return False
-        payload = {
-            "authorization_id": auth_id,
-            "state": "consumed",
-            "consumed_at": datetime.now(timezone.utc).isoformat(),
-            "pid": os.getpid(),
-        }
-        tmp = self.store_dir / f"{auth_id}.tmp.{os.getpid()}"
-        with open(tmp, "w", encoding="utf-8") as fp:
-            json.dump(payload, fp)
-        os.replace(tmp, f)
-        return True
+        with self._lock_auth(auth_id):
+            curr = self.get_state(auth_id)
+            # Priority fail-closed: once marked indeterminate, transition to consumed is strictly forbidden
+            if curr == "indeterminate":
+                return False
+            if curr != "reserved":
+                return False
+            payload = {
+                "authorization_id": auth_id,
+                "state": "consumed",
+                "consumed_at": datetime.now(timezone.utc).isoformat(),
+                "pid": os.getpid(),
+            }
+            tmp = self.store_dir / f"{auth_id}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+            try:
+                with open(tmp, "w", encoding="utf-8") as fp:
+                    json.dump(payload, fp)
+                os.replace(tmp, self._state_file(auth_id))
+                return True
+            finally:
+                if tmp.exists():
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
 
     def mark_indeterminate(self, auth_id: str) -> None:
-        f = self._state_file(auth_id)
-        payload = {
-            "authorization_id": auth_id,
-            "state": "indeterminate",
-            "marked_at": datetime.now(timezone.utc).isoformat(),
-            "pid": os.getpid(),
-        }
-        tmp = self.store_dir / f"{auth_id}.tmp.{os.getpid()}"
-        with open(tmp, "w", encoding="utf-8") as fp:
-            json.dump(payload, fp)
-        os.replace(tmp, f)
+        with self._lock_auth(auth_id):
+            payload = {
+                "authorization_id": auth_id,
+                "state": "indeterminate",
+                "marked_at": datetime.now(timezone.utc).isoformat(),
+                "pid": os.getpid(),
+            }
+            tmp = self.store_dir / f"{auth_id}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+            try:
+                with open(tmp, "w", encoding="utf-8") as fp:
+                    json.dump(payload, fp)
+                os.replace(tmp, self._state_file(auth_id))
+            finally:
+                if tmp.exists():
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
 
 
 class LocalLedgerAuthorityStore(AuthorityStore):
@@ -880,6 +912,8 @@ class LocalLedgerAuthorityStore(AuthorityStore):
                             self.external.commit_consumed(aid)
                         elif st == "reserved":
                             self.external.reserve(aid)
+                        elif st == "indeterminate":
+                            self.external.mark_indeterminate(aid)
             except Exception:
                 continue
 

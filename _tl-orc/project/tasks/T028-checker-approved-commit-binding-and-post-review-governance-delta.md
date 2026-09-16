@@ -4,8 +4,8 @@ type: gov
 deliverable: none
 standalone: true
 method: native
-status: in_progress
-state_revision: 21
+status: done
+state_revision: 22
 depends_on: [T027]
 blocked_by: []
 origin: instrução normativa do mantenedor em 2026-09-14 (ratificação B004) e extensão formal ratificada em 2026-09-15 após auditoria do incidente de merge do PR #55

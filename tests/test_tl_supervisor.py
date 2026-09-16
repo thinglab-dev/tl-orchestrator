@@ -2166,6 +2166,52 @@ class MergeQueueTest(SupervisorCase):
             )
             self.assertEqual(res["state"], "invalid_input")
 
+    def test_counterfactual_r2_merge_queue_head_without_store_on_invalid_queue_never_touches_cas(self):
+        """Action Item R2 (r20): merge_queue_head invoked without authority_store over invalid/missing bindings must never instantiate or touch CAS store."""
+        queue = self.root / "queue-r2-invalid.json"
+        never_created_dir = self.root / "cas_never_created"
+
+        # 1. Legacy item without commit bindings rejected at _read_queue and merge_queue_head without touching store
+        legacy_item = {
+            "story_id": "T001",
+            "pr_number": 11,
+            "target_repository": "thinglab-dev/tl-orchestrator",
+            "authority_mode": "delegated_single_merge",
+        }
+        queue.write_text(json.dumps([legacy_item]), encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            tl_supervisor._read_queue(queue)
+
+        with mock.patch("scripts.tl_run_story.DurableExternalAuthorityStore") as mock_cls:
+            res = tl_run_story.merge_queue_head(queue, authority_store=None, repo_root=self.root)
+            self.assertEqual(res["state"], "unavailable")
+            mock_cls.assert_not_called()
+
+        # 2. Live environment store dir path proves zero directory creation on disk
+        with mock.patch.dict(os.environ, {"TL_CAS_STORE_DIR": str(never_created_dir)}):
+            res2 = tl_run_story.merge_queue_head(queue, authority_store=None, repo_root=self.root)
+            self.assertEqual(res2["state"], "unavailable")
+            self.assertFalse(never_created_dir.exists(), "CAS store directory must not be created on invalid queue")
+
+        # 3. Item with missing/invalid 40-hex commit bindings rejected early without touching store
+        bad_format_item = {
+            "story_id": "T001",
+            "pr_number": 11,
+            "target_repository": "thinglab-dev/tl-orchestrator",
+            "authority_mode": "delegated_single_merge",
+            "checker_approved_commit": "short_or_invalid_hash",
+            "integration_candidate_commit": "short_or_invalid_hash",
+        }
+        queue.write_text(json.dumps([bad_format_item]), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            tl_supervisor._read_queue(queue)
+
+        with mock.patch("scripts.tl_run_story.DurableExternalAuthorityStore") as mock_cls:
+            res3 = tl_run_story.merge_queue_head(queue, authority_store=None, repo_root=self.root)
+            self.assertEqual(res3["state"], "unavailable")
+            mock_cls.assert_not_called()
+
 
 
 class OrphanSweepTest(SupervisorCase):

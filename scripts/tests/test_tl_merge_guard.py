@@ -719,6 +719,10 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
         }), encoding="utf-8")
         fx.script("maker", MAKER_OK)
         fx.script("checker", CHECKER_OK)
+        res = fx.run_cli("run", fault="after_result:pull_request")
+        self.assertEqual(res.returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
 
         old_fake = os.environ.get("TL_FAKE_GH_STATE")
         os.environ["TL_FAKE_GH_STATE"] = str(fx.gh_state)
@@ -758,6 +762,10 @@ class TestMergeGuardProbes(MergeGuardBaseCase):
         }), encoding="utf-8")
         fx.script("maker", MAKER_OK)
         fx.script("checker", CHECKER_OK)
+        res = fx.run_cli("run", fault="after_result:pull_request")
+        self.assertEqual(res.returncode, 70)
+        commit_sha = fx.fold().units["T001"].commit
+        fx.bind_unit_commits("T001", commit_sha, commit_sha)
 
         old_fake = os.environ.get("TL_FAKE_GH_STATE")
         os.environ["TL_FAKE_GH_STATE"] = str(fx.gh_state)
@@ -1602,6 +1610,10 @@ sys.exit(0)
                 }), encoding="utf-8")
                 fx.script("maker", MAKER_OK)
                 fx.script("checker", CHECKER_OK)
+                res = fx.run_cli("run", fault="after_result:pull_request")
+                self.assertEqual(res.returncode, 70)
+                commit_sha = fx.fold().units["T001"].commit
+                fx.bind_unit_commits("T001", commit_sha, commit_sha)
                 rt = fx.runtime()
                 self.assertEqual(rt.run(), "blocked")
                 record = fx.fold().units["T001"]
@@ -1638,6 +1650,10 @@ sys.exit(0)
                 }), encoding="utf-8")
                 fx.script("maker", MAKER_OK)
                 fx.script("checker", CHECKER_OK)
+                res = fx.run_cli("run", fault="after_result:pull_request")
+                self.assertEqual(res.returncode, 70)
+                commit_sha = fx.fold().units["T001"].commit
+                fx.bind_unit_commits("T001", commit_sha, commit_sha)
                 rt = fx.runtime()
                 self.assertEqual(rt.run(), "blocked")
                 record = fx.fold().units["T001"]
@@ -1663,6 +1679,10 @@ sys.exit(0)
                 }), encoding="utf-8")
                 fx.script("maker", MAKER_OK)
                 fx.script("checker", CHECKER_OK)
+                res = fx.run_cli("run", fault="after_result:pull_request")
+                self.assertEqual(res.returncode, 70)
+                commit_sha = fx.fold().units["T001"].commit
+                fx.bind_unit_commits("T001", commit_sha, commit_sha)
                 rt = fx.runtime()
                 self.assertEqual(rt.run(), "blocked")
                 record = fx.fold().units["T001"]
@@ -1753,6 +1773,10 @@ sys.exit(0)
                 }), encoding="utf-8")
                 fx.script("maker", MAKER_OK)
                 fx.script("checker", CHECKER_OK)
+                res = fx.run_cli("run", fault="after_result:pull_request")
+                self.assertEqual(res.returncode, 70)
+                commit_sha = fx.fold().units["T001"].commit
+                fx.bind_unit_commits("T001", commit_sha, commit_sha)
                 rt = fx.runtime()
 
                 with mock.patch("scripts.tl_merge_guard.LocalLedgerAuthorityStore.commit_consumed", return_value=False):
@@ -1782,6 +1806,10 @@ sys.exit(0)
                 }), encoding="utf-8")
                 fx.script("maker", MAKER_OK)
                 fx.script("checker", CHECKER_OK)
+                res = fx.run_cli("run", fault="after_result:pull_request")
+                self.assertEqual(res.returncode, 70)
+                commit_sha = fx.fold().units["T001"].commit
+                fx.bind_unit_commits("T001", commit_sha, commit_sha)
                 rt = fx.runtime()
 
                 with mock.patch("scripts.tl_merge_guard.LocalLedgerAuthorityStore.commit_consumed", side_effect=OSError("disk I/O error")):

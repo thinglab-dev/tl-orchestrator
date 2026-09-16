@@ -66,6 +66,7 @@ except ImportError:
             return False, "merge_guard_unavailable"
 
 
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RUNTIME_VERSION = "0.17.0"
 JOURNAL_FORMAT = 1
 STATE_DIR_NAME = "_tl-orc/runtime"
@@ -2009,20 +2010,15 @@ class Runtime:
 
                     authority_mode = getattr(unit, "authority_mode", "") or self.batch.get("authorization", {}).get("authority_mode", "")
                     if not authority_mode:
-                        if self.batch.get("authorization", {}).get("authority_source") == "test":
-                            authority_mode = "delegated_single_merge"
-                        else:
-                            raise UnitPark("awaiting_operator", f"missing_authority_mode: unit {uid} must declare authority_mode to execute merge", decision={"options": ["retry", "skip"]})
+                        raise UnitPark("awaiting_operator", f"missing_authority_mode: unit {uid} must declare authority_mode to execute merge", decision={"options": ["retry", "skip"]})
 
                     if authority_mode == "delegated_single_merge":
                         checker_commit = getattr(unit, "checker_approved_commit", "")
                         candidate_commit = getattr(unit, "integration_candidate_commit", "")
                         if not checker_commit or not candidate_commit:
-                            if self.batch.get("authorization", {}).get("authority_source") == "test":
-                                checker_commit = checker_commit or getattr(record, "checker_commit", "") or record.commit
-                                candidate_commit = candidate_commit or record.commit
-                            else:
-                                raise UnitPark("awaiting_operator", f"missing_commit_bindings: unit {uid} in delegated_single_merge must declare checker_approved_commit and integration_candidate_commit", decision={"options": ["retry", "skip"]})
+                            raise UnitPark("awaiting_operator", f"missing_commit_bindings: unit {uid} in delegated_single_merge must declare checker_approved_commit and integration_candidate_commit", decision={"options": ["retry", "skip"]})
+                        if not _COMMIT_RE.match(checker_commit) or not _COMMIT_RE.match(candidate_commit):
+                            raise UnitPark("awaiting_operator", f"invalid_commit_bindings: unit {uid} in delegated_single_merge requires 40-hex lowercase commits", decision={"options": ["skip"]})
                         if candidate_commit != record.commit:
                             raise UnitPark("awaiting_operator", f"candidate_commit_mismatch: unit {uid} candidate {candidate_commit} != record.commit {record.commit}", decision={"options": ["retry", "skip"]})
                         delta_ok, delta_reason = validate_post_review_delta(self.repo, checker_commit, candidate_commit)

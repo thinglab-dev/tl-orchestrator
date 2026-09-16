@@ -97,11 +97,18 @@ def merge_queue_head(
     active_repo_root = Path(repo_root) if repo_root is not None else Path(".")
     expected_repo_param = target_repository or expected_repo
     active_store = authority_store
-    if active_store is None and DurableExternalAuthorityStore is not None:
+
+    def get_or_create_store():
+        nonlocal active_store
+        if active_store is not None:
+            return active_store, ""
+        if DurableExternalAuthorityStore is None:
+            return None, "external_authority_store_unavailable: DurableExternalAuthorityStore primitive missing"
         try:
             active_store = DurableExternalAuthorityStore()
-        except Exception:
-            active_store = None
+            return active_store, ""
+        except Exception as exc:
+            return None, f"external_authority_store_initialization_failed: {exc}"
 
     def run(item):
         pr_number = int(item.get("pr_number", 0))
@@ -210,7 +217,7 @@ def merge_queue_head(
                         live_pr_info=live_pr,
                         checker_commit=item_checker,
                         candidate_commit=item_candidate,
-                        authority_store=active_store,
+                        authority_store=get_or_create_store()[0],
                         expected_repo=expected_repo,
                         comments=comments,
                         enforce_mode="delegated_single_merge",
@@ -394,22 +401,13 @@ def merge_queue_head(
             )
 
         # 4. External CAS Anti-Replay Reservation on Queue Path (MANDATORY PRECONDITION)
-        store = active_store
+        store, store_err = get_or_create_store()
         if store is None:
-            if DurableExternalAuthorityStore is None:
-                reason = "external_authority_store_unavailable: DurableExternalAuthorityStore primitive missing"
-                return (
-                    AuthorityReceipt(status="REJECTED", target_pr=pr_number, target_repository=expected_repo, reason=reason),
-                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
-                )
-            try:
-                store = DurableExternalAuthorityStore()
-            except Exception as exc:
-                reason = f"external_authority_store_initialization_failed: {exc}"
-                return (
-                    AuthorityReceipt(status="REJECTED", target_pr=pr_number, target_repository=expected_repo, reason=reason),
-                    subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
-                )
+            reason = store_err
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, target_repository=expected_repo, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
 
         try:
             curr_state = store.get_state(receipt.authorization_id)

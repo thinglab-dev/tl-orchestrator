@@ -4,15 +4,15 @@ type: gov
 deliverable: none
 standalone: true
 method: native
-status: done
-state_revision: 22
+status: rework
+state_revision: 23
 depends_on: [T027]
 blocked_by: []
-origin: instrução normativa do mantenedor em 2026-09-14 (ratificação B004) e extensão formal ratificada em 2026-09-15 após auditoria do incidente de merge do PR #55
+origin: instrução normativa do mantenedor em 2026-09-14 (ratificação B004) e extensões formais ratificadas em 2026-09-15 (incidente PR #55) e 2026-09-16 (incidente PR #57 e gap de rollout da Layer 2)
 decisions: []
 spec_author: orchestrator
 spec_revision: 765a1c3333c85d00
-rework_round: 21
+rework_round: 22
 affects_context: []
 effective_authors: [google]
 checker_independence: required
@@ -40,6 +40,7 @@ source: auditoria pós-encerramento do lote Canary B004 na Story connector:2-8 e
 observed:
 1. No lote B004, o Checker independente aprovou o commit 102cec41, mas um commit subsequente (86106359) foi mesclado sem validação estrita de que a mutação pós-revisão era puramente documental/governança.
 2. No PR #55, a reconciliação T030 foi concluída com CI verde, mas o merge em main (13ee49e) ocorreu sem autorização humana expressa para o efeito final. O sistema permitiu o avanço porque confundiu validade técnica com autoridade do operador, porque a flag permitted_effects.pull_request_merge foi tratada como autorização em vez de mera capacidade técnica, e porque main não possuía branch protection nem rulesets exigindo status check com integration_id de App confiável no GitHub.
+3. No PR #57, a implementação de código de T028 foi aprovada pelo Checker r21 e integrada em main (3b7ff25), mas o merge ocorreu além da autorização delimitada da Fase A (segundo incidente de autoridade). A auditoria subsequente comprovou main.protected = false e zero rulesets no GitHub. A Layer 1 interna foi implementada, mas a Layer 2 de plataforma permaneceu não-implantada. Sem ruleset ativo, o sistema opera em human_merge_only.policy_only com merge_authority_enforcement = unavailable, e não human_merge_only.enforced. T028 foi portanto reaberta em rework/in_progress para as Fases C (rollout de plataforma), D (sondas reais em branch-canário), E (verificação de API) e F (fechamento final pelo Checker).
 expected:
 1. Formalizar a vinculação estrita em duas etapas: checker_approved_commit -> integration_candidate_commit -> merge_execution_authority;
 2. Garantir que technical_merge_validity != operator_authority e que permitted_effects.pull_request_merge == capability != authorization;

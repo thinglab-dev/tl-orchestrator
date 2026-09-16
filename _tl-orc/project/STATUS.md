@@ -1,8 +1,8 @@
 format_version: 1
 work_method: native
-active_work_ref: none
-current_role: none
-next_action: Publicar PR de integração e solicitar autorização humana para merge em main conforme CONTRIBUTING.md.
+active_work_ref: T028
+current_role: coordinator
+next_action: Executar Fase C (rollout da infraestrutura de autoridade da plataforma com o Operador) e Fase D (sondas em branch-canário).
 coordinator:
   harness: claude
   session: claude-code-b5b7f943
@@ -49,7 +49,7 @@ open_discussions: []
 | T025 | feat | none | done | [] | [] | 2 | evidence/T025-r11.md |
 | T026 | feat | none | done | [T025] | [] | 6 | evidence/T026-r03.md |
 | T027 | feat | package | done | [T018, T026] | [] | 2 | evidence/T027-r01.md |
-| T028 | gov | none | done | [T027] | [] | 22 | evidence/T028-r01.md |
+| T028 | gov | none | rework | [T027] | [] | 23 | evidence/T028-r01.md |
 | T029 | feat | none | done | [T026] | [] | 12 | evidence/T029-r11.md |
 | T030 | gov | none | done | [T029] | [] | 2 | evidence/T030-r01.md |
 | T031 | feat | package | done | [T019, T027] | [] | 2 | evidence/T031-r01.md |

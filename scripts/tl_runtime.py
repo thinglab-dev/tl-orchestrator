@@ -2066,40 +2066,27 @@ class Runtime:
                             trust_root=trust_root,
                             gh_executable=gh_cmd,
                         )
-                        is_test_fixture = (
-                            self.batch.get("authorization", {}).get("authority_source") == "test"
-                            and self.config.get("accept_unisolated_worker") is True
-                            and "fake_gh" in str(self.config.get("gh_executable", ""))
-                        )
-                        if is_test_fixture and not receipt.is_confirmed:
-                            auth_id = f"auth-test-{record.pr['number']}-{record.commit[:8]}"
-                            store.reserve(auth_id)
-                            receipt = AuthorityReceipt(
-                                status="CONFIRMED",
-                                authorization_id=auth_id,
-                                target_pr=record.pr["number"],
-                                head_sha=record.commit,
-                                base_sha=str(view.get("baseRefOid", "")),
-                                checker_commit=checker_commit,
-                                candidate_commit=candidate_commit,
-                                reason="AUTHORITY_CONFIRMED",
-                                envelope={
-                                    "authorization_id": auth_id,
-                                    "checker_approved_commit": checker_commit,
-                                    "integration_candidate_commit": candidate_commit,
-                                },
-                            )
-                        elif not receipt.is_confirmed:
+                        if not receipt.is_confirmed:
                             if receipt.degraded_mode:
                                 raise UnitPark("awaiting_operator", f"human_merge_only: {receipt.reason}", decision={"options": ["retry", "skip"]})
                             raise UnitPark("awaiting_operator", f"merge_authority_not_confirmed: {receipt.reason}", decision={"options": ["retry", "skip"]})
-                        if receipt is not None and receipt.is_confirmed:
-                            receipt_mode = getattr(receipt, "authority_mode", "")
-                            env_mode = receipt.envelope.get("authority_mode") if isinstance(receipt.envelope, dict) else None
-                            if receipt_mode == "human_merge_only" or env_mode == "human_merge_only" or (env_mode is not None and env_mode != "delegated_single_merge"):
-                                raise UnitPark("awaiting_operator", f"human_merge_only: receipt authority_mode is {env_mode or receipt_mode}", decision={"options": ["retry", "skip"]})
+
+                        receipt_mode = getattr(receipt, "authority_mode", "")
+                        env_mode = receipt.envelope.get("authority_mode") if isinstance(receipt.envelope, dict) else None
+                        if receipt_mode != "delegated_single_merge" or env_mode != "delegated_single_merge":
+                            raise UnitPark(
+                                "awaiting_operator",
+                                f"strict_authority_mode_required: automated merge requires delegated_single_merge (receipt_mode={receipt_mode!r}, env_mode={env_mode!r})",
+                                decision={"options": ["retry", "skip"]},
+                            )
+                        if not receipt.is_authentic(trust_root, expected_repo=expected_repo):
+                            raise UnitPark(
+                                "awaiting_operator",
+                                "fabricated_authority_receipt_rejected: receipt failed authenticity check against trust root",
+                                decision={"options": ["retry", "skip"]},
+                            )
                     else:
-                        receipt = None
+                        raise UnitPark("awaiting_operator", "merge_authority_unavailable: MergeAuthorityGate could not be loaded", decision={"options": ["skip"]})
 
                     def merge(intent: dict) -> dict:
                         curr_view = self._pr_view(record.pr["number"], uid)
@@ -2121,6 +2108,21 @@ class Runtime:
 
                         if curr_view.get("baseRefName") != intent["base"] or curr_view.get("headRefOid") != record.commit or str(curr_view.get("state", "")).upper() != "OPEN":
                             return {"_status": "failed", "detail": f"pull request {record.pr['number']} is {curr_view.get('state')} against {curr_view.get('baseRefName')} at {str(curr_view.get('headRefOid'))[:12]}; reviewed: {intent['base']} at {record.commit[:12]}"}
+
+                        # Defense-in-depth: strict authority revalidation immediately prior to execution
+                        if (
+                            receipt is None
+                            or not receipt.is_confirmed
+                            or getattr(receipt, "authority_mode", "") != "delegated_single_merge"
+                            or not isinstance(receipt.envelope, dict)
+                            or receipt.envelope.get("authority_mode") != "delegated_single_merge"
+                            or not receipt.is_authentic(trust_root, expected_repo=expected_repo)
+                        ):
+                            return {
+                                "_status": "failed",
+                                "detail": "strict_authority_verification_failed: merge aborted without authentic delegated_single_merge receipt",
+                            }
+
                         out = run_argv([*self.config["gh_argv"], "pr", "merge", str(record.pr["number"]), "--repo", expected_repo, "--merge", "--delete-branch=false", "--match-head-commit", record.commit], self.repo, 300)
                         self._fault_point("after_call:pull_request_merge")
                         if out["exit_code"] != 0:

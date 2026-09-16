@@ -18,6 +18,19 @@ sys.path.insert(0, str(SCRIPTS))
 
 import tl_ci_slice  # noqa: E402
 import tl_runtime  # noqa: E402
+from tl_merge_guard import (  # noqa: E402
+    temporary_platform_anchor_for_testing,
+    AuthorityReceipt,
+    TrustRoot,
+    InMemoryAuthorityStore,
+    compute_receipt_token,
+    IMMUTABLE_PLATFORM_AUTHORITY_APP_ID,
+    IMMUTABLE_PLATFORM_AUTHORITY_APP_SLUG,
+)
+try:
+    from fixtures.runtime.fake_gh import TEST_FIXTURE_KEY_ID, TEST_FIXTURE_PUBLIC_KEY, TEST_FIXTURE_SECRET_KEY, TEST_FIXTURE_APP_ID, TEST_FIXTURE_APP_SLUG  # noqa: E402
+except Exception:
+    from scripts.fixtures.runtime.fake_gh import TEST_FIXTURE_KEY_ID, TEST_FIXTURE_PUBLIC_KEY, TEST_FIXTURE_SECRET_KEY, TEST_FIXTURE_APP_ID, TEST_FIXTURE_APP_SLUG  # noqa: E402
 
 FAKE_HARNESS = SCRIPTS / "fixtures" / "runtime" / "fake_harness.py"
 FAKE_GH = SCRIPTS / "fixtures" / "runtime" / "fake_gh.py"
@@ -42,6 +55,12 @@ SPEC_B = SPEC_A.replace("T001", "T002").replace("greeting", "farewell").replace(
 
 def git(cwd: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=True, encoding="utf-8").stdout.strip()
+
+
+def run_cli_entry() -> None:
+    with temporary_platform_anchor_for_testing({TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()}):
+        from scripts.tl_runtime import main
+        sys.exit(main(sys.argv[1:]))
 
 
 class Fixture:
@@ -123,7 +142,7 @@ class Fixture:
         env = dict(os.environ, TL_FAKE_GH_STATE=str(self.gh_state), PYTHONIOENCODING="utf-8")
         if fault:
             env["TL_RUNTIME_FAULT"] = fault
-        return subprocess.run([sys.executable, str(SCRIPTS / "tl_runtime.py"), *args, "--batch", str(self.batch_path), "--config", str(self.config_path),
+        return subprocess.run([sys.executable, "-c", "from scripts.tests.test_tl_runtime import run_cli_entry; run_cli_entry()", *args, "--batch", str(self.batch_path), "--config", str(self.config_path),
                                "--repo", str(self.repo), "--state-dir", str(self.state_dir)], capture_output=True, text=True, env=env, encoding="utf-8")
 
     def journal(self) -> list[dict]:
@@ -143,8 +162,14 @@ class RuntimeTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         os.environ["TL_FAKE_GH_STATE"] = str(self.root / "gh.json")
+        self._anchor_ctx = temporary_platform_anchor_for_testing({
+            TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex(),
+        })
+        self._anchor_ctx.__enter__()
 
     def tearDown(self) -> None:
+        if hasattr(self, "_anchor_ctx"):
+            self._anchor_ctx.__exit__(None, None, None)
         os.environ.pop("TL_FAKE_GH_STATE", None)
         self.tmp.cleanup()
 
@@ -1370,6 +1395,200 @@ class RuntimeTest(unittest.TestCase):
             envelope=env,
         )
         self.assertFalse(receipt.is_authentic())
+
+    def test_probe_missing_or_empty_authority_mode_in_receipt_parks_unit_and_prevents_merge(self) -> None:
+        """Action Item R1: AuthorityReceipt with missing/empty authority_mode must park unit, execute zero gh pr merge, and keep CAS unused."""
+        from tl_merge_guard import InMemoryAuthorityStore, AuthorityReceipt
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.batch["authorization"]["authority_mode"] = "delegated_single_merge"
+        fx.batch["frozen_scope"]["units"][0]["authority_mode"] = "delegated_single_merge"
+        fx.batch["frozen_scope"]["immutable_digest"] = tl_runtime.frozen_scope_digest(fx.batch["frozen_scope"])
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+
+        store = InMemoryAuthorityStore()
+        rt = fx.runtime()
+        rt.authority_store = store
+
+        head_sha = "1" * 40
+        base_sha = "0" * 40
+        auth_id = "auth-counterfactual-1"
+        dummy_receipt = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id,
+            target_pr=1,
+            head_sha=head_sha,
+            base_sha=base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="",
+            reason="AUTHORITY_CONFIRMED",
+            envelope={
+                "authorization_id": auth_id,
+                "target_repository": "thinglab-dev/tl-orchestrator",
+                "target_pr": 1,
+                "checker_approved_commit": head_sha,
+                "integration_candidate_commit": head_sha,
+                "authority_mode": "delegated_single_merge",
+            },
+        )
+
+        with mock.patch("scripts.tl_runtime.MergeAuthorityGate.evaluate", return_value=dummy_receipt):
+            rt.run()
+
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("strict_authority_mode_required", record.reason)
+        self.assertFalse(record.merged)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+        self.assertNotEqual(store.get_state(auth_id), "consumed")
+
+    def test_probe_missing_or_empty_authority_mode_in_envelope_parks_unit_and_prevents_merge(self) -> None:
+        """Action Item R1: Envelope with missing/empty authority_mode must park unit, execute zero gh pr merge, and keep CAS unused."""
+        from tl_merge_guard import InMemoryAuthorityStore, AuthorityReceipt
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.batch["authorization"]["authority_mode"] = "delegated_single_merge"
+        fx.batch["frozen_scope"]["units"][0]["authority_mode"] = "delegated_single_merge"
+        fx.batch["frozen_scope"]["immutable_digest"] = tl_runtime.frozen_scope_digest(fx.batch["frozen_scope"])
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+
+        store = InMemoryAuthorityStore()
+        rt = fx.runtime()
+        rt.authority_store = store
+
+        head_sha = "1" * 40
+        base_sha = "0" * 40
+        auth_id = "auth-counterfactual-2"
+        dummy_receipt = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id,
+            target_pr=1,
+            head_sha=head_sha,
+            base_sha=base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
+            reason="AUTHORITY_CONFIRMED",
+            envelope={
+                "authorization_id": auth_id,
+                "target_repository": "thinglab-dev/tl-orchestrator",
+                "target_pr": 1,
+                "checker_approved_commit": head_sha,
+                "integration_candidate_commit": head_sha,
+                "authority_mode": "",
+            },
+        )
+
+        with mock.patch("scripts.tl_runtime.MergeAuthorityGate.evaluate", return_value=dummy_receipt):
+            rt.run()
+
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("strict_authority_mode_required", record.reason)
+        self.assertFalse(record.merged)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+        self.assertNotEqual(store.get_state(auth_id), "consumed")
+
+    def test_probe_unauthentic_or_fabricated_receipt_parks_unit_and_prevents_merge(self) -> None:
+        """Action Item R1: Unauthentic or fabricated receipt must park unit, execute zero gh pr merge, and keep CAS unused."""
+        from tl_merge_guard import InMemoryAuthorityStore, AuthorityReceipt
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.batch["authorization"]["authority_mode"] = "delegated_single_merge"
+        fx.batch["frozen_scope"]["units"][0]["authority_mode"] = "delegated_single_merge"
+        fx.batch["frozen_scope"]["immutable_digest"] = tl_runtime.frozen_scope_digest(fx.batch["frozen_scope"])
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+
+        store = InMemoryAuthorityStore()
+        rt = fx.runtime()
+        rt.authority_store = store
+
+        head_sha = "1" * 40
+        base_sha = "0" * 40
+        auth_id = "auth-counterfactual-3"
+        dummy_receipt = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id=auth_id,
+            target_pr=1,
+            head_sha=head_sha,
+            base_sha=base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
+            reason="AUTHORITY_CONFIRMED",
+            envelope={
+                "authorization_id": auth_id,
+                "target_repository": "thinglab-dev/tl-orchestrator",
+                "target_pr": 1,
+                "checker_approved_commit": head_sha,
+                "integration_candidate_commit": head_sha,
+                "authority_mode": "delegated_single_merge",
+                "provenance": {"key_id": "key-forged-999", "signature": "0" * 128},
+            },
+        )
+
+        with mock.patch("scripts.tl_runtime.MergeAuthorityGate.evaluate", return_value=dummy_receipt):
+            rt.run()
+
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("fabricated_authority_receipt_rejected", record.reason)
+        self.assertFalse(record.merged)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+        self.assertNotEqual(store.get_state(auth_id), "consumed")
+
+    def test_probe_missing_receipt_parks_unit_and_prevents_merge(self) -> None:
+        """Action Item R1: Unconfirmed or missing receipt must park unit, execute zero gh pr merge, and keep CAS unused."""
+        from tl_merge_guard import InMemoryAuthorityStore, AuthorityReceipt
+        fx = Fixture(self.root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+        fx.batch["authorization"]["authority_mode"] = "delegated_single_merge"
+        fx.batch["frozen_scope"]["units"][0]["authority_mode"] = "delegated_single_merge"
+        fx.batch["frozen_scope"]["immutable_digest"] = tl_runtime.frozen_scope_digest(fx.batch["frozen_scope"])
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        fx.gh_state.write_text(json.dumps({"checks_sequence": ["success"]}), encoding="utf-8")
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+
+        store = InMemoryAuthorityStore()
+        rt = fx.runtime()
+        rt.authority_store = store
+
+        rejected_receipt = AuthorityReceipt(
+            status="REJECTED",
+            authorization_id="auth-rejected-4",
+            target_pr=1,
+            head_sha="1" * 40,
+            base_sha="0" * 40,
+            checker_commit="1" * 40,
+            candidate_commit="1" * 40,
+            target_repository="thinglab-dev/tl-orchestrator",
+            authority_mode="delegated_single_merge",
+            reason="REJECTED_SIGNATURE_INVALID",
+        )
+
+        with mock.patch("scripts.tl_runtime.MergeAuthorityGate.evaluate", return_value=rejected_receipt):
+            rt.run()
+
+        record = fx.fold().units["T001"]
+        self.assertEqual(record.state, "awaiting_operator")
+        self.assertIn("merge_authority_not_confirmed", record.reason)
+        self.assertFalse(record.merged)
+        calls = json.loads(fx.gh_state.read_text(encoding="utf-8"))["calls"]
+        self.assertFalse(any(c[:2] == ["pr", "merge"] for c in calls))
+        self.assertNotEqual(store.get_state("auth-rejected-4"), "consumed")
 
 
 class CiSliceTest(unittest.TestCase):

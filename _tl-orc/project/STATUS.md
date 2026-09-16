@@ -49,6 +49,6 @@ open_discussions: []
 | T025 | feat | none | done | [] | [] | 2 | evidence/T025-r11.md |
 | T026 | feat | none | done | [T025] | [] | 6 | evidence/T026-r03.md |
 | T027 | feat | package | done | [T018, T026] | [] | 2 | evidence/T027-r01.md |
-| T028 | gov | none | in_progress | [T027] | [] | 20 | evidence/T028-r01.md |
+| T028 | gov | none | in_progress | [T027] | [] | 21 | evidence/T028-r01.md |
 | T029 | feat | none | done | [T026] | [] | 12 | evidence/T029-r11.md |
 | T030 | gov | none | done | [T029] | [] | 2 | evidence/T030-r01.md |

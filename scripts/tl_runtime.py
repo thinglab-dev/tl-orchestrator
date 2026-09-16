@@ -2159,7 +2159,18 @@ class Runtime:
                                        decision={"options": ["skip"]})
                     if result.get("merged"):
                         if receipt and receipt.authorization_id:
-                            store.commit_consumed(receipt.authorization_id)
+                            consumed_ok = False
+                            try:
+                                consumed_ok = store.commit_consumed(receipt.authorization_id)
+                            except Exception:
+                                consumed_ok = False
+                            if not consumed_ok:
+                                try:
+                                    store.mark_indeterminate(receipt.authorization_id)
+                                except Exception:
+                                    pass
+                                raise UnitPark("awaiting_operator", f"authority_commit_consumed_failed: pull request {record.pr['number']} authority token could not be consumed (CAS state conflict or indeterminate)",
+                                               decision={"options": ["skip"]})
                         self.unit_state(uid, "running", "", phase="complete", merged=True)
                     else:
                         if receipt and receipt.authorization_id:

@@ -1730,6 +1730,73 @@ sys.exit(0)
             tmp_files = list(Path(td).glob("*.tmp.*"))
             self.assertEqual(len(tmp_files), 0)
 
+    def test_probe_27_runtime_commit_consumed_failure_marks_indeterminate_and_parks(self):
+        """
+        Probe 27 (R1 r09): Runtime post-merge commit_consumed failure handling.
+        When gh pr merge succeeds and terminal checks are valid, but store.commit_consumed returns False
+        or raises an exception (e.g. CAS state conflict or indeterminate priority):
+        - Must NOT complete the unit (phase must not be 'complete', unit must not succeed).
+        - Must mark authority indeterminate in CAS store.
+        - Must park unit closed in awaiting_operator with authority_commit_consumed_failed.
+        """
+        from scripts.tests.test_tl_runtime import Fixture, MAKER_OK, CHECKER_OK
+        # 1. commit_consumed returns False
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fx = Fixture(root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+            os.environ["TL_FAKE_GH_STATE"] = str(fx.gh_state)
+            try:
+                fx.gh_state.write_text(json.dumps({
+                    "checks_sequence": ["success"],
+                }), encoding="utf-8")
+                fx.script("maker", MAKER_OK)
+                fx.script("checker", CHECKER_OK)
+                rt = fx.runtime()
+
+                with mock.patch("scripts.tl_merge_guard.LocalLedgerAuthorityStore.commit_consumed", return_value=False):
+                    self.assertEqual(rt.run(), "blocked")
+
+                record = fx.fold().units["T001"]
+                self.assertEqual(record.state, "awaiting_operator")
+                self.assertNotEqual(record.phase, "complete")
+                self.assertIn("authority_commit_consumed_failed", record.reason)
+
+                # External CAS store must record state == indeterminate, NEVER consumed
+                cas_files = sorted(rt.authority_store.external.store_dir.glob("*.cas"), key=os.path.getmtime)
+                self.assertTrue(len(cas_files) > 0)
+                latest_cas = json.loads(cas_files[-1].read_text(encoding="utf-8"))
+                self.assertEqual(latest_cas.get("state"), "indeterminate")
+            finally:
+                os.environ.pop("TL_FAKE_GH_STATE", None)
+
+        # 2. commit_consumed raises an Exception
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fx = Fixture(root, units=1, effects={"push": True, "pull_request": True, "pull_request_merge": True}, ci=True)
+            os.environ["TL_FAKE_GH_STATE"] = str(fx.gh_state)
+            try:
+                fx.gh_state.write_text(json.dumps({
+                    "checks_sequence": ["success"],
+                }), encoding="utf-8")
+                fx.script("maker", MAKER_OK)
+                fx.script("checker", CHECKER_OK)
+                rt = fx.runtime()
+
+                with mock.patch("scripts.tl_merge_guard.LocalLedgerAuthorityStore.commit_consumed", side_effect=OSError("disk I/O error")):
+                    self.assertEqual(rt.run(), "blocked")
+
+                record = fx.fold().units["T001"]
+                self.assertEqual(record.state, "awaiting_operator")
+                self.assertNotEqual(record.phase, "complete")
+                self.assertIn("authority_commit_consumed_failed", record.reason)
+
+                cas_files = sorted(rt.authority_store.external.store_dir.glob("*.cas"), key=os.path.getmtime)
+                self.assertTrue(len(cas_files) > 0)
+                latest_cas = json.loads(cas_files[-1].read_text(encoding="utf-8"))
+                self.assertEqual(latest_cas.get("state"), "indeterminate")
+            finally:
+                os.environ.pop("TL_FAKE_GH_STATE", None)
+
 
 if __name__ == "__main__":
     unittest.main()

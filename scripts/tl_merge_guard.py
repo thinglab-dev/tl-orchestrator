@@ -1275,6 +1275,19 @@ class MergeAuthorityGate:
         base_sha = str(live_pr_info.get("baseRefOid", ""))
         pr_state = str(live_pr_info.get("state", "")).upper()
 
+        if not expected_repo or not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", str(expected_repo).strip()):
+            return AuthorityReceipt(
+                status="REJECTED",
+                authorization_id="",
+                target_pr=pr_number,
+                head_sha=head_sha,
+                base_sha=base_sha,
+                checker_commit=checker_commit,
+                candidate_commit=candidate_commit,
+                target_repository=str(expected_repo) if expected_repo is not None else "",
+                reason=f"missing_or_invalid_target_repository: '{expected_repo}'",
+            )
+
         if not checker_commit or not candidate_commit:
             return AuthorityReceipt(
                 status="REJECTED",
@@ -1401,6 +1414,19 @@ class MergeAuthorityGate:
         auth_id = envelope["authorization_id"]
 
         # Scope validation on matched envelope (defense-in-depth)
+        if envelope.get("target_repository") != expected_repo:
+            return AuthorityReceipt(
+                status="REJECTED",
+                authorization_id=auth_id,
+                target_pr=pr_number,
+                head_sha=head_sha,
+                base_sha=base_sha,
+                checker_commit=checker_commit,
+                candidate_commit=candidate_commit,
+                target_repository=expected_repo,
+                reason=f"cross_repository_authority_reuse_rejected: envelope target_repository='{envelope.get('target_repository')}' does not match expected_repo='{expected_repo}'",
+                envelope=envelope,
+            )
         if envelope.get("checker_approved_commit") != checker_commit:
             return AuthorityReceipt(
                 status="REJECTED",

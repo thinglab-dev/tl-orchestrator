@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -104,12 +105,21 @@ def merge_queue_head(
 
     def run(item):
         pr_number = int(item.get("pr_number", 0))
-        expected_repo = (
+        raw_repo = (
             expected_repo_param
-            or item.get("target_repository")
-            or item.get("expected_repo")
-            or os.environ.get("TL_TARGET_REPOSITORY", "thinglab-dev/tl-orchestrator")
+            if expected_repo_param is not None
+            else (item.get("target_repository") if "target_repository" in item else item.get("expected_repo"))
         )
+        if raw_repo is None:
+            raw_repo = os.environ.get("TL_TARGET_REPOSITORY")
+
+        expected_repo = str(raw_repo).strip() if raw_repo is not None else ""
+        if not expected_repo or not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", expected_repo):
+            reason = f"missing_or_invalid_target_repository: '{raw_repo}'"
+            return (
+                AuthorityReceipt(status="REJECTED", target_pr=pr_number, reason=reason),
+                subprocess.CompletedProcess([gh_executable], 1, "", f"Authority rejected: {reason}"),
+            )
 
         # 1. Resolve AuthorityReceipt
         receipt = None
@@ -130,9 +140,12 @@ def merge_queue_head(
                                     "pr",
                                     "view",
                                     str(pr_number),
+                                    "--repo",
+                                    expected_repo,
                                     "--json",
                                     "state,headRefOid,baseRefOid,baseRefName,comments",
                                 ],
+                                cwd=active_repo_root,
                                 capture_output=True,
                                 text=True,
                                 check=False,
@@ -162,9 +175,12 @@ def merge_queue_head(
                             "pr",
                             "view",
                             str(pr_number),
+                            "--repo",
+                            expected_repo,
                             "--json",
                             "state,headRefOid,baseRefOid,baseRefName,comments",
                         ],
+                        cwd=active_repo_root,
                         capture_output=True,
                         text=True,
                         check=False,
@@ -356,12 +372,15 @@ def merge_queue_head(
             "pr",
             "view",
             str(pr_number),
+            "--repo",
+            expected_repo,
             "--json",
             "state,headRefOid,baseRefOid,baseRefName,comments",
         ]
         try:
             proc_view = subprocess.run(
                 cmd_view,
+                cwd=active_repo_root,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -457,6 +476,8 @@ def merge_queue_head(
             "pr",
             "merge",
             str(item["pr_number"]),
+            "--repo",
+            expected_repo,
             "--squash",
             "--delete-branch",
             "--match-head-commit",
@@ -464,6 +485,7 @@ def merge_queue_head(
         ]
         proc = subprocess.run(
             cmd_merge,
+            cwd=active_repo_root,
             capture_output=True,
             text=True,
             check=False,
@@ -482,12 +504,15 @@ def merge_queue_head(
             "pr",
             "view",
             str(pr_number),
+            "--repo",
+            expected_repo,
             "--json",
             "state,headRefOid,baseRefOid",
         ]
         try:
             proc_term = subprocess.run(
                 cmd_terminal,
+                cwd=active_repo_root,
                 capture_output=True,
                 text=True,
                 check=False,

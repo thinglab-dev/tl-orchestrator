@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 import threading
@@ -463,7 +464,9 @@ class MergeQueueTest(SupervisorCase):
             self.assertNotIn("12", cmd)
         merge_calls = [call_args[0][0] for call_args in run.call_args_list if call_args[0][0][1:3] == ["pr", "merge"]]
         self.assertEqual(len(merge_calls), 1)
-        self.assertEqual(merge_calls[0][:5], ["gh", "pr", "merge", "11", "--squash"])
+        self.assertEqual(merge_calls[0][:4], ["gh", "pr", "merge", "11"])
+        self.assertEqual(merge_calls[0][4:6], ["--repo", "thinglab-dev/tl-orchestrator"])
+        self.assertEqual(merge_calls[0][6], "--squash")
         self.assertNotIn("--auto", merge_calls[0])
         self.assertIn("--match-head-commit", merge_calls[0])
         self.assertEqual(merge_calls[0][merge_calls[0].index("--match-head-commit") + 1], "a" * 40)
@@ -1060,15 +1063,21 @@ class MergeQueueTest(SupervisorCase):
         self.assertEqual(store.get_state(auth_id), "unused")
 
         merge_invoked = False
+        recorded_calls = []
         def fake_run(args, *a, **kw):
             nonlocal merge_invoked
             cmd = args
+            recorded_calls.append((list(cmd), dict(kw)))
             if len(cmd) >= 3 and cmd[1:3] == ["api", f"apps/{TEST_FIXTURE_APP_SLUG}"]:
                 return subprocess.CompletedProcess(cmd, 0, json.dumps({
                     "id": TEST_FIXTURE_APP_ID,
                     "slug": TEST_FIXTURE_APP_SLUG,
                     "public_keys": {TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
                 }), "")
+            if len(cmd) >= 3 and cmd[1] == "pr":
+                self.assertIn("--repo", cmd)
+                self.assertEqual(cmd[cmd.index("--repo") + 1], "thinglab-dev/tl-orchestrator")
+                self.assertEqual(kw.get("cwd"), self.root)
             if len(cmd) >= 4 and cmd[1:3] == ["pr", "view"] and cmd[3] == "11":
                 if any("comments" in arg for arg in cmd):
                     return subprocess.CompletedProcess(cmd, 0, json.dumps({
@@ -1115,6 +1124,13 @@ class MergeQueueTest(SupervisorCase):
         self.assertEqual(store.get_state(auth_id), "consumed")
         queue_item = json.loads(queue.read_text(encoding="utf-8"))["items"][0]
         self.assertEqual(queue_item["state"], "merged")
+        pr_calls = [c for c, _ in recorded_calls if len(c) >= 3 and c[1] == "pr"]
+        self.assertGreaterEqual(len(pr_calls), 3)
+        for c, kw in recorded_calls:
+            if len(c) >= 3 and c[1] == "pr":
+                self.assertIn("--repo", c)
+                self.assertEqual(c[c.index("--repo") + 1], "thinglab-dev/tl-orchestrator")
+                self.assertEqual(kw.get("cwd"), self.root)
 
     def test_cli_advance_connects_to_canonical_gate_without_mocked_validator(self):
         """Action Item R2: CLI advance connects to canonical gate without requiring a mocked validator."""
@@ -1385,6 +1401,178 @@ class MergeQueueTest(SupervisorCase):
         result = tl_supervisor.advance_merge_queue(queue, runner)
         self.assertEqual(result["state"], "unavailable")
         runner.assert_not_called()
+    def test_merge_queue_counterfactual_gh_repo_and_cwd_isolation(self):
+        """Action Item R1: Counterfactual probe forcing foreign GH_REPO and foreign cwd.
+        Proves that:
+        1. All queries and merges carry explicit --repo <target_repository> and cwd=active_repo_root.
+        2. Ambient GH_REPO and ambient working directory cannot divert queries or merges.
+        3. Attempts to use a receipt for a foreign repository matching GH_REPO fail closed.
+        4. Missing or invalid target_repository in queue item fails closed without merge.
+        """
+        foreign_repo = "attacker/evil-fork"
+        expected_repo = "thinglab-dev/tl-orchestrator"
+        store = DurableExternalAuthorityStore(store_dir=self.root / "store_cf_isolation")
+
+        claim = {
+            "schema_version": 1,
+            "target_repository": expected_repo,
+            "target_pr": 11,
+            "expected_head_sha": "a" * 40,
+            "expected_base_sha": "b" * 40,
+            "checker_approved_commit": "a" * 40,
+            "integration_candidate_commit": "a" * 40,
+            "authority_mode": "delegated_single_merge",
+            "issued_at": "2026-09-15T00:00:00Z",
+            "expires_at": "2029-01-01T00:00:00Z",
+            "nonce": "nonce-cf-isolation-1234",
+        }
+        envelope = sign_authorization_envelope(
+            claim,
+            secret_key=TEST_FIXTURE_SECRET_KEY,
+            key_id=TEST_FIXTURE_KEY_ID,
+            mechanism="dedicated_github_app",
+            integration_id=TEST_FIXTURE_APP_ID,
+            issuer=f"{TEST_FIXTURE_APP_SLUG}[bot]",
+        )
+        auth_id = envelope["authorization_id"]
+
+        queue1 = self.root / "queue-cf1.json"
+        tl_supervisor.enqueue_merge("T001", 11, queue1, target_repository=expected_repo)
+
+        merge_invoked = False
+        captured_calls = []
+
+        def fake_run(args, *a, **kw):
+            nonlocal merge_invoked
+            cmd = list(args)
+            captured_calls.append((cmd, dict(kw)))
+            if len(cmd) >= 3 and cmd[1:3] == ["api", f"apps/{TEST_FIXTURE_APP_SLUG}"]:
+                return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                    "id": TEST_FIXTURE_APP_ID,
+                    "slug": TEST_FIXTURE_APP_SLUG,
+                    "public_keys": {TEST_FIXTURE_KEY_ID: TEST_FIXTURE_PUBLIC_KEY.hex()},
+                }), "")
+            if len(cmd) >= 3 and cmd[1] == "pr":
+                self.assertIn("--repo", cmd)
+                repo_idx = cmd.index("--repo")
+                self.assertEqual(cmd[repo_idx + 1], expected_repo)
+                self.assertNotEqual(cmd[repo_idx + 1], foreign_repo)
+                self.assertEqual(kw.get("cwd"), self.root)
+            if len(cmd) >= 4 and cmd[1:3] == ["pr", "view"] and cmd[3] == "11":
+                if any("comments" in arg for arg in cmd):
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                        "state": "OPEN",
+                        "headRefOid": "a" * 40,
+                        "baseRefOid": "b" * 40,
+                        "baseRefName": "main",
+                        "comments": [{
+                            "id": 1,
+                            "body": f"```json:tl-merge-authorization\n{json.dumps(envelope)}\n```",
+                            "author": {"login": f"{TEST_FIXTURE_APP_SLUG}[bot]"},
+                            "user": {"login": f"{TEST_FIXTURE_APP_SLUG}[bot]"},
+                            "author_association": "COLLABORATOR",
+                        }],
+                    }), "")
+                elif merge_invoked:
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                        "state": "MERGED",
+                        "headRefOid": "a" * 40,
+                        "baseRefOid": "b" * 40,
+                    }), "")
+                else:
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                        "state": "OPEN",
+                        "headRefOid": "a" * 40,
+                        "baseRefOid": "b" * 40,
+                    }), "")
+            if len(cmd) >= 3 and cmd[1:3] == ["pr", "merge"]:
+                merge_invoked = True
+                return subprocess.CompletedProcess(cmd, 0, "merged", "")
+            return completed()
+
+        with mock.patch.dict(os.environ, {"GH_REPO": foreign_repo}), \
+             mock.patch("scripts.tl_run_story.subprocess.run", side_effect=fake_run), \
+             mock.patch("scripts.tl_merge_guard.subprocess.run", side_effect=fake_run):
+            res1 = tl_run_story.merge_queue_head(
+                queue1,
+                authority_store=store,
+                repo_root=self.root,
+                expected_repo=expected_repo,
+            )
+
+        self.assertEqual(res1["state"], "merged")
+        self.assertTrue(merge_invoked)
+        self.assertEqual(store.get_state(auth_id), "consumed")
+        pr_calls = [c for c, _ in captured_calls if len(c) >= 3 and c[1] == "pr"]
+        self.assertGreaterEqual(len(pr_calls), 3)
+        for c, kw in captured_calls:
+            if len(c) >= 3 and c[1] == "pr":
+                self.assertIn("--repo", c)
+                self.assertEqual(c[c.index("--repo") + 1], expected_repo)
+                self.assertEqual(kw.get("cwd"), self.root)
+
+        queue2 = self.root / "queue-cf2.json"
+        tl_supervisor.enqueue_merge("T002", 12, queue2, target_repository=expected_repo)
+        foreign_receipt = AuthorityReceipt(
+            status="CONFIRMED",
+            authorization_id="auth-foreign-repo-attack-1234",
+            target_pr=12,
+            head_sha="a" * 40,
+            base_sha="b" * 40,
+            checker_commit="a" * 40,
+            candidate_commit="a" * 40,
+            target_repository=foreign_repo,
+            reason="AUTHORITY_CONFIRMED",
+            envelope={"target_repository": foreign_repo},
+        )
+        with mock.patch.dict(os.environ, {"GH_REPO": foreign_repo}):
+            res2 = tl_run_story.merge_queue_head(
+                queue2,
+                authority_receipt=foreign_receipt,
+                authority_store=store,
+                repo_root=self.root,
+                expected_repo=expected_repo,
+            )
+        self.assertEqual(res2["state"], "failed")
+        self.assertIn("cross_repository_authority_reuse_rejected", res2["item"]["detail"])
+
+        queue3 = self.root / "queue-cf3.json"
+        queue3.write_text(json.dumps({
+            "items": [{
+                "story_id": "T003",
+                "pr_number": 13,
+                "state": "pending",
+                "enqueued_at": time.time(),
+            }]
+        }), encoding="utf-8")
+        clean_env = {k: v for k, v in os.environ.items() if k != "TL_TARGET_REPOSITORY"}
+        with mock.patch.dict(os.environ, clean_env, clear=True):
+            res3 = tl_run_story.merge_queue_head(
+                queue3,
+                repo_root=self.root,
+            )
+        self.assertEqual(res3["state"], "failed")
+        self.assertIn("missing_or_invalid_target_repository", res3["item"]["detail"])
+
+        queue4 = self.root / "queue-cf4.json"
+        queue4.write_text(json.dumps({
+            "items": [{
+                "story_id": "T004",
+                "pr_number": 14,
+                "target_repository": "invalid_repo_no_slash",
+                "state": "pending",
+                "enqueued_at": time.time(),
+            }]
+        }), encoding="utf-8")
+        res4 = tl_run_story.merge_queue_head(
+            queue4,
+            repo_root=self.root,
+        )
+        self.assertEqual(res4["state"], "unavailable")
+
+        # Directly verifying enqueue_merge rejects invalid target_repository
+        enqueue_res = tl_supervisor.enqueue_merge("T004", 14, queue4, target_repository="invalid_repo_no_slash")
+        self.assertEqual(enqueue_res["state"], "invalid_input")
 
 
 

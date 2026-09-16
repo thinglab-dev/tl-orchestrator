@@ -49,6 +49,20 @@ def main(argv: list[str]) -> int:
     state["calls"].append(argv)
     out = ""
     code = 0
+
+    if "--repo" in argv:
+        passed_repo = argv[argv.index("--repo") + 1]
+        state["last_repo_arg"] = passed_repo
+        expected_target = state.get("target_repository")
+        if expected_target and passed_repo != expected_target:
+            sys.stderr.write(f"fake gh: repo mismatch: '{passed_repo}' != '{expected_target}'\n")
+            state_path.write_text(json.dumps(state, indent=1), encoding="utf-8")
+            return 1
+    elif state.get("require_repo_flag", False):
+        sys.stderr.write("fake gh: missing required --repo flag\n")
+        state_path.write_text(json.dumps(state, indent=1), encoding="utf-8")
+        return 1
+
     if argv[:2] == ["pr", "create"]:
         head = argv[argv.index("--head") + 1]
         number = len(state["prs"]) + 100
@@ -63,7 +77,7 @@ def main(argv: list[str]) -> int:
             pr["head_oid"] = subprocess.run(["git", "rev-parse", head], capture_output=True, text=True).stdout.strip() or pr.get("head_oid")
         out = json.dumps([{"number": pr["number"], "url": pr["url"], "baseRefName": pr.get("base"), "headRefOid": pr.get("head_oid"), "state": pr["state"]}] if pr else [])
     elif argv[:2] == ["pr", "view"]:
-        number = int(argv[2])
+        number = int(next(a for a in argv[2:] if a.isdigit()))
         pr = next((p for p in state["prs"].values() if p["number"] == number), None)
         if pr and pr["state"] == "OPEN":
             head = next(h for h, p in state["prs"].items() if p is pr)
@@ -90,6 +104,8 @@ def main(argv: list[str]) -> int:
         elif state.get("auto_authorize_merge", True) and pr:
             head_sha = pr.get("head_oid") or ""
             target_repo = state.get("target_repository")
+            if not target_repo and "--repo" in argv:
+                target_repo = argv[argv.index("--repo") + 1]
             if not target_repo:
                 try:
                     origin_url = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True).stdout.strip()
@@ -155,7 +171,7 @@ def main(argv: list[str]) -> int:
         } if pr else {})
         code = 0 if pr else 1
     elif argv[:2] == ["pr", "merge"]:
-        number = int(argv[2])
+        number = int(next(a for a in argv[2:] if a.isdigit()))
         pr = next((p for p in state["prs"].values() if p["number"] == number), None)
         expected = argv[argv.index("--match-head-commit") + 1] if "--match-head-commit" in argv else None
         head_now = subprocess.run(["git", "rev-parse", next(h for h, p in state["prs"].items() if p is pr)], capture_output=True, text=True).stdout.strip() if pr else ""

@@ -1947,6 +1947,100 @@ sys.exit(0)
         )
         self.assertFalse(receipt_no_env_repo.is_authentic(trust_root=self.trust_root))
 
+    def test_probe_35_merge_authority_gate_target_repository_validation(self):
+        """Action Item R1: MergeAuthorityGate.evaluate rejects missing or invalid expected_repo,
+        and rejects envelope target_repository mismatch."""
+        head_sha = "a" * 40
+        base_sha = "b" * 40
+        live_pr = {
+            "state": "OPEN",
+            "headRefOid": head_sha,
+            "baseRefOid": base_sha,
+            "baseRefName": "main",
+        }
+        authority_store = InMemoryAuthorityStore()
+
+        # 1. Missing expected_repo -> rejected
+        receipt_missing = MergeAuthorityGate.evaluate(
+            repo_root=self.root,
+            pr_number=55,
+            live_pr_info=live_pr,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            authority_store=authority_store,
+            expected_repo="",
+            comments=[],
+            enforce_mode="delegated_single_merge",
+            trust_root=self.trust_root,
+        )
+        self.assertEqual(receipt_missing.status, "REJECTED")
+        self.assertIn("missing_or_invalid_target_repository", receipt_missing.reason)
+
+        # 2. Invalid expected_repo format -> rejected
+        receipt_invalid = MergeAuthorityGate.evaluate(
+            repo_root=self.root,
+            pr_number=55,
+            live_pr_info=live_pr,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            authority_store=authority_store,
+            expected_repo="invalid-format-without-slash",
+            comments=[],
+            enforce_mode="delegated_single_merge",
+            trust_root=self.trust_root,
+        )
+        self.assertEqual(receipt_invalid.status, "REJECTED")
+        self.assertIn("missing_or_invalid_target_repository", receipt_invalid.reason)
+
+        # 3. Envelope target_repository mismatch -> rejected
+        foreign_claim = make_valid_claim(
+            repo="attacker/evil-fork",
+            pr=55,
+            head_sha=head_sha,
+            base_sha=base_sha,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+        )
+        foreign_env = make_envelope(foreign_claim)
+        comments = [{
+            "id": 1,
+            "body": f"```json:tl-merge-authorization\n{json.dumps(foreign_env)}\n```",
+            "author": {"login": "thinglab-merge-authority[bot]"},
+            "user": {"login": "thinglab-merge-authority[bot]"},
+            "author_association": "COLLABORATOR",
+        }]
+        receipt_mismatch = MergeAuthorityGate.evaluate(
+            repo_root=self.root,
+            pr_number=55,
+            live_pr_info=live_pr,
+            checker_commit=head_sha,
+            candidate_commit=head_sha,
+            authority_store=authority_store,
+            expected_repo="thinglab-dev/tl-orchestrator",
+            comments=comments,
+            enforce_mode="delegated_single_merge",
+            trust_root=self.trust_root,
+        )
+        self.assertEqual(receipt_mismatch.status, "REJECTED")
+        self.assertEqual(receipt_mismatch.reason, "missing_merge_authorization")
+
+        # 4. Defense-in-depth: envelope mismatch at evaluate stage -> rejected
+        with mock.patch("scripts.tl_merge_guard.parse_pr_comment_transport", return_value=("ok", [foreign_env])):
+            receipt_did = MergeAuthorityGate.evaluate(
+                repo_root=self.root,
+                pr_number=55,
+                live_pr_info=live_pr,
+                checker_commit=head_sha,
+                candidate_commit=head_sha,
+                authority_store=authority_store,
+                expected_repo="thinglab-dev/tl-orchestrator",
+                comments=comments,
+                enforce_mode="delegated_single_merge",
+                trust_root=self.trust_root,
+            )
+            self.assertEqual(receipt_did.status, "REJECTED")
+            self.assertIn("cross_repository_authority_reuse_rejected", receipt_did.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

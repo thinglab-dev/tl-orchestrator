@@ -2,7 +2,7 @@ format_version: 1
 work_method: native
 active_work_ref: native/task/T032@_tl-orc/project/tasks/T032-protocolo-de-retomada-curta-e-transicao-entre-ciclos.md
 current_role: orchestrator
-next_action: Executar Phase A de T032 (descoberta mecânica, consulta mandatória ao Advisor e freeze da spec).
+next_action: Executar Phase B de T032 (implementação do pacote, testes e revisão independente).
 coordinator:
   harness: agy
   session: antigravity-c35bdc15
@@ -53,4 +53,4 @@ open_discussions: []
 | T029 | feat | none | done | [T026] | [] | 12 | evidence/T029-r11.md |
 | T030 | gov | none | done | [T029] | [] | 2 | evidence/T030-r01.md |
 | T031 | feat | package | done | [T019, T027] | [] | 2 | evidence/T031-r01.md |
-| T032 | feat | package | draft | [T022, T023] | [] | 0 | - |
+| T032 | feat | package | ready | [T022, T023] | [] | 1 | - |

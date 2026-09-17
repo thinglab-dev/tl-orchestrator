@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "run_id": "arm_a",
+  "session_ref_digest": "d1f6ff3e6bd28af72673b9e72a8f04431201f7c81da687814eba969c9fa5520c",
+  "harness": "codex",
+  "harness_version": "0.153.4",
+  "source_format": "codex_session_jsonl",
+  "source_format_fingerprint": "487c9d7026a20365",
+  "parser_status": {
+    "status": "supported",
+    "parser_version": "1.0.0",
+    "reasons": [
+      "full_codex_rollout_recognized_and_complete"
+    ]
+  },
+  "completeness": {
+    "status": "complete",
+    "reasons": [
+      "clean_terminal_event_observed"
+    ]
+  },
+  "timing": {
+    "observed_session_span_seconds": 58.669,
+    "first_timestamp": "2026-09-17T01:15:56.581Z",
+    "last_timestamp": "2026-09-17T01:16:55.250Z",
+    "source": "rollout_first_last_timestamp",
+    "job_wall_seconds": "not_observable",
+    "model_latency_seconds": "not_observable"
+  },
+  "raw_usage": {
+    "cumulative": {
+      "input_tokens": 64701,
+      "cached_input_tokens": 7936,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 3069,
+      "reasoning_output_tokens": 1552,
+      "total_tokens": 67770
+    },
+    "per_response_sum": {
+      "input_tokens": 129402,
+      "cached_input_tokens": 15872,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 6138,
+      "reasoning_output_tokens": 3104,
+      "total_tokens": 135540
+    },
+    "reconciliation": {
+      "status": "divergent",
+      "fields": {
+        "input_tokens": {
+          "status": "divergent",
+          "cumulative_value": 64701,
+          "per_response_value": 129402,
+          "delta": -64701
+        },
+        "cached_input_tokens": {
+          "status": "divergent",
+          "cumulative_value": 7936,
+          "per_response_value": 15872,
+          "delta": -7936
+        },
+        "cache_write_input_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 0,
+          "per_response_value": 0,
+          "delta": 0
+        },
+        "output_tokens": {
+          "status": "divergent",
+          "cumulative_value": 3069,
+          "per_response_value": 6138,
+          "delta": -3069
+        },
+        "reasoning_output_tokens": {
+          "status": "divergent",
+          "cumulative_value": 1552,
+          "per_response_value": 3104,
+          "delta": -1552
+        },
+        "total_tokens": {
+          "status": "divergent",
+          "cumulative_value": 67770,
+          "per_response_value": 135540,
+          "delta": -67770
+        }
+      }
+    },
+    "response_count": 2
+  },
+  "raw_usage_channels": {
+    "token_usage_records": {
+      "event_count": 1,
+      "per_response_sum": {
+        "input_tokens": 64701,
+        "cached_input_tokens": 7936,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3069,
+        "reasoning_output_tokens": 1552,
+        "total_tokens": 67770
+      }
+    },
+    "event_msg_token_counts": {
+      "event_count": 1,
+      "per_response_sum": {
+        "input_tokens": 64701,
+        "cached_input_tokens": 7936,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3069,
+        "reasoning_output_tokens": 1552,
+        "total_tokens": 67770
+      }
+    },
+    "cumulative_snapshots": {
+      "snapshot_count": 1,
+      "latest_snapshot": {
+        "input_tokens": 64701,
+        "cached_input_tokens": 7936,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3069,
+        "reasoning_output_tokens": 1552,
+        "total_tokens": 67770
+      }
+    }
+  },
+  "semantic_correlations": {
+    "rule_id": "codex-0.153.4-structural-event-dedup-v1",
+    "summary": {
+      "records_observed": 1,
+      "records_retained": 1,
+      "records_truncated": false,
+      "correlated_events": 1,
+      "ambiguous_events": 0,
+      "unmatched_events": 0
+    },
+    "records": [
+      {
+        "correlation_id": "resp_0886441f4ea6f3ec016aab3f4f017087d2bce8ba348254b47f",
+        "status": "correlated",
+        "strategy": "exact_identity",
+        "response_id": "resp_0886441f4ea6f3ec016aab3f4f017087d2bce8ba348254b47f",
+        "turn_id": "01a0acef-431d-7ed2-a8f2-1405bc19cfbf",
+        "thread_id": "01a0acef-425c-7331-92b0-afe2fd61ac22",
+        "channels": [
+          "token_usage_record"
+        ],
+        "counters": {
+          "input_tokens": 64701,
+          "cached_input_tokens": 7936,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 3069,
+          "reasoning_output_tokens": 1552,
+          "total_tokens": 67770
+        },
+        "reasons": [
+          "exact_response_id_registered"
+        ]
+      }
+    ]
+  },
+  "normalized_usage": {
+    "status": "normalized",
+    "rule_id": "codex-0.153.4-structural-event-dedup-v1",
+    "eligible_for_normalization": true,
+    "ineligibility_reasons": [],
+    "semantic_response_count": 1,
+    "semantic_per_response_sum": {
+      "input_tokens": 64701,
+      "cached_input_tokens": 7936,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 3069,
+      "reasoning_output_tokens": 1552,
+      "total_tokens": 67770
+    },
+    "cumulative": {
+      "input_tokens": 64701,
+      "cached_input_tokens": 7936,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 3069,
+      "reasoning_output_tokens": 1552,
+      "total_tokens": 67770
+    },
+    "reconciliation": {
+      "status": "reconciled",
+      "fields": {
+        "input_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 64701,
+          "per_response_value": 64701,
+          "delta": 0
+        },
+        "cached_input_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 7936,
+          "per_response_value": 7936,
+          "delta": 0
+        },
+        "cache_write_input_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 0,
+          "per_response_value": 0,
+          "delta": 0
+        },
+        "output_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 3069,
+          "per_response_value": 3069,
+          "delta": 0
+        },
+        "reasoning_output_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 1552,
+          "per_response_value": 1552,
+          "delta": 0
+        },
+        "total_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 67770,
+          "per_response_value": 67770,
+          "delta": 0
+        }
+      }
+    }
+  },
+  "derived_usage": {
+    "uncached_input_tokens": "not_observable"
+  },
+  "observed_contexts": [
+    {
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "turn_count": 1,
+      "raw_usage": {
+        "input_tokens": 129402,
+        "cached_input_tokens": 15872,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 6138,
+        "reasoning_output_tokens": 3104,
+        "total_tokens": 135540
+      }
+    }
+  ],
+  "thread_topology": {
+    "root_thread_id": "01a0acef-425c-7331-92b0-afe2fd61ac22",
+    "session_id": "01a0acef-425c-7331-92b0-afe2fd61ac22",
+    "threads": [
+      {
+        "thread_id": "01a0acef-425c-7331-92b0-afe2fd61ac22",
+        "parent_thread_id": null,
+        "role": "root",
+        "turn_count": 1
+      }
+    ]
+  },
+  "rate_limits": [
+    {
+      "scope": "account",
+      "attribution": "unknown",
+      "limit_id": "codex",
+      "limit_name": null,
+      "primary": {
+        "used_percent": 84.0,
+        "window_minutes": 10080.0,
+        "resets_at": 1789806222.0
+      },
+      "secondary": null,
+      "plan_type": "prolite"
+    }
+  ]
+}

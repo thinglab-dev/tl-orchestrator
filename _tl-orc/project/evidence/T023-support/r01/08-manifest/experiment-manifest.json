@@ -1,0 +1,102 @@
+{
+  "task_id": "T023",
+  "experiment": "Piloto de Retomada Curta entre Ciclos e Economia de Contexto",
+  "timestamp_utc": "2026-09-16T21:30:00Z",
+  "git_base_commit": "3b7ff25ce4203541eb563a25eb8429efef7f0ab2",
+  "git_branch": "feat/t023-context-economy-pilot",
+  "seed": 42,
+  "advisor_role": {
+    "classification_ref": "06-classification/advisor-role-classification.json",
+    "harness": "agy",
+    "model": "gemini-3.1-pro-high",
+    "effort": "high",
+    "family": "Google (cross-family consultivo em modo Debater)",
+    "recommendation": "Aprovação do avanço experimental com ampliação de margem do sub-teto do Braço B para até 12 requisições e teto global de 18 requisições."
+  },
+  "experimental_role": {
+    "classification_ref": "06-classification/experimental-role-classification.json",
+    "harness": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "frozen_symmetric": true,
+    "arms": [
+      "Arm_A",
+      "Arm_B"
+    ]
+  },
+  "evaluator_role": {
+    "classification_ref": "06-classification/evaluator-role-classification.json",
+    "harness": "agy",
+    "model": "gemini-3.1-pro-high",
+    "effort": "high",
+    "independence_policy": "required",
+    "family": "Google (independent of OpenAI experimental author)"
+  },
+  "budget": {
+    "max_ai_requests": 18,
+    "max_input_tokens": 3400000,
+    "max_output_tokens": 105000,
+    "max_total_tokens": 3505000,
+    "sub_budgets": {
+      "preparation": {
+        "requests": 0,
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "classification": {
+        "requests": 3,
+        "input_tokens": 180000,
+        "output_tokens": 10000
+      },
+      "advisor": {
+        "requests": 1,
+        "input_tokens": 100000,
+        "output_tokens": 10000
+      },
+      "arm_a": {
+        "requests": 1,
+        "input_tokens": 2000000,
+        "output_tokens": 25000
+      },
+      "arm_b": {
+        "requests": 10,
+        "input_tokens": 500000,
+        "output_tokens": 30000
+      },
+      "evaluation": {
+        "requests": 1,
+        "input_tokens": 100000,
+        "output_tokens": 10000
+      },
+      "checker": {
+        "requests": 1,
+        "input_tokens": 500000,
+        "output_tokens": 15000
+      },
+      "contingency": {
+        "requests": 1,
+        "input_tokens": 20000,
+        "output_tokens": 5000
+      }
+    }
+  },
+  "input_hashes": {
+    "short-resume-package.md": "fa3f35c5879d488e3465f5d628ac9b7b2097733127857bce2ac315f94f078903",
+    "normative-rubric.md": "d4d83a684e6e18cae436ff4f3c514866715de7c05f29770a4fb94f94cfbf7cc6",
+    "arm-a-history.md": "ca847301f841c48cf283d907b427042d7a21fd5cebee0da20d2d875112d7f8f8"
+  },
+  "snapshot_file_hashes": {
+    "_tl-orc/project/tasks/T009-validacao-semantica-da-classificacao-pelo-orquestrador.md": "79fe9df58f3a9dc1aafe73455b67fe50b031116224b902ac1433ee6765481175",
+    "_tl-orc/project/evidence/T009-r02.md": "2730e8bd3b03ff81cd5ac2a4a7b79967fec19dc749a8f57fbf9561bb1ca9bf89",
+    "_tl-orc/PROJECT.md": "3b0620be3a576da4d93494d726548368322f0735313de5c81a2223d25bf89fe7",
+    "prompts/orchestrator.md": "2735b3ce7a6973726f973c126149ee832f9faed06ece3aabe06ac73d5560939e",
+    "prompts/orchestrator-perfis.md": "ac296a8b07affa98360611f123bae5bf6e7696f5d884dc24bb745f9633220842",
+    "prompts/orchestrator-playbook.md": "ed57a254cf3c0a1d4daa8046c186147a527f080d3362e88ceafb21a262060f24",
+    "prompts/maker.md": "e24be10829ed3284d76ce42d37f7fc31b8f4c9aaaa30bd2b96ac6861ac216d4e",
+    "prompts/checker-report-only.md": "85a71b904fe8e9133bf6bf6f785ee8c7c4b0f800b312e714778d790f6e66583f",
+    "schemas/review-result.schema.json": "4cfb98cf8a2994edc152c2406ada4cea6da2e8f859d1a6d3c53306356fbb6a48",
+    "schemas/classification-result.schema.json": "455f655442dd2aed4ba3fc475ea7650456df7bb1734659bea6aab428ca8379f7",
+    "docs/WORK_MODEL.md": "310d2ec32b12e6142f2e561e32c8c63af7de4a1ee62f5e63a8d90d9e2945c14e",
+    "docs/MODEL_ROUTING.md": "28f8bc9c76a24af57fc2efaea6d589b75ecc6c22d298ec73248db5b35c259abf"
+  }
+}

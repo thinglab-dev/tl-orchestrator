@@ -44,7 +44,7 @@ open_discussions: []
 | T020 | fix | none | done | [T011] | [] | 2 | evidence/T013-r01.md |
 | T021 | feat | none | done | [T020] | [] | 2 | evidence/T014-r01.md |
 | T022 | feat | none | done | [] | [] | 2 | evidence/T015-r03b.md |
-| T023 | analysis | none | ready | [T010, T021] | [] | 1 | evidence/T012-r01.md |
+| T023 | analysis | none | done | [T010, T021] | [] | 2 | evidence/T023-r01.md |
 | T024 | gov | none | done | [T015, T018] | [] | 1 | evidence/T024-r02.md |
 | T025 | feat | none | done | [] | [] | 2 | evidence/T025-r11.md |
 | T026 | feat | none | done | [T025] | [] | 6 | evidence/T026-r03.md |

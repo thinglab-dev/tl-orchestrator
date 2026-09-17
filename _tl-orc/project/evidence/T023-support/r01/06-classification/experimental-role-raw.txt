@@ -1,0 +1,108 @@
+I have initiated a search across the user's home directory to locate `schemas/classification-result-v3.schema.json` and will inspect its structure as soon as it completes.
+{
+  "schema_version": 3,
+  "story_id": "T023",
+  "phase": "planning",
+  "context_revision": "tl-orchestrator@3b7ff25",
+  "catalog_revision": "PROJECT.md-2026-09-07",
+  "confidence": "high",
+  "facts": [
+    "A fase a classificar é planning da story experimental T023 (retomada curta entre ciclos), com escopo em modo somente leitura na raiz do repositório.",
+    "O agente atuará avaliando o parecer do Checker r02 sobre T009 (veredito changes_requested, achados R1-R5 da classe procedência), propondo formalmente o encaminhamento da fase e elaborando briefing estruturado correspondente.",
+    "O harness Claude está fisicamente indisponível no ambiente runtime atual por expiração de sessão OAuth (pre_dispatch_unavailable), tornando seus modelos não despacháveis (dispatchable: false).",
+    "Os harnesses comprovadamente disponíveis e funcionais no ambiente runtime são Codex (OpenAI) e Agy (Google).",
+    "O catálogo permitido em PROJECT.md para o papel planner autoriza claude/sonnet (high/medium), codex/gpt-5.6-terra (high/medium) e agy/gemini-3.1-pro-high (high)."
+  ],
+  "uncertainties": [
+    "Disponibilidade de cota e latência de rede no harness Codex durante a chamada efetiva de despacho para o papel planner.",
+    "Inexistência de medição empírica local prévia de custo para o papel de planejamento sobre o contexto delimitado de T023."
+  ],
+  "reclassify_when": [
+    "Se a sessão OAuth do harness Claude for restabelecida no ambiente operacional.",
+    "Se houver alteração de escopo, saída do modo somente leitura ou mudança para fase de implementação/debate.",
+    "Se os parâmetros de catálogo ou restrições em PROJECT.md forem revisados pelo operador."
+  ],
+  "roles": {
+    "planner": {
+      "tier": "normal",
+      "selection_status": "conclusive",
+      "selection_basis": "escalation",
+      "escalation_reason": "pre_dispatch_unavailable",
+      "reason": "Planejamento estruturado para avaliação de parecer e elaboração de briefing em modo somente leitura. Primário escalado para Codex Terra High diante da indisponibilidade runtime da cadeia nominal Claude (sessão OAuth expirada / pre_dispatch_unavailable).",
+      "tie_break_applied": null,
+      "evaluations": [
+        {
+          "harness": "claude",
+          "model": "sonnet",
+          "effort": "high",
+          "catalog_eligible": true,
+          "technical_adequacy": "sufficient",
+          "dispatchable": false,
+          "cost_basis": "token_price_only",
+          "evidence_ids": [
+            "price-sonnet",
+            "transport-claude"
+          ],
+          "uncertainty": null,
+          "reason": "Modelo tecnicamente adequado porem indisponivel no ambiente runtime por expiracao de sessao OAuth (pre_dispatch_unavailable)."
+        },
+        {
+          "harness": "codex",
+          "model": "gpt-5.6-terra",
+          "effort": "high",
+          "catalog_eligible": true,
+          "technical_adequacy": "sufficient",
+          "dispatchable": true,
+          "cost_basis": "token_price_only",
+          "evidence_ids": [
+            "price-terra",
+            "gpt56-coding"
+          ],
+          "uncertainty": null,
+          "reason": "Modelo de alta precisao em raciocinio tecnico e manipulacao de contexto normativo sob sandbox isolado."
+        },
+        {
+          "harness": "agy",
+          "model": "gemini-3.1-pro-high",
+          "effort": "high",
+          "catalog_eligible": true,
+          "technical_adequacy": "sufficient",
+          "dispatchable": true,
+          "cost_basis": "token_price_only",
+          "evidence_ids": [
+            "price-flash",
+            "transport-flash"
+          ],
+          "uncertainty": null,
+          "reason": "Modelo de planejamento alternativo da familia Google elegivel e disponivel."
+        }
+      ],
+      "candidates": [
+        {
+          "harness": "codex",
+          "model": "gpt-5.6-terra",
+          "effort": "high",
+          "dispatch_role": "primary",
+          "evidence_ids": [
+            "price-terra",
+            "gpt56-coding"
+          ],
+          "cost_basis": "token_price_only",
+          "reason": "Candidato primario selecionado sob escalonamento factual por indisponibilidade pre-despacho do candidato nominal da cadeia; modelo apto ao raciocinio tecnico sob sandbox."
+        },
+        {
+          "harness": "agy",
+          "model": "gemini-3.1-pro-high",
+          "effort": "high",
+          "dispatch_role": "fallback",
+          "evidence_ids": [
+            "price-flash",
+            "transport-flash"
+          ],
+          "cost_basis": "token_price_only",
+          "reason": "Fallback funcional da familia Google elegivel no catalogo e disponivel no ambiente runtime."
+        }
+      ]
+    }
+  }
+}

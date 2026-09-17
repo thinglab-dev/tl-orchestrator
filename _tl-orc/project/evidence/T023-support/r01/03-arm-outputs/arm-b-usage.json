@@ -1,0 +1,467 @@
+{
+  "schema_version": 1,
+  "run_id": "arm_b",
+  "session_ref_digest": "5a96cfaab0c8310d825caafb7fbc81d3fe9ee63f54a87c8eb24adac3eecbde81",
+  "harness": "codex",
+  "harness_version": "0.153.4",
+  "source_format": "codex_session_jsonl",
+  "source_format_fingerprint": "487c9d7026a20365",
+  "parser_status": {
+    "status": "supported",
+    "parser_version": "1.0.0",
+    "reasons": [
+      "full_codex_rollout_recognized_and_complete"
+    ]
+  },
+  "completeness": {
+    "status": "complete",
+    "reasons": [
+      "clean_terminal_event_observed"
+    ]
+  },
+  "timing": {
+    "observed_session_span_seconds": 129.689,
+    "first_timestamp": "2026-09-17T01:16:57.165Z",
+    "last_timestamp": "2026-09-17T01:19:06.854Z",
+    "source": "rollout_first_last_timestamp",
+    "job_wall_seconds": "not_observable",
+    "model_latency_seconds": "not_observable"
+  },
+  "raw_usage": {
+    "cumulative": {
+      "input_tokens": 436372,
+      "cached_input_tokens": 356864,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 6147,
+      "reasoning_output_tokens": 3057,
+      "total_tokens": 442519
+    },
+    "per_response_sum": {
+      "input_tokens": 872744,
+      "cached_input_tokens": 713728,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 12294,
+      "reasoning_output_tokens": 6114,
+      "total_tokens": 885038
+    },
+    "reconciliation": {
+      "status": "divergent",
+      "fields": {
+        "input_tokens": {
+          "status": "divergent",
+          "cumulative_value": 436372,
+          "per_response_value": 872744,
+          "delta": -436372
+        },
+        "cached_input_tokens": {
+          "status": "divergent",
+          "cumulative_value": 356864,
+          "per_response_value": 713728,
+          "delta": -356864
+        },
+        "cache_write_input_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 0,
+          "per_response_value": 0,
+          "delta": 0
+        },
+        "output_tokens": {
+          "status": "divergent",
+          "cumulative_value": 6147,
+          "per_response_value": 12294,
+          "delta": -6147
+        },
+        "reasoning_output_tokens": {
+          "status": "divergent",
+          "cumulative_value": 3057,
+          "per_response_value": 6114,
+          "delta": -3057
+        },
+        "total_tokens": {
+          "status": "divergent",
+          "cumulative_value": 442519,
+          "per_response_value": 885038,
+          "delta": -442519
+        }
+      }
+    },
+    "response_count": 20
+  },
+  "raw_usage_channels": {
+    "token_usage_records": {
+      "event_count": 10,
+      "per_response_sum": {
+        "input_tokens": 436372,
+        "cached_input_tokens": 356864,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 6147,
+        "reasoning_output_tokens": 3057,
+        "total_tokens": 442519
+      }
+    },
+    "event_msg_token_counts": {
+      "event_count": 10,
+      "per_response_sum": {
+        "input_tokens": 436372,
+        "cached_input_tokens": 356864,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 6147,
+        "reasoning_output_tokens": 3057,
+        "total_tokens": 442519
+      }
+    },
+    "cumulative_snapshots": {
+      "snapshot_count": 10,
+      "latest_snapshot": {
+        "input_tokens": 436372,
+        "cached_input_tokens": 356864,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 6147,
+        "reasoning_output_tokens": 3057,
+        "total_tokens": 442519
+      }
+    }
+  },
+  "semantic_correlations": {
+    "rule_id": "codex-0.153.4-structural-event-dedup-v1",
+    "summary": {
+      "records_observed": 10,
+      "records_retained": 10,
+      "records_truncated": false,
+      "correlated_events": 10,
+      "ambiguous_events": 0,
+      "unmatched_events": 0
+    },
+    "records": [
+      {
+        "correlation_id": "resp_009aba613b67d73f016aab3f8b9bac87d286ff7d2465a7cb4c",
+        "status": "correlated",
+        "strategy": "exact_identity",
+        "response_id": "resp_009aba613b67d73f016aab3f8b9bac87d286ff7d2465a7cb4c",
+        "turn_id": "01a0acf0-2fcb-7152-9ff5-3b076bc0bbea",
+        "thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+        "channels": [
+          "token_usage_record"
+        ],
+        "counters": {
+          "input_tokens": 17577,
+          "cached_input_tokens": 17152,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 330,
+          "reasoning_output_tokens": 55,
+          "total_tokens": 17907
+        },
+        "reasons": [
+          "exact_response_id_registered"
+        ]
+      },
+      {
+        "correlation_id": "resp_009aba613b67d73f016aab3f936f5087d2b4d7689ac1b53279",
+        "status": "correlated",
+        "strategy": "exact_identity",
+        "response_id": "resp_009aba613b67d73f016aab3f936f5087d2b4d7689ac1b53279",
+        "turn_id": "01a0acf0-2fcb-7152-9ff5-3b076bc0bbea",
+        "thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+        "channels": [
+          "token_usage_record"
+        ],
+        "counters": {
+          "input_tokens": 18143,
+          "cached_input_tokens": 17152,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 190,
+          "reasoning_output_tokens": 47,
+          "total_tokens": 18333
+        },
+        "reasons": [
+          "exact_response_id_registered"
+        ]
+      },
+      {
+        "correlation_id": "resp_009aba613b67d73f016aab3f98ccf087d2b472543477ea7c6d",
+        "status": "correlated",
+        "strategy": "exact_identity",
+        "response_id": "resp_009aba613b67d73f016aab3f98ccf087d2b472543477ea7c6d",
+        "turn_id": "01a0acf0-2fcb-7152-9ff5-3b076bc0bbea",
+        "thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+        "channels": [
+          "token_usage_record"
+        ],
+        "counters": {
+          "input_tokens": 23122,
+          "cached_input_tokens": 17152,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 405,
+          "reasoning_output_tokens": 87,
+          "total_tokens": 23527
+        },
+        "reasons": [
+          "exact_response_id_registered"
+        ]
+      },
+      {
+        "correlation_id": "resp_009aba613b67d73f016aab3fa1727487d297b34523ccccc558",
+        "status": "correlated",
+        "strategy": "exact_identity",
+        "response_id": "resp_009aba613b67d73f016aab3fa1727487d297b34523ccccc558",
+        "turn_id": "01a0acf0-2fcb-7152-9ff5-3b076bc0bbea",
+        "thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+        "channels": [
+          "token_usage_record"
+        ],
+        "counters": {
+          "input_tokens": 24292,
+          "cached_input_tokens": 11008,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 365,
+          "reasoning_output_tokens": 108,
+          "total_tokens": 24657
+        },
+        "reasons": [
+          "exact_response_id_registered"
+        ]
+      },
+      {
+        "correlation_id": "resp_009aba613b67d73f016aab3fa9db6c87d281da96512094292b",
+        "status": "correlated",
+        "strategy": "exact_identity",
+        "response_id": "resp_009aba613b67d73f016aab3fa9db6c87d281da96512094292b",
+        "turn_id": "01a0acf0-2fcb-7152-9ff5-3b076bc0bbea",
+        "thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+        "channels": [
+          "token_usage_record"
+        ],
+        "counters": {
+          "input_tokens": 34296,
+          "cached_input_tokens": 23296,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 219,
+          "reasoning_output_tokens": 77,
+          "total_tokens": 34515
+        },
+        "reasons": [
+          "exact_response_id_registered"
+        ]
+      },
+      {
+        "correlation_id": "resp_009aba613b67d73f016aab3faedffc87d2b62d1595755482b2",
+        "status": "correlated",
+        "strategy": "exact_identity",
+        "response_id": "resp_009aba613b67d73f016aab3faedffc87d2b62d1595755482b2",
+        "turn_id": "01a0acf0-2fcb-7152-9ff5-3b076bc0bbea",
+        "thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+        "channels": [
+          "token_usage_record"
+        ],
+        "counters": {
+          "input_tokens": 43937,
+          "cached_input_tokens": 33536,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 388,
+          "reasoning_output_tokens": 202,
+          "total_tokens": 44325
+        },
+        "reasons": [
+          "exact_response_id_registered"
+        ]
+      },
+      {
+        "correlation_id": "resp_009aba613b67d73f016aab3fb6e1a087d29a219873de861578",
+        "status": "correlated",
+        "strategy": "exact_identity",
+        "response_id": "resp_009aba613b67d73f016aab3fb6e1a087d29a219873de861578",
+        "turn_id": "01a0acf0-2fcb-7152-9ff5-3b076bc0bbea",
+        "thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+        "channels": [
+          "token_usage_record"
+        ],
+        "counters": {
+          "input_tokens": 53820,
+          "cached_input_tokens": 43776,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1471,
+          "reasoning_output_tokens": 1071,
+          "total_tokens": 55291
+        },
+        "reasons": [
+          "exact_response_id_registered"
+        ]
+      },
+      {
+        "correlation_id": "resp_009aba613b67d73f016aab3fd3c27c87d29aa48ddd4eef6e90",
+        "status": "correlated",
+        "strategy": "exact_identity",
+        "response_id": "resp_009aba613b67d73f016aab3fd3c27c87d29aa48ddd4eef6e90",
+        "turn_id": "01a0acf0-2fcb-7152-9ff5-3b076bc0bbea",
+        "thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+        "channels": [
+          "token_usage_record"
+        ],
+        "counters": {
+          "input_tokens": 66007,
+          "cached_input_tokens": 52992,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 315,
+          "reasoning_output_tokens": 113,
+          "total_tokens": 66322
+        },
+        "reasons": [
+          "exact_response_id_registered"
+        ]
+      },
+      {
+        "correlation_id": "resp_009aba613b67d73f016aab3fdb68a487d2a8e52e9ce8de2dc9",
+        "status": "correlated",
+        "strategy": "exact_identity",
+        "response_id": "resp_009aba613b67d73f016aab3fdb68a487d2a8e52e9ce8de2dc9",
+        "turn_id": "01a0acf0-2fcb-7152-9ff5-3b076bc0bbea",
+        "thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+        "channels": [
+          "token_usage_record"
+        ],
+        "counters": {
+          "input_tokens": 75699,
+          "cached_input_tokens": 65280,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 410,
+          "reasoning_output_tokens": 263,
+          "total_tokens": 76109
+        },
+        "reasons": [
+          "exact_response_id_registered"
+        ]
+      },
+      {
+        "correlation_id": "resp_009aba613b67d73f016aab3fe41a9487d2b3cf457f1b940180",
+        "status": "correlated",
+        "strategy": "exact_identity",
+        "response_id": "resp_009aba613b67d73f016aab3fe41a9487d2b3cf457f1b940180",
+        "turn_id": "01a0acf0-2fcb-7152-9ff5-3b076bc0bbea",
+        "thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+        "channels": [
+          "token_usage_record"
+        ],
+        "counters": {
+          "input_tokens": 79479,
+          "cached_input_tokens": 75520,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2054,
+          "reasoning_output_tokens": 1034,
+          "total_tokens": 81533
+        },
+        "reasons": [
+          "exact_response_id_registered"
+        ]
+      }
+    ]
+  },
+  "normalized_usage": {
+    "status": "normalized",
+    "rule_id": "codex-0.153.4-structural-event-dedup-v1",
+    "eligible_for_normalization": true,
+    "ineligibility_reasons": [],
+    "semantic_response_count": 10,
+    "semantic_per_response_sum": {
+      "input_tokens": 436372,
+      "cached_input_tokens": 356864,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 6147,
+      "reasoning_output_tokens": 3057,
+      "total_tokens": 442519
+    },
+    "cumulative": {
+      "input_tokens": 436372,
+      "cached_input_tokens": 356864,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 6147,
+      "reasoning_output_tokens": 3057,
+      "total_tokens": 442519
+    },
+    "reconciliation": {
+      "status": "reconciled",
+      "fields": {
+        "input_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 436372,
+          "per_response_value": 436372,
+          "delta": 0
+        },
+        "cached_input_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 356864,
+          "per_response_value": 356864,
+          "delta": 0
+        },
+        "cache_write_input_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 0,
+          "per_response_value": 0,
+          "delta": 0
+        },
+        "output_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 6147,
+          "per_response_value": 6147,
+          "delta": 0
+        },
+        "reasoning_output_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 3057,
+          "per_response_value": 3057,
+          "delta": 0
+        },
+        "total_tokens": {
+          "status": "reconciled",
+          "cumulative_value": 442519,
+          "per_response_value": 442519,
+          "delta": 0
+        }
+      }
+    }
+  },
+  "derived_usage": {
+    "uncached_input_tokens": "not_observable"
+  },
+  "observed_contexts": [
+    {
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "turn_count": 1,
+      "raw_usage": {
+        "input_tokens": 872744,
+        "cached_input_tokens": 713728,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 12294,
+        "reasoning_output_tokens": 6114,
+        "total_tokens": 885038
+      }
+    }
+  ],
+  "thread_topology": {
+    "root_thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+    "session_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+    "threads": [
+      {
+        "thread_id": "01a0acf0-2f7b-7162-b5b4-74a6cc6d1900",
+        "parent_thread_id": null,
+        "role": "root",
+        "turn_count": 10
+      }
+    ]
+  },
+  "rate_limits": [
+    {
+      "scope": "account",
+      "attribution": "unknown",
+      "limit_id": "codex",
+      "limit_name": null,
+      "primary": {
+        "used_percent": 84.0,
+        "window_minutes": 10080.0,
+        "resets_at": 1789806222.0
+      },
+      "secondary": null,
+      "plan_type": "prolite"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "alpha": "Braço A (Controle / Histórico Acumulado)",
+  "beta": "Braço B (Sessão Nova + Pacote Curto)",
+  "mapping": {
+    "Alpha": "Arm_A",
+    "Beta": "Arm_B"
+  },
+  "hash_raw_a": "2ef7fe6d8db7e03548f415f21a78cee661535f01e939e337c3ae53b2f588559d",
+  "hash_raw_b": "bcd5040981827b3f2b420a8195c9e4f726686c95ebca84eff39db01048709cdf"
+}

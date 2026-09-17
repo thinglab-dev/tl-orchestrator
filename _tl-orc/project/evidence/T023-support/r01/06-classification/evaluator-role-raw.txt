@@ -1,0 +1,94 @@
+{
+  "schema_version": 3,
+  "story_id": "T023",
+  "phase": "review",
+  "context_revision": "tl-orchestrator@3b7ff25",
+  "catalog_revision": "PROJECT.md-2026-09-07",
+  "confidence": "high",
+  "facts": [
+    "A fase a classificar e o review cego da Task T023 (piloto de retomada curta entre ciclos).",
+    "O objeto de avaliacao sao as duas decisoes sanitizadas (decision-alpha.md e decision-beta.md) contra a rubrica normativa congelada (normative-rubric.md).",
+    "Ambas as decisoes foram geradas sob o harness Codex da familia OpenAI.",
+    "A politica checker_independence: required impede terminantemente a familia OpenAI de atuar como avaliadora independente na fase de review.",
+    "O harness Claude (familia Anthropic) esta indisponivel no runtime operacional por expiracao de sessao OAuth (pre_dispatch_unavailable).",
+    "O harness Agy (familia Google) com o modelo gemini-3.1-pro-high e o unico revisor independente elegivel no catalogo e funcional no runtime."
+  ],
+  "uncertainties": [
+    "Latencia de resposta e taxa de throughput da API do harness Agy durante a avaliacao comparativa das duas decisoes cegas."
+  ],
+  "reclassify_when": [
+    "Restabelecimento da sessao OAuth funcional para o harness Claude no ambiente operacional.",
+    "Alteracao no catalogo permitido de modelos ou na politica checker_independence."
+  ],
+  "roles": {
+    "checker": {
+      "tier": "heavy",
+      "selection_status": "conclusive",
+      "selection_basis": "escalation",
+      "escalation_reason": "checker_family_independence",
+      "reason": "Avaliacao cega independente das duas decisoes experimentais de T023 contra a rubrica normativa congelada, exigindo revisor de familia externa sem conflito de autoria com a familia OpenAI.",
+      "tie_break_applied": null,
+      "evaluations": [
+        {
+          "harness": "agy",
+          "model": "gemini-3.1-pro-high",
+          "effort": "high",
+          "catalog_eligible": true,
+          "technical_adequacy": "sufficient",
+          "dispatchable": true,
+          "cost_basis": "token_price_only",
+          "evidence_ids": [
+            "price-flash",
+            "transport-flash"
+          ],
+          "uncertainty": null,
+          "reason": "Revisor independente primario da familia Google, nao participante da autoria das decisoes de T023 e funcional no runtime."
+        },
+        {
+          "harness": "codex",
+          "model": "gpt-5.6-terra",
+          "effort": "high",
+          "catalog_eligible": false,
+          "technical_adequacy": "insufficient",
+          "dispatchable": false,
+          "cost_basis": "token_price_only",
+          "evidence_ids": [
+            "price-terra",
+            "transport-openai"
+          ],
+          "uncertainty": null,
+          "reason": "Impedido sob checker_independence: required por pertencer a mesma familia (OpenAI) que gerou as decisoes avaliadas."
+        },
+        {
+          "harness": "claude",
+          "model": "sonnet",
+          "effort": "high",
+          "catalog_eligible": true,
+          "technical_adequacy": "sufficient",
+          "dispatchable": false,
+          "cost_basis": "token_price_only",
+          "evidence_ids": [
+            "price-sonnet",
+            "transport-claude"
+          ],
+          "uncertainty": null,
+          "reason": "Indisponivel no runtime por expiracao de sessao OAuth (pre_dispatch_unavailable)."
+        }
+      ],
+      "candidates": [
+        {
+          "harness": "agy",
+          "model": "gemini-3.1-pro-high",
+          "effort": "high",
+          "dispatch_role": "primary",
+          "evidence_ids": [
+            "price-flash",
+            "transport-flash"
+          ],
+          "cost_basis": "token_price_only",
+          "reason": "Candidato primario selecionado por ser o unico revisor independente elegivel, tecnicamente adequado e disponivel no runtime."
+        }
+      ]
+    }
+  }
+}

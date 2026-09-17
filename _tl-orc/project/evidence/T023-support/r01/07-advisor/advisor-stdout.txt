@@ -1,0 +1,48 @@
+**Parecer Consultivo — Advisor (Modo Debater)**
+**Ref: Avaliação de Congelamento Experimental da Task T023**
+
+Na qualidade de Advisor, submeto a presente análise crítica da arquitetura experimental e das premissas metodológicas da Task T023. O objetivo é assegurar a integridade do ensaio comparativo entre o histórico operacional estendido (Braço A) e a retomada baseada no Pacote Curto (Braço B), com especial foco nas resoluções R5 e R6, antes do congelamento definitivo.
+
+Abaixo, apresento o escrutínio estruturado dos pontos solicitados.
+
+---
+
+### 1. Suficiência e Robustez da Calibração Orçamentária (R5)
+
+**Análise Crítica:**
+A implementação de tetos nominais e sub-tetos rigorosos, aliados a um mecanismo *fail-closed* via script (`run_arms.py`), representa uma evolução fundamental na governança de custos e na segurança da automação. A contabilização de *cache tokens* via `tl_usage.py` também agrega a granularidade necessária para a análise de viabilidade econômica comparativa.
+
+**Objeção / Risco Identificado:**
+O diagnóstico aponta que, na rodada r01/r02, a conferência física dos 12 arquivos demandou **exatamente 10 requisições** por parte do Braço B. Ao fixar o sub-teto do Braço B em precisamente 10 requisições, a tolerância para a natureza estocástica inerente à navegação autônoma de LLMs é reduzida a zero. 
+Se na rodada final o modelo particionar a leitura dos arquivos de forma ligeiramente diferente (ex: decidindo ler dois arquivos em requisições separadas por capricho de geração), o ensaio abortará em *fail-closed*, gerando uma falha técnica (falso negativo de capacidade) em vez de um resultado qualitativo avaliável.
+
+**Recomendação:**
+Embora o mecanismo de *fail-closed* esteja plenamente aprovado, a calibragem numérica possui risco de estrangulamento operacional. Sugiro ampliar a margem técnica de estresse: elevar o sub-teto do Braço B para **12 requisições** e o Teto Global para **18 requisições**. Isso preserva a restrição orçamentária estrita enquanto mitiga a fragilidade de um limite idêntico ao consumo empírico basal.
+
+### 2. Eficácia da Anonimização de Caminhos (R6)
+
+**Análise Crítica:**
+A substituição de caminhos absolutos locais pelo token `<repo-root>` ou por referências relativas relativas ao diretório raiz atende integralmente aos padrões canônicos de reprodutibilidade em testes de software e engenharia de *prompts*. Elimina-se o risco de vazamento de PII (Identificadores Pessoais de Informação) no versionamento e evita-se a ancoragem espacial do modelo a ambientes que não existem nos sistemas de avaliação.
+
+**Objeção / Risco Identificado:**
+É necessário assegurar que, em tempo de execução (*runtime*), o ambiente do Orquestrador trate adequadamente os caminhos relativos ou faça a substituição do *placeholder* `<repo-root>` pelos caminhos absolutos exigidos pelas *tools* (como `view_file` ou `run_command`, que frequentemente exigem caminhos absolutos no formato Unix). Se o LLM tentar invocar a ferramenta passando literalmente a *string* `<repo-root>/src/...`, a execução falhará por *Path Not Found*.
+
+### 3. Validade Metodológica da Não-Tautologia
+
+**Análise Crítica:**
+O princípio de não-tautologia é a premissa mais robusta deste ensaio. Ao forçar o modelo do Braço B a usar os hashes apenas como um índice (e não como um oráculo de verdade factual), o ensaio avalia com precisão a verdadeira autonomia investigativa da inteligência artificial frente a um *cold start*. Isso neutraliza o viés de confirmação (onde o modelo alucina coerência por confiar na síntese passada) e testa rigorosamente a competência do agente em ler a realidade física do código em disco.
+
+**Objeção / Risco Identificado:**
+A validação de 12 arquivos *cross-references* é um gargalo intenso de I/O de contexto. O modelo do Braço B pode sofrer de degradação da "janela de atenção média" (*lost in the middle*) após ler o 8º ou 9º arquivo consecutivo. Embora isso seja um risco para o Braço B, metodologicamente **isso é um aspecto desejável da experiência**, pois o Braço A servirá justamente para mostrar se a preservação de contexto nativo contínuo supera o peso da reconstrução investigativa massiva.
+
+### 4. Objeções, Riscos Residuais e Recomendações Finais
+
+Para além das observações acima, destaco os seguintes riscos residuais antes do congelamento mecânico:
+
+1. **Aderência do Avaliador Cego (Braço C):** Dado que o Braço A e o Braço B têm abordagens epistemológicas radicalmente diferentes para alcançar o estado de contexto, o *prompt* do Avaliador Cego deve estar rigidamente restrito a avaliar as decisões normativas de *saída* (*outputs/plans*) contra o gabarito. O avaliador não deve penalizar o Braço B simplesmente por ter gastado mais etapas lendo arquivos (o custo é metrificado via script, não via juízo de valor qualitativo do Avaliador Cego).
+2. **Poluição de Log em Falha Parcial:** Caso o *fail-closed* do Braço B seja acionado, deve estar explícito na spec se o experimento inteiro (Braços A e B) é considerado inválido ou se o Braço A avança para consolidação como "vencedor por W.O. técnico". A recomendação é que a falha de um braço consolide o encerramento do script apenas para aquele braço.
+
+**Conclusão e Parecer Consultivo:**
+Sob a ótica arquitetural e metodológica, as premissas da Task T023 são rigorosas, defensáveis e representam um avanço significativo em metrologia de Agentes LLM. 
+
+Não existem obstáculos metodológicos sistêmicos impeditivos. Recomendo o **avanço para o congelamento experimental definitivo**, condicionado unicamente à reflexão técnica sobre a ampliação da margem de segurança do sub-teto do Braço B (de 10 para 12 requisições), a fim de evitar o estrangulamento do *baseline* operacional.

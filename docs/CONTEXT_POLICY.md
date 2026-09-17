@@ -117,14 +117,15 @@ Para evitar que o agente reintroduza silenciosamente o histórico completo ou ex
 desmedidas antes de agir, a política fixa um teto mecânico e verificável:
 
 - **Parâmetro:** `bootstrap_on_demand_budget` (default operacional: `5` leituras `on_demand`),
-  configurável na política de contexto ou na especificação da unidade.
-- **Métrica contabilizada:** Cada invocação de ferramenta de leitura seletiva (`scripts/read_section.py`
-  ou leitura pontual de trecho) executada desde a inicialização da sessão nova até o primeiro despacho
-  material ou decisão de coordenação.
+  configurável na política de contexto ou na especificação da unidade e gravado de forma imutável em `resume.json`.
+- **Métrica contabilizada:** Cada invocação de ferramenta de leitura seletiva (leitura direta ou comando shell de leitura)
+  executada desde a inicialização da sessão nova até o marco do primeiro despacho material (`model_call`, subagente ou ação motora).
 - **Semântica fail-closed:**
   Se a contagem de leituras sob demanda de bootstrap exceder o teto alocado (`reads_count > max_budget`),
   o sistema emite `STOP: bootstrap_budget_exceeded`, bloqueando o prosseguimento.
   A continuidade exige justificativa explícita registrada na evidência da rodada ou elevação formal
-  do orçamento na política autorizada da unidade.
-- **Verificação mecânica:** O utilitário `scripts/resume_generate.py --check-bootstrap-budget <reads> [--max-budget <N>] [--json]`
-  permite a validação determinística desse teto em scripts, CI e portões pré-despacho.
+  do orçamento na política autorizada da unidade. O verificador rejeita alterações ad hoc de `--max-budget`
+  que colidam com o valor formalmente gravado no manifesto.
+- **Verificação mecânica durável:** O utilitário `scripts/resume_generate.py` audita o teto de forma não-forjável:
+  - `--verify <manifest> [--transcript <log.jsonl> | --journal <journal.jsonl>]`: audita o consumo real até o primeiro despacho contra o orçamento autoritativo do próprio manifesto;
+  - `--check-bootstrap-budget <reads> --manifest <manifest>`: valida a conformidade garantindo que o orçamento do manifesto prevaleça sobre qualquer parâmetro de linha de comando.

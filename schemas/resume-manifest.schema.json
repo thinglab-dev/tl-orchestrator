@@ -16,7 +16,8 @@
     "effective_authors",
     "open_items",
     "next_action",
-    "always_read"
+    "always_read",
+    "bootstrap_budget"
   ],
   "properties": {
     "schema_version": {
@@ -51,7 +52,8 @@
     },
     "generated_at": {
       "type": "string",
-      "minLength": 1
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"
     },
     "generator_version": {
       "type": "string",
@@ -130,7 +132,7 @@
         },
         "digest": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9a-f]{64}$"
         }
       }
     },
@@ -159,7 +161,7 @@
         },
         "digest": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9a-f]{64}$"
         },
         "delivery": {
           "enum": [

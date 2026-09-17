@@ -96,15 +96,16 @@ payload compacto.
 ### Protocolo operacional de retomada curta e barreira de autoridade
 
 Na transição de ciclos e retomada em sessão limpa:
-1. **Compilação sob demanda:** Execute `python3 scripts/resume_generate.py --task <task_file> --phase <phase> --output staging/resume.json`
-   para compilar o pacote com fontes congeladas, digests e classes de entrega de `docs/CONTEXT_POLICY.md`.
+1. **Compilação atômica sob demanda:** Execute `python3 scripts/resume_generate.py --task <task_file> --phase <phase> --output staging/resume.json`
+   para compilar o pacote com fontes congeladas, digests e classes de entrega de `docs/CONTEXT_POLICY.md`. O utilitário
+   auto-revalida o manifesto e publica o arquivo via substituição atômica (`fsync` e replace atômico), prevenindo TOCTOU e artefatos parciais.
 2. **Verificação mecânica pré-despacho (`fail-closed`):** Na sessão limpa iniciada, o **primeiro comando
    obrigatório** antes de qualquer despacho é:
-   `python3 scripts/resume_generate.py --verify <caminho_do_resume.json> --json`
-   - Se `status: verified`, o agente prossegue consumindo as seções `inline` entregues no pacote e
-     realizando consultas `on_demand` seletivas.
-   - Se `status: stale_package_rejected` ou `status: source_missing`, fail-closed imediato: o pacote é
-     descartado e o estado operacional é reconstruído diretamente dos arquivos originais em disco
+   `python3 scripts/resume_generate.py --verify <caminho_do_resume.json> [--transcript <log.jsonl>] --json`
+   - Se `status: verified`, o agente vincula o despacho ao `manifest_file_digest` e prossegue consumindo as seções `inline`
+     entregues no pacote e realizando consultas `on_demand` seletivas dentro do orçamento alocado.
+   - Se `status: stale_package_rejected`, `source_missing`, `schema_invalid` ou `bootstrap_budget_exceeded`, fail-closed imediato:
+     o pacote é descartado ou a sessão é interrompida, e o estado operacional é reconstruído diretamente dos arquivos originais em disco
      (`STATUS.md`, Task file e `PROJECT.md`).
 3. **Barreira contratual contra autoridade de resumos:** É terminantemente PROIBIDO citar campos derivados
    do manifesto (`open_items`, `next_action`, `reason`) como prova factual em decisões, relatórios ou
@@ -113,7 +114,7 @@ Na transição de ciclos e retomada em sessão limpa:
 4. **Teto mecânico de bootstrap:** No turno inicial de retomada, o agente deve respeitar o parâmetro
    `bootstrap_on_demand_budget` (default: 5 leituras `on_demand` antes do primeiro despacho material).
    Se o agente exceder o teto sem emitir a decisão/despacho, o sistema emite `STOP: bootstrap_budget_exceeded`
-   (verificável via `scripts/resume_generate.py --check-bootstrap-budget <reads>`).
+   (verificável de forma não-forjável via `scripts/resume_generate.py --verify <resume.json> --transcript <log.jsonl>`).
 
 Para exploração ambígua de dependências/assinaturas num consumidor onde o usuário já ativou o
 acelerador local (ver [`docs/GRAFT.md`](../docs/GRAFT.md)), Planner e Maker podem consultar o

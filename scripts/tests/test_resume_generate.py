@@ -456,6 +456,127 @@ class TestResumeGenerate(unittest.TestCase):
             self.assertFalse(res_drift["ok"])
             self.assertTrue(any("frontmatter" in m.get("selector", "") for m in res_drift["mismatches"]))
 
+    # R1: Schema validation against Draft 2020-12 and ISO timestamp format
+    def test_r1_schema_validation_rejection(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            shutil.copytree(ROOT / "_tl-orc", temp_root / "_tl-orc")
+            shutil.copytree(ROOT / "schemas", temp_root / "schemas")
+            shutil.copytree(ROOT / "scripts", temp_root / "scripts")
+
+            from scripts.resume_generate import generate_resume_manifest, verify_resume_manifest_structured
+
+            task_file = temp_root / "_tl-orc/project/tasks/T032-protocolo-de-retomada-curta-e-transicao-entre-ciclos.md"
+            base_manifest = generate_resume_manifest(temp_root, task_file, "implementation")
+
+            # 1. Partial object with only sources fails schema validation
+            partial_manifest = {"sources": base_manifest["sources"]}
+            res_partial = verify_resume_manifest_structured(partial_manifest, temp_root)
+            self.assertEqual(res_partial["status"], "schema_invalid")
+            self.assertFalse(res_partial["ok"])
+            self.assertTrue(any("required property" in err for err in res_partial["errors"]))
+
+            # 2. Invalid generated_at timestamp rejected
+            bad_time_manifest = dict(base_manifest)
+            bad_time_manifest["generated_at"] = "not-an-iso-time"
+            res_bad_time = verify_resume_manifest_structured(bad_time_manifest, temp_root)
+            self.assertEqual(res_bad_time["status"], "schema_invalid")
+            self.assertFalse(res_bad_time["ok"])
+            self.assertTrue(any("generated_at" in m.get("path", "") for m in res_bad_time["mismatches"]))
+
+            # 3. Malformed digest in sources rejected
+            bad_digest_manifest = dict(base_manifest)
+            bad_digest_manifest["sources"] = [dict(s) for s in base_manifest["sources"]]
+            bad_digest_manifest["sources"][0]["digest"] = "short-hash-not-sha256"
+            res_bad_digest = verify_resume_manifest_structured(bad_digest_manifest, temp_root)
+            self.assertEqual(res_bad_digest["status"], "schema_invalid")
+            self.assertFalse(res_bad_digest["ok"])
+
+    # R2: Mechanical transcript and journal budget audit and override rejection
+    def test_r2_mechanical_bootstrap_budget_from_transcript_and_journal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            shutil.copytree(ROOT / "_tl-orc", temp_root / "_tl-orc")
+            shutil.copytree(ROOT / "schemas", temp_root / "schemas")
+            shutil.copytree(ROOT / "scripts", temp_root / "scripts")
+
+            from scripts.resume_generate import generate_resume_manifest
+
+            task_file = temp_root / "_tl-orc/project/tasks/T032-protocolo-de-retomada-curta-e-transicao-entre-ciclos.md"
+            manifest = generate_resume_manifest(temp_root, task_file, "implementation")
+            manifest_path = temp_root / "resume.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+            # 1. Transcript with 6 reads before dispatch (budget is 5) -> fail-closed
+            t_lines_6 = [
+                {"step_index": i, "kind": "turn", "tool_calls": [{"tool": "view_file", "parameters": {"AbsolutePath": f"/p/{i}"}}]}
+                for i in range(1, 7)
+            ] + [{"step_index": 7, "kind": "step_intent", "effect_class": "model_call", "step_id": "dispatch:maker"}]
+            transcript_file = temp_root / "transcript.jsonl"
+            transcript_file.write_text("\n".join(json.dumps(l) for l in t_lines_6) + "\n", encoding="utf-8")
+
+            code_t, out_t, _ = self.run_cli(
+                "--verify", str(manifest_path), "--transcript", str(transcript_file), "--json", cwd=temp_root
+            )
+            self.assertEqual(code_t, 1)
+            data_t = json.loads(out_t)
+            self.assertEqual(data_t["status"], "bootstrap_budget_exceeded")
+            self.assertFalse(data_t["ok"])
+            self.assertEqual(data_t["bootstrap_budget_check"]["reads_count"], 6)
+            self.assertEqual(data_t["bootstrap_budget_check"]["max_budget"], 5)
+
+            # 2. Transcript with 3 reads before dispatch -> passes
+            t_lines_3 = [
+                {"step_index": i, "kind": "turn", "tool_calls": [{"tool": "view_file", "parameters": {"AbsolutePath": f"/p/{i}"}}]}
+                for i in range(1, 4)
+            ] + [{"step_index": 4, "kind": "step_intent", "effect_class": "model_call", "step_id": "dispatch:maker"}]
+            transcript_file.write_text("\n".join(json.dumps(l) for l in t_lines_3) + "\n", encoding="utf-8")
+
+            code_ok, out_ok, _ = self.run_cli(
+                "--verify", str(manifest_path), "--transcript", str(transcript_file), "--json", cwd=temp_root
+            )
+            self.assertEqual(code_ok, 0)
+            data_ok = json.loads(out_ok)
+            self.assertEqual(data_ok["status"], "verified")
+            self.assertTrue(data_ok["ok"])
+            self.assertEqual(data_ok["bootstrap_budget_check"]["reads_count"], 3)
+
+            # 3. Ad-hoc override rejection when manifest defines budget
+            code_ovr, out_ovr, _ = self.run_cli(
+                "--manifest", str(manifest_path), "--transcript", str(transcript_file), "--max-budget", "10", "--json", cwd=temp_root
+            )
+            self.assertEqual(code_ovr, 1)
+            data_ovr = json.loads(out_ovr)
+            self.assertEqual(data_ovr["status"], "unauthorized_override")
+            self.assertFalse(data_ovr["ok"])
+
+    # R3: Atomic publication and pre-publication verification
+    def test_r3_atomic_publication_and_toctou_prevention(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            shutil.copytree(ROOT / "_tl-orc", temp_root / "_tl-orc")
+            shutil.copytree(ROOT / "schemas", temp_root / "schemas")
+            shutil.copytree(ROOT / "scripts", temp_root / "scripts")
+
+            task_file = temp_root / "_tl-orc/project/tasks/T032-protocolo-de-retomada-curta-e-transicao-entre-ciclos.md"
+            out_file = temp_root / "published-resume.json"
+
+            # 1. Successful atomic publication
+            code_p, out_p, err_p = self.run_cli(
+                "--task", str(task_file), "--output", str(out_file), cwd=temp_root
+            )
+            self.assertEqual(code_p, 0, f"Atomic publish failed: {err_p}")
+            self.assertTrue(out_file.is_file())
+
+            # Verify and check manifest_file_digest is present
+            code_v, out_v, _ = self.run_cli("--verify", str(out_file), "--json", cwd=temp_root)
+            self.assertEqual(code_v, 0)
+            data_v = json.loads(out_v)
+            self.assertEqual(data_v["status"], "verified")
+            self.assertIn("manifest_file_digest", data_v)
+            self.assertEqual(len(data_v["manifest_file_digest"]), 64)
+
 
 if __name__ == "__main__":
     unittest.main()
+

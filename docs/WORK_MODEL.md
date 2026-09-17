@@ -192,13 +192,16 @@ gerado deterministicamente sob demanda (`scripts/resume_generate.py`). O pacote 
      `spec_revision`, `state_revision`, `content_id` e `generator_version`.
 
 3. **Verificação mecânica pré-despacho (`fail-closed`):**
+   - Na publicação, o gerador auto-revalida o manifesto e substitui o arquivo com replace atômico (`fsync`),
+     prevenindo TOCTOU e arquivos parciais.
    - Na sessão limpa subsequente à transição, o primeiro comando obrigatório é a validação mecânica
-     via `python3 scripts/resume_generate.py --verify <caminho> --json`.
-   - Se retornar `status: verified`, o agente consome as classes `inline` e realiza leituras `on_demand`
-     estritamente guiadas pela necessidade, respeitando o teto de bootstrap (`bootstrap_on_demand_budget`).
-   - Se retornar `status: stale_package_rejected` (divergência em qualquer fonte congelada, incluindo
-     frontmatter da Task ou STATUS.md) ou `status: source_missing`, o pacote é descartado imediatamente
-     e o agente reconstrói o estado diretamente das fontes oficiais em disco.
+     via `python3 scripts/resume_generate.py --verify <caminho> [--transcript <log.jsonl>] --json`.
+   - Se retornar `status: verified`, o agente vincula o despacho ao hash do artefato (`manifest_file_digest`),
+     consome as classes `inline` e realiza leituras `on_demand` estritamente guiadas pela necessidade,
+     respeitando o teto de bootstrap (`bootstrap_on_demand_budget`).
+   - Se retornar `status: stale_package_rejected`, `source_missing`, `schema_invalid` ou `bootstrap_budget_exceeded`,
+     o pacote é descartado imediatamente (ou a sessão é interrompida) e o agente reconstrói o estado diretamente
+     das fontes oficiais em disco.
 
 4. **Critérios absolutos de continuidade (quando NÃO rotacionar sessão):**
    A rotação de sessão visa mitigar a fadiga de contexto e a atenuação de atenção em conversas longas, mas

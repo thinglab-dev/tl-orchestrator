@@ -5,14 +5,14 @@ deliverable: package
 standalone: true
 method: native
 status: ready
-state_revision: 3
+state_revision: 4
 depends_on: [T022, T023]
 blocked_by: []
-origin: user (autorizacao formal em 2026-09-17 para institucionalizar as conclusoes de T023 e a base tecnica de T022; rework_round 1 ratificado para sanar acoplamento de limiar, metadata volátil e verificabilidade de bootstrap)
+origin: user (autorizacao formal em 2026-09-17 para institucionalizar as conclusoes de T023 e a base tecnica de T022; rework_round 1 ratificado para sanar acoplamento de limiar, metadata volátil e verificabilidade de bootstrap; rework_round 2 para sanar R1-R4 do Checker r01)
 decisions: []
 spec_author: orchestrator
 spec_revision: 83a410d9244726c8
-rework_round: 1
+rework_round: 2
 affects_context: []
 effective_authors: [google, anthropic]
 checker_independence: required
@@ -121,3 +121,16 @@ A execucao de Phase B e estrita aos seguintes 10 caminhos de arquivo:
    - Inspecionar minuciosamente os diffs de `content_paths` contra o texto do parecer do Advisor (`advisor-stdout.txt` / Anthropic Claude); se houver incorporacao substantiva de redacao ou proposicao autoral do Advisor, Anthropic DEVE ser adicionada a `effective_authors`;
    - Consolidar a lista final em `effective_authors` e fornecer ao Classificador sob `checker_independence: required`, bloqueando qualquer candidato da mesma familia de qualquer autor efetivo.
 6. **Revisao do Checker Independente:** Invocacao do Checker cross-family eleito em sessao limpa report-only contra a arvore imutavel congelada.
+
+## Review
+
+### Rodada r01 (2026-09-17)
+- Checker: OpenAI Codex `gpt-5.6-terra / high` (independente, cross-family sob `checker_independence: required`)
+- Target commit: `b74b9281b34def7bd6689bf8831a4ca42a8c1a2f`
+- Parecer: `changes_requested` (JSON íntegro em `_tl-orc/project/evidence/T032-support/phase-b/02-review/review-result.json`)
+- Ações Requeridas (Action Items):
+  - R1 (`patch`, severity high, maker): Validação integral contra schema Draft 2020-12 no `verify_resume_manifest_structured` (rejeitando manifestos parciais sem campos obrigatórios) e padrão ISO 8601 explícito em `generated_at`.
+  - R2 (`patch`, severity high, maker): Aplicação mecânica do teto de bootstrap a leituras reais auditadas de transcript/journal até o primeiro despacho material; rejeição de overrides ad hoc de `--max-budget` perante o orçamento do manifesto.
+  - R3 (`patch`, severity medium, maker): Prevenção de janela TOCTOU na publicação de `resume.json` via pré-validação antes da escrita e publicação por substituição atômica (`tempfile`, `flush`, `fsync` e `os.replace`).
+  - R4 (`intent_gap`, severity medium, human): Preservação de log bruto completo da execução da suíte de testes e sondas contrafactuais vinculado ao commit SHA da entrega para auditabilidade em sandbox somente leitura.
+- Rework r02 executado pelo Maker sanando integralmente R1, R2, R3 e registrando a evidência de execução para R4.

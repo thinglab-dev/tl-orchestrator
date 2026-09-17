@@ -9,11 +9,16 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
+
+import jsonschema
 
 DEFAULT_GENERATOR_VERSION = "resume_generate/1.0.0 (T032)"
 DEFAULT_BOOTSTRAP_BUDGET = 5
@@ -335,19 +340,127 @@ def derive_next_action(task_id: str, method: str, status: str, phase: str) -> st
 def check_bootstrap_budget(
     reads_count: int,
     max_budget: int = DEFAULT_BOOTSTRAP_BUDGET,
+    manifest: Optional[dict[str, Any]] = None,
+    allow_override: bool = False,
 ) -> tuple[bool, str]:
     """
-    Evaluate whether on-demand bootstrap reads exceeded the allocated budget (AC06).
+    Evaluate whether on-demand bootstrap reads exceeded the allocated budget (AC06, R2).
+    If manifest is provided, its bootstrap_budget["max_on_demand_reads"] is authoritative.
     Returns (True, message) if within budget, or (False, 'STOP: bootstrap_budget_exceeded: ...').
     """
+    effective_budget = max_budget
+    if manifest and isinstance(manifest, dict):
+        m_budget = manifest.get("bootstrap_budget", {}).get("max_on_demand_reads")
+        if m_budget is not None:
+            effective_budget = m_budget
+
     if reads_count < 0:
         return False, "Invalid negative reads count"
-    if reads_count > max_budget:
+    if reads_count > effective_budget:
         return (
             False,
-            f"STOP: bootstrap_budget_exceeded (reads: {reads_count}, max_budget: {max_budget})",
+            f"STOP: bootstrap_budget_exceeded (reads: {reads_count}, max_budget: {effective_budget})",
         )
-    return True, f"OK: bootstrap budget preserved ({reads_count}/{max_budget} reads used)"
+    return True, f"OK: bootstrap budget preserved ({reads_count}/{effective_budget} reads used)"
+
+
+def extract_bootstrap_reads_from_transcript(
+    transcript_path: Path,
+) -> tuple[int, list[dict[str, Any]], Optional[str]]:
+    """
+    Extract on-demand read tool calls from transcript prior to first model dispatch event (AC06, R2).
+    Returns (reads_count, reads_list, first_dispatch_marker).
+    """
+    if not transcript_path.is_file():
+        raise FileNotFoundError(f"Transcript not found: {transcript_path}")
+
+    reads: list[dict[str, Any]] = []
+    first_dispatch: Optional[str] = None
+    direct_read_tools = {"read", "view", "view_file", "section", "cat", "grep", "glob", "read_url_content"}
+
+    for line in transcript_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            step = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        # 1. Step kind step_intent with effect_class model_call marks first dispatch
+        if step.get("kind") == "step_intent" and step.get("effect_class") == "model_call":
+            first_dispatch = step.get("step_id") or "step_intent:model_call"
+            break
+
+        # 2. Tool calls dispatching a model or subagent mark first dispatch
+        tool_calls = step.get("tool_calls") or []
+        hit_dispatch = False
+        for call in tool_calls:
+            tool_name = (call.get("tool") or call.get("name") or "").lower()
+            if any(d in tool_name for d in ["dispatch", "agent", "codex", "claude", "invoke_subagent", "model_call"]):
+                first_dispatch = f"tool_call:{tool_name}"
+                hit_dispatch = True
+                break
+
+            params = call.get("parameters") or call.get("args") or {}
+            if any(k in tool_name for k in direct_read_tools):
+                target = params.get("AbsolutePath") or params.get("file") or params.get("path") or params.get("TargetFile") or params.get("FilePath")
+                reads.append({
+                    "tool": tool_name,
+                    "target": str(target) if target else None,
+                    "step_index": step.get("step_index"),
+                })
+
+            cmd = str(params.get("CommandLine") or params.get("command") or params.get("cmd") or "")
+            if cmd and any(k in tool_name for k in ["bash", "command", "shell", "exec", "terminal"]):
+                if re.search(r"\b(cat|head|tail|grep|sed|awk)\b", cmd):
+                    reads.append({
+                        "tool": tool_name,
+                        "command": cmd,
+                        "step_index": step.get("step_index"),
+                    })
+
+        if hit_dispatch:
+            break
+
+    return len(reads), reads, first_dispatch
+
+
+def extract_bootstrap_reads_from_journal(
+    journal_path: Path,
+) -> tuple[int, list[dict[str, Any]], Optional[str]]:
+    """
+    Extract on-demand read events from journal.jsonl prior to first model dispatch event (AC06, R2).
+    Returns (reads_count, reads_list, first_dispatch_step_id).
+    """
+    if not journal_path.is_file():
+        raise FileNotFoundError(f"Journal not found: {journal_path}")
+
+    reads: list[dict[str, Any]] = []
+    first_dispatch: Optional[str] = None
+
+    for line in journal_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        kind = event.get("kind")
+        if kind == "step_intent" and event.get("effect_class") == "model_call":
+            first_dispatch = event.get("step_id")
+            break
+
+        if kind == "step_intent" and event.get("effect_class") in ("local_read", "none"):
+            intent = event.get("intent") or {}
+            if intent.get("action") in ("read", "view", "section"):
+                reads.append(event)
+        elif kind == "step_result" and event.get("effect_class") == "local_read":
+            reads.append(event)
+
+    return len(reads), reads, first_dispatch
 
 
 def verify_resume_manifest_structured(
@@ -355,9 +468,9 @@ def verify_resume_manifest_structured(
     repo_root: Path,
 ) -> dict[str, Any]:
     """
-    Verify pre-dispatch integrity of manifest against current disk content (AC03, AC15).
-    Inspects each source declared in manifest["sources"], reads section with select_section,
-    computes canonical digest (masking volatile fields for frontmatter selectors),
+    Verify pre-dispatch integrity of manifest against current disk content (AC01, AC03, AC15, R1).
+    Performs full Draft 2020-12 schema validation, inspects each source declared in manifest["sources"],
+    reads section with select_section, computes canonical digest (masking volatile fields for frontmatter),
     and compares to manifest digest.
     Returns dictionary with:
       - status: 'verified', 'stale_package_rejected', 'source_missing', or 'schema_invalid'
@@ -378,6 +491,39 @@ def verify_resume_manifest_structured(
             "errors": errors,
             "mismatches": [],
         }
+
+    # 1. Full schema validation against schemas/resume-manifest.schema.json (AC01, R1)
+    schema_path = repo_root / "schemas" / "resume-manifest.schema.json"
+    if schema_path.is_file():
+        try:
+            schema_data = json.loads(schema_path.read_text(encoding="utf-8"))
+            validator = jsonschema.Draft202012Validator(schema_data)
+            schema_errors = sorted(validator.iter_errors(manifest), key=lambda e: list(e.path))
+            if schema_errors:
+                for s_err in schema_errors:
+                    loc = "/".join(str(p) for p in s_err.path) if s_err.path else "root"
+                    errors.append(f"Schema error at {loc}: {s_err.message}")
+                    mismatches.append({
+                        "type": "schema_validation_error",
+                        "path": loc,
+                        "message": s_err.message,
+                    })
+                return {
+                    "status": "schema_invalid",
+                    "ok": False,
+                    "checked_sources_count": 0,
+                    "errors": errors,
+                    "mismatches": mismatches,
+                }
+        except Exception as exc:
+            errors.append(f"Could not load or validate schema: {exc}")
+            return {
+                "status": "schema_invalid",
+                "ok": False,
+                "checked_sources_count": 0,
+                "errors": errors,
+                "mismatches": [{"type": "schema_load_error", "error": str(exc)}],
+            }
 
     sources = manifest.get("sources")
     if not isinstance(sources, list) or not sources:
@@ -744,6 +890,18 @@ def main() -> None:
         help="Verify pre-dispatch integrity of an existing resume manifest JSON file against disk.",
     )
     parser.add_argument(
+        "--manifest",
+        help="Path to resume manifest JSON file (for budget/policy binding).",
+    )
+    parser.add_argument(
+        "--transcript",
+        help="Path to JSONL transcript file for durable bootstrap read audit.",
+    )
+    parser.add_argument(
+        "--journal",
+        help="Path to journal.jsonl file for durable bootstrap read audit.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Output structured JSON (used with --verify or --check-bootstrap-budget).",
@@ -768,14 +926,50 @@ def main() -> None:
 
     repo_root = Path.cwd()
 
-    if args.check_bootstrap_budget is not None:
-        ok, msg = check_bootstrap_budget(args.check_bootstrap_budget, args.max_budget)
+    # Standalone Bootstrap Budget Check (durable log or explicit count)
+    if (args.check_bootstrap_budget is not None or args.transcript or args.journal) and not args.verify:
+        manifest_obj = None
+        manifest_budget = None
+        if args.manifest:
+            m_path = Path(args.manifest)
+            if m_path.is_file():
+                try:
+                    manifest_obj = json.loads(m_path.read_text(encoding="utf-8"))
+                    manifest_budget = manifest_obj.get("bootstrap_budget", {}).get("max_on_demand_reads")
+                except Exception:
+                    pass
+
+        first_dispatch = None
+        if args.transcript:
+            reads_count, _, first_dispatch = extract_bootstrap_reads_from_transcript(Path(args.transcript))
+        elif args.journal:
+            reads_count, _, first_dispatch = extract_bootstrap_reads_from_journal(Path(args.journal))
+        else:
+            reads_count = args.check_bootstrap_budget if args.check_bootstrap_budget is not None else 0
+
+        authoritative_budget = manifest_budget if manifest_budget is not None else args.max_budget
+
+        # Reject ad-hoc override attempt if caller tries to alter manifest budget
+        if manifest_budget is not None and args.max_budget != DEFAULT_BOOTSTRAP_BUDGET and args.max_budget != manifest_budget:
+            err_msg = f"ERROR: cannot override --max-budget ({args.max_budget}) ad hoc when manifest defines bootstrap_budget ({manifest_budget})"
+            if args.json:
+                print(json.dumps({
+                    "status": "unauthorized_override",
+                    "ok": False,
+                    "error": err_msg,
+                }, indent=2))
+            else:
+                print(err_msg, file=sys.stderr)
+            sys.exit(1)
+
+        ok, msg = check_bootstrap_budget(reads_count, authoritative_budget, manifest=manifest_obj)
         if args.json:
             result = {
                 "status": "verified" if ok else "bootstrap_budget_exceeded",
                 "ok": ok,
-                "reads_count": args.check_bootstrap_budget,
-                "max_budget": args.max_budget,
+                "reads_count": reads_count,
+                "max_budget": authoritative_budget,
+                "first_dispatch": first_dispatch,
                 "message": msg,
             }
             print(json.dumps(result, indent=2, sort_keys=True))
@@ -801,8 +995,11 @@ def main() -> None:
             else:
                 print(f"ERROR: {err_msg}", file=sys.stderr)
             sys.exit(1)
+
         try:
-            manifest_to_verify = json.loads(verify_path.read_text(encoding="utf-8"))
+            raw_bytes = verify_path.read_bytes()
+            manifest_file_digest = hashlib.sha256(raw_bytes).hexdigest()
+            manifest_to_verify = json.loads(raw_bytes.decode("utf-8"))
         except Exception as exc:
             err_msg = f"could not parse manifest JSON: {exc}"
             if args.json:
@@ -818,6 +1015,41 @@ def main() -> None:
             sys.exit(1)
 
         result = verify_resume_manifest_structured(manifest_to_verify, repo_root)
+        result["manifest_file_digest"] = manifest_file_digest
+
+        # Mechanical bootstrap read audit if transcript or journal is supplied
+        reads_count = None
+        first_dispatch = None
+        if args.transcript:
+            reads_count, _, first_dispatch = extract_bootstrap_reads_from_transcript(Path(args.transcript))
+        elif args.journal:
+            reads_count, _, first_dispatch = extract_bootstrap_reads_from_journal(Path(args.journal))
+        elif args.check_bootstrap_budget is not None:
+            reads_count = args.check_bootstrap_budget
+
+        if reads_count is not None:
+            budget_ok, budget_msg = check_bootstrap_budget(
+                reads_count=reads_count,
+                manifest=manifest_to_verify,
+                allow_override=False,
+            )
+            result["bootstrap_budget_check"] = {
+                "ok": budget_ok,
+                "reads_count": reads_count,
+                "max_budget": manifest_to_verify.get("bootstrap_budget", {}).get("max_on_demand_reads"),
+                "first_dispatch": first_dispatch,
+                "message": budget_msg,
+            }
+            if not budget_ok:
+                result["ok"] = False
+                result["status"] = "bootstrap_budget_exceeded"
+                result["errors"].append(budget_msg)
+                result["mismatches"].append({
+                    "type": "bootstrap_budget_exceeded",
+                    "reads_count": reads_count,
+                    "max_budget": manifest_to_verify.get("bootstrap_budget", {}).get("max_on_demand_reads"),
+                })
+
         if args.json:
             print(json.dumps(result, indent=2, sort_keys=True))
             sys.exit(0 if result["ok"] else 1)
@@ -848,13 +1080,31 @@ def main() -> None:
         print(f"ERROR: resume_generate failed: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    # Revalidate manifest against current disk content prior to publication (TOCTOU guard, R3)
+    v_res = verify_resume_manifest_structured(manifest, repo_root)
+    if not v_res.get("ok"):
+        print(f"ERROR: pre-publication verification failed: {v_res.get('status')} - {v_res.get('errors')}", file=sys.stderr)
+        sys.exit(1)
+
     # Output deterministically formatted JSON (sorted keys, 2-space indent, single trailing \n)
     formatted = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
 
     if args.output and args.output != "-":
-        out_path = Path(args.output)
+        out_path = Path(args.output).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(formatted, encoding="utf-8")
+        # Atomic replace via fsynced temporary file in the target directory (R3)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(out_path.parent),
+            prefix=".tmp-resume-",
+            delete=False,
+        ) as tf:
+            tf.write(formatted)
+            tf.flush()
+            os.fsync(tf.fileno())
+            temp_name = tf.name
+        os.replace(temp_name, str(out_path))
     else:
         sys.stdout.write(formatted)
 

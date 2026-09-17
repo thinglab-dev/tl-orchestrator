@@ -137,6 +137,73 @@ class ExecutionPlanValidatorTest(unittest.TestCase):
         self.assertIn("missing_budget_scenario", violations(result))
         self.assertIn("retry", {e.get("scenario") for e in result["errors"]})
 
+    def test_retry_scenario_with_zero_rework_rounds_is_refused(self) -> None:
+        """A `retry` that budgets no rework round only proves the happy path a second time."""
+        plan = self.plan()
+        plan["scenarios"] = [{"name": "straight_line", "rework_rounds": 0},
+                             {"name": "retry", "rework_rounds": 0}]
+        # Arithmetically this plan "fits", which is exactly why the shape has to be refused.
+        self.assertLessEqual(2 + 1 * 2, plan["budget"]["max_model_calls"])
+        result = validate(plan)
+        self.assertFalse(result["approved"])
+        self.assertEqual(violations(result), {"retry_scenario_without_rework"})
+        finding = next(e for e in result["errors"] if e["violation"] == "retry_scenario_without_rework")
+        self.assertEqual((finding["scenario"], finding["rework_rounds"]), ("retry", 0))
+
+        # One rework round is the minimum that makes `retry` mean something.
+        plan["scenarios"][1]["rework_rounds"] = 1
+        self.assertTrue(validate(plan)["approved"])
+
+    def test_straight_line_scenario_must_have_zero_rework_rounds(self) -> None:
+        plan = self.plan()
+        plan["scenarios"] = [{"name": "straight_line", "rework_rounds": 1},
+                             {"name": "retry", "rework_rounds": 2}]
+        result = validate(plan)
+        self.assertFalse(result["approved"])
+        self.assertEqual(violations(result), {"straight_line_scenario_has_rework"})
+
+    def test_scenario_names_are_unique(self) -> None:
+        """A second `retry` cannot hide an unaffordable path behind an affordable namesake."""
+        plan = self.plan()
+        plan["scenarios"] = [{"name": "straight_line", "rework_rounds": 0},
+                             {"name": "retry", "rework_rounds": 1},
+                             {"name": "retry", "rework_rounds": 2}]
+        result = validate(plan)
+        self.assertFalse(result["approved"])
+        self.assertEqual(violations(result), {"duplicate_budget_scenario"})
+        self.assertEqual({e["scenario"] for e in result["errors"]}, {"retry"})
+
+        duplicated_happy_path = self.plan()
+        duplicated_happy_path["scenarios"].append({"name": "straight_line", "rework_rounds": 0})
+        self.assertIn("duplicate_budget_scenario", violations(validate(duplicated_happy_path)))
+
+    def test_retry_budget_must_be_satisfiable_and_rounds_must_cost_calls(self) -> None:
+        # The smallest honest retry (one rework round) still has to fit: 2 + 2x2 = 6 > 5.
+        plan = self.plan()
+        plan["scenarios"] = [{"name": "straight_line", "rework_rounds": 0},
+                             {"name": "retry", "rework_rounds": 1}]
+        plan["budget"]["max_model_calls"] = 5
+        result = validate(plan)
+        self.assertEqual(violations(result), {"gate_call_constraints_unsatisfiable"})
+        self.assertEqual([e["scenario"] for e in result["errors"]], ["retry"])
+        self.assertEqual(result["errors"][0]["required_calls"], 6)
+
+        # A round that costs no model call makes every retry free and the proof vacuous.
+        free = self.plan()
+        free["budget"]["role_calls_per_round"] = {"maker": 0, "checker": 0}
+        self.assertIn("round_without_model_calls", violations(validate(free)))
+
+    def test_schema_patterns_anchor_at_the_end_of_input(self) -> None:
+        """JSON Schema `$` is end of input: a value followed by a newline is a different value."""
+        schema = {"type": "string", "pattern": "^[0-9a-f]{4}$"}
+        self.assertEqual(plan_validator.validate_json_schema("beef", schema), [])
+        for value in ("beef\n", "beef\r\n", "\nbeef", "beef "):
+            self.assertTrue(plan_validator.validate_json_schema(value, schema), repr(value))
+        # `$` inside a character class and an escaped `\$` stay literal.
+        self.assertEqual(plan_validator.validate_json_schema("a$", {"type": "string", "pattern": "^a[$]$"}), [])
+        self.assertEqual(plan_validator.validate_json_schema("a$", {"type": "string", "pattern": "^a\\$$"}), [])
+        self.assertTrue(plan_validator.validate_json_schema("a$\n", {"type": "string", "pattern": "^a\\$$"}))
+
     def test_protected_paths_are_verified_against_a_real_tree(self) -> None:
         with tempfile.TemporaryDirectory(prefix="tl-plan-paths-") as tmp:
             root = Path(tmp)

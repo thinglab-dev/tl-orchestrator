@@ -754,6 +754,8 @@ class Policy:
         # CLI, so a direct `agy`/`codex`/`claude`/`gemini` invocation fails before it reaches a
         # provider instead of spending budget nobody journaled.
         self.cognitive_barrier = cognitive_barrier
+        # T032: forbidden and protected paths of the bound child batch. Empty for a legacy batch.
+        self.story_denied: list[str] = []
 
     def effect_allowed(self, effect: str) -> bool:
         return bool(self.effects.get(effect, False))
@@ -777,6 +779,10 @@ class Policy:
             return "security", "secret_pattern_in_diff: " + ", ".join(secrets)
         outside = [p for p in dirty if not path_within(p, unit.scope_paths)]
         forbidden = [p for p in dirty if unit.do_not_touch and path_within(p, unit.do_not_touch)]
+        if self.story_denied and story_authority is not None:
+            # Judged by the matcher that proved the derivation, so what the Story forbids is
+            # forbidden here exactly as it was proven, however broad scope_paths is.
+            forbidden += story_authority.paths_denied(dirty, self.story_denied)
         if outside or forbidden:
             return "scope", "scope_expansion: " + ", ".join(sorted(set(outside + forbidden))[:12])
         return "", ""
@@ -1276,6 +1282,7 @@ class Runtime:
         os.environ["GIT_CONFIG_COUNT"] = str(max(hooks_count, slot + 1))
         self.git = Git(self.repo, self.config["git_executable"])
         self.authority = None
+        self.child_binding = None
         self.barrier_report = None
         self.authority_mode = str(self.batch["authorization"].get("story_authority_mode", "direct_proposal"))
         barrier_dir = self.state_dir / "cognitive-barrier" if self.authority_mode == "AUTO_STORY" else None
@@ -1328,7 +1335,7 @@ class Runtime:
             # One holder of the authority lease at a time: the global budget has a single writer.
             try:
                 self.authority.acquire()
-                story_authority.assert_batch_within_story(self.authority.payload, self.units)
+                self._bind_to_registered_derivation()
             except story_authority.HardStop as stop:
                 self.release()
                 raise Refusal(f"{stop.reason}: {stop.detail}", 2) from stop
@@ -1344,6 +1351,23 @@ class Runtime:
                                 budget={k: self.batch["budget"].get(k) for k in ("max_model_calls", "max_rework_rounds_per_unit")},
                                 roles={role: {k: cfg.get(k) for k in ("adapter", "model", "effort", "family")} for role, cfg in self.config["roles"].items()})
             self.fold = self.journal.fold()
+
+    def _bind_to_registered_derivation(self) -> None:
+        """T032: prove, before any worker, that this batch is the child the Story Authority derived.
+
+        The digests in the batch file are claims. The proof lives in `bind_child_batch`, the same
+        code that verified the derivation when it was registered: the proposal and proof journaled
+        for exactly this batch id are recomputed and the batch may ask for nothing beyond them.
+        What the child forbids or protects then becomes unit policy, so a forbidden path nested
+        inside a broad `scope_paths` entry reaches the Maker's pack as `do_not_touch` and is
+        blocked by the same containment that enforces the unit's own list.
+        """
+        units = [{"work_ref": unit.id, "scope_paths": list(unit.scope_paths), "spec_sha256": unit.spec_digest,
+                  "spec_path": unit.spec_path.relative_to(self.repo).as_posix()} for unit in self.units.values()]
+        self.child_binding = story_authority.bind_child_batch(self.authority, self.batch, units)
+        self.policy.story_denied = list(self.child_binding["do_not_touch"])
+        for unit in self.units.values():
+            unit.do_not_touch = sorted(set(unit.do_not_touch) | set(self.child_binding["do_not_touch"]))
 
     def release(self) -> None:
         if self.authority is not None:
@@ -1691,8 +1715,11 @@ class Runtime:
         """T032 §2.11: the unmerged commit the previous Checker reviewed, as the authority recorded it."""
         if self.authority is None:
             return None
-        derivation = (self.authority.state.children.get(self.batch_id) or {}).get("derivation") or {}
-        return derivation.get("functional_parent_checkpoint") or None
+        if self.child_binding is None:
+            # Never read around the proof: the checkpoint is the one in the verified proposal.
+            raise Refusal("authority_missing_or_ambiguous: the AUTO_STORY batch is not bound to its registered "
+                          "derivation yet; acquire the runtime before resolving its functional checkpoint", 2)
+        return self.child_binding["functional_parent_checkpoint"] or None
 
     def base_ref(self, unit: Unit) -> str:
         base = self.base_branch

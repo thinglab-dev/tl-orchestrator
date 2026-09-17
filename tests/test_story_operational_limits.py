@@ -86,10 +86,13 @@ class OperationalLimitsTest(StoryCase):
         auth = self.authority(self.frozen_authority(authority_id="A007"))
         commit, tree = self.git.head(), self.git.tree()
 
-        def proposal(child_id: str) -> dict:
+        residual = [self.patch_item("R5")]
+
+        def proposal(child_id: str, parent: str | None = None) -> dict:
             return story.derive_child_proposal(
-                authority=auth, child_batch_id=child_id, action_items=[], previous_child_id=None,
-                model_call_budget=2, governance_base_commit=commit, story_baseline_commit=commit)
+                authority=auth, child_batch_id=child_id, action_items=residual if parent else [],
+                previous_child_id=parent, model_call_budget=2, governance_base_commit=commit,
+                story_baseline_commit=commit)
 
         first = proposal("B013")
         auth.record_child_derived(first, story.verify_derivation(auth, first))
@@ -97,21 +100,22 @@ class OperationalLimitsTest(StoryCase):
         with self.assertRaises(story.HardStop) as active:
             story.verify_derivation(auth, proposal("B014"))
         self.assertEqual(active.exception.reason, "state_integrity")
+        self.assertIn("max_active_child_batches", active.exception.detail)
         self.assertEqual(story.MAX_ACTIVE_CHILD_BATCHES, 1)
 
         auth.record_child_closed(
             child_batch_id="B013", governance_base_commit=commit, checker_reviewed_commit=commit,
             checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,
-            checker_verdict="changes_requested", unresolved_action_items=[self.patch_item("R5")])
-        second = proposal("B014")
-        auth.record_child_derived(second, story.verify_derivation(auth, second))
+            checker_verdict="changes_requested", unresolved_action_items=residual)
+        second = proposal("B014", parent="B013")
+        auth.record_child_derived(second, story.verify_derivation(auth, second, action_items=residual))
         auth.record_child_closed(
             child_batch_id="B014", governance_base_commit=commit, checker_reviewed_commit=commit,
             checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,
-            checker_verdict="changes_requested", unresolved_action_items=[self.patch_item("R5")])
+            checker_verdict="changes_requested", unresolved_action_items=residual)
         # max_child_batches is 2: a third is refused whatever else is true.
         with self.assertRaises(story.HardStop) as exhausted:
-            story.verify_derivation(auth, proposal("B015"))
+            story.verify_derivation(auth, proposal("B015", parent="B014"), action_items=residual)
         self.assertEqual(exhausted.exception.reason, "max_child_batches_exhausted")
 
     def test_wall_clock_deadline_stops_derivation(self) -> None:

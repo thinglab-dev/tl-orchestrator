@@ -1037,16 +1037,23 @@ remove esse atrito artificial sem afrouxar nenhuma garantia.
   onde `authority_payload` contém exclusivamente os doze campos submetidos à decisão humana. O
   próprio digest, `authorized_at`, `authorized_literal` e qualquer metadado posterior ficam
   fora do cálculo. A autorização é a frase canônica exata
-  `AUTORIZO STORY <work_ref> sha256:<root_authority_digest>`; ao carregar, o digest é
+  `AUTORIZO STORY <work_ref> sha256:<root_authority_digest>`, julgada byte a byte sem qualquer
+  normalização (espaço, tab ou quebra de linha a mais é recusa); ao carregar, o digest é
   recalculado e qualquer divergência é `HARD STOP` por `state_integrity`.
 - **Derivação sem assinatura fabricada:** o runtime nunca inventa autorização para o filho. A
   autoridade derivada é provada pela cadeia `root_authority_digest` + `parent_authority_digest`
   + `parent_batch_digest` + `child_proposal_digest` + `derivation_proof_digest`, e só existe
-  porque o filho é subconjunto estrito e verificável do envelope original.
+  porque o filho é subconjunto estrito e verificável do envelope original. A proposta e a prova
+  são registradas inteiras no evento `child_derived`, e o runtime só executa um lote depois de
+  recuperar as registradas para exatamente `batch.id`, recalcular seus digests e re-provar
+  envelope, linhagem e cadeia (`bind_child_batch`). Só o primeiro filho pode não ter pai; todo
+  outro declara um pai derivado, fechado `changes_requested` e último revisado.
 - **Escopo monotônico:** é a **união** `child.required ∪ child.conditional` que precisa estar
   contida em `parent.authorized_write_scope`; um path condicional no pai pode virar obrigatório
   no filho após apontamento factual do Checker. `forbidden_paths` e `protected_paths` só podem
-  crescer, e os itens herdados de `protected_paths` preservam policy e parâmetros idênticos.
+  crescer, e os itens herdados de `protected_paths` preservam policy e parâmetros idênticos. Um
+  path proibido aninhado num escopo amplo continua proibido: ele entra como `do_not_touch` no
+  Context Pack do Maker e a contenção pós-Maker restaura a árvore se for tocado.
 - **Derivação estritamente patch-only:** todos os apontamentos residuais precisam ser
   `target_role = maker`, `category = patch`, `scope_status = inside_parent_envelope` e
   `spec_status = unchanged`, com os dois últimos recalculados mecanicamente contra o envelope.

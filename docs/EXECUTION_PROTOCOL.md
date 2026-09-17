@@ -90,8 +90,14 @@ proposta pontual. Três obrigações se somam ao protocolo acima:
    `assertion_id` do registro fechado em `scripts/validate_execution_plan.py`, com parâmetros
    tipados e `lifecycle_phase` declarado. Asserção desconhecida ou avaliada em fase incompatível
    ⟹ **FAIL CLOSED**. O validador ainda prova a satisfatibilidade aritmética do orçamento contra
-   os cenários obrigatórios `straight_line` e `retry`, e verifica os `protected_paths` nos modos
-   `read_only`, `exact_file_hash` e `exact_set_snapshot`.
+   os cenários obrigatórios `straight_line` (exatamente zero `rework_rounds`) e `retry` (ao
+   menos um), com nomes únicos e rodada de custo não nulo, e verifica os `protected_paths` nos
+   modos `read_only`, `exact_file_hash` e `exact_set_snapshot`.
+4. **Vínculo à derivação registrada.** Antes de qualquer worker o runtime recupera do journal da
+   autoridade a `child_proposal` e a `derivation_proof` registradas para exatamente `batch.id`,
+   recalcula os digests e re-prova envelope, linhagem e cadeia; lote não derivado, digest
+   adulterado, pai inexistente ou não fechado e lote que peça mais que o filho derivado são
+   recusados. `forbidden_paths` e `protected_paths` do filho tornam-se `do_not_touch` da unidade.
 
 Um lote filho derivado só existe se todos os apontamentos residuais do Checker forem
 estritamente patch-only; o commit que o Checker revisou é preservado sem merge e o filho seguinte

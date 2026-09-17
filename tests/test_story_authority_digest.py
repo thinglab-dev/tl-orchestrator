@@ -107,6 +107,50 @@ class RootAuthorityDigestTest(StoryCase):
             story.verify_authority_envelope(forged)
         self.assertEqual(raised.exception.reason, "authority_missing_or_ambiguous")
 
+    def test_authorization_literal_is_never_normalized_before_it_is_judged(self) -> None:
+        """R1. Whitespace around or inside the phrase is a different utterance, not a near miss."""
+        payload = make_payload()
+        digest = story.root_authority_digest(payload)
+        exact = story.authorization_literal("connector:2-10", digest)
+        self.assertEqual(story.parse_authorization_literal(exact), ("connector:2-10", digest))
+
+        padded = (
+            " " + exact, exact + " ", "\t" + exact, exact + "\t", "\n" + exact, exact + "\n",
+            exact + "\r\n", "\r\n" + exact, " " + exact, exact + " ", "﻿" + exact,
+            exact + "\n\n", f"  {exact}  ",
+            exact.replace("AUTORIZO STORY", "AUTORIZO\tSTORY"),
+            exact.replace("AUTORIZO STORY", "AUTORIZO  STORY"),
+            exact.replace(" sha256:", "\tsha256:"),
+            exact.replace(" sha256:", "\nsha256:"),
+            exact.replace(" sha256:", "  sha256:"),
+            exact.replace("sha256:", "sha256: "),
+            exact + "\nAUTORIZO STORY connector:2-11 sha256:" + digest,
+        )
+        for literal in padded:
+            with self.assertRaises(story.Refusal, msg=repr(literal)):
+                story.parse_authorization_literal(literal)
+            with self.assertRaises(story.Refusal, msg=repr(literal)):
+                story.freeze_authority(payload, authorized_literal=literal, authority_source="operator-terminal",
+                                       authorized_at="2026-09-17T09:00:00Z")
+        # Nothing but a string can be the phrase; coercing bytes or a list would invent one.
+        for not_text in (exact.encode("utf-8"), [exact], None, 0):
+            with self.assertRaises(story.Refusal, msg=repr(not_text)):
+                story.parse_authorization_literal(not_text)
+
+        # The envelope persists the literal exactly as issued, and a persisted envelope whose
+        # literal was padded afterwards no longer opens a ledger.
+        granted = story.freeze_authority(payload, authorized_literal=exact, authority_source="operator-terminal",
+                                         authorized_at="2026-09-17T09:00:00Z")
+        self.assertEqual(granted["operator_authorization"]["authorized_literal"], exact)
+        for literal in (exact + "\n", " " + exact, exact + " "):
+            forged = copy.deepcopy(granted)
+            forged["operator_authorization"]["authorized_literal"] = literal
+            with self.assertRaises(story.HardStop, msg=repr(literal)) as raised:
+                story.verify_authority_envelope(forged)
+            self.assertEqual(raised.exception.reason, "authority_missing_or_ambiguous")
+            with self.assertRaises(story.HardStop):
+                story.StoryAuthority(forged, self.root / "runtime" / "A001")
+
     def test_presentation_shows_the_operator_exactly_what_will_be_digested(self) -> None:
         """The read-only presentation step grants nothing and states the literal required."""
         payload = make_payload()

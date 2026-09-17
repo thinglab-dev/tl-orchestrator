@@ -139,6 +139,30 @@ def _equal(left: Any, right: Any) -> bool:
     return left == right
 
 
+def _end_anchored(pattern: str) -> str:
+    """JSON Schema patterns are ECMA-262, where `$` is the end of the input and nothing else.
+
+    Python's `$` also matches just before a trailing newline, so `^[0-9a-f]{64}$` would accept a
+    digest followed by "\\n". Every unescaped `$` outside a character class becomes `\\Z`.
+    """
+    out: list[str] = []
+    in_class = False
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\" and index + 1 < len(pattern):
+            out.append(pattern[index:index + 2])
+            index += 2
+            continue
+        if char == "[":
+            in_class = True
+        elif char == "]":
+            in_class = False
+        out.append(r"\Z" if char == "$" and not in_class else char)
+        index += 1
+    return "".join(out)
+
+
 def validate_json_schema(value: Any, schema: Any, root: dict | None = None, path: str = "$") -> list[str]:
     """Validate `value` against a Draft 2020-12 subset. Returns every error found."""
     root = root if root is not None else (schema if isinstance(schema, dict) else {})
@@ -162,7 +186,7 @@ def validate_json_schema(value: Any, schema: Any, root: dict | None = None, path
             errors.append(f"{path}: string shorter than minLength {node['minLength']}")
         if "maxLength" in node and len(value) > node["maxLength"]:
             errors.append(f"{path}: string longer than maxLength {node['maxLength']}")
-        if "pattern" in node and re.search(node["pattern"], value) is None:
+        if "pattern" in node and re.search(_end_anchored(node["pattern"]), value) is None:
             errors.append(f"{path}: {value!r} does not match pattern {node['pattern']!r}")
 
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -546,7 +570,10 @@ def gate_call_constraints_are_satisfiable_under_budget(plan: dict) -> list[dict]
 
     A plan that only adds up on the happy path is a plan that stops mid-review the first time
     the Maker needs a second round, so both the straight-line and the retry scenario must be
-    declared and both must be shown to fit.
+    declared and both must be shown to fit. The names carry meaning: `straight_line` is zero
+    rework rounds and `retry` is at least one. A `retry` declared with zero rounds would only
+    prove the happy path twice, and a name declared twice would let one entry satisfy the
+    requirement while the other hides behind it.
     """
     findings: list[dict] = []
     budget = plan.get("budget") or {}
@@ -556,13 +583,26 @@ def gate_call_constraints_are_satisfiable_under_budget(plan: dict) -> list[dict]
     round_cost = sum(int(value) for value in per_round.values())
     gate_cost = sum(int(gate.get("model_calls", 0)) for gate in plan.get("gates") or [])
     scenarios = plan.get("scenarios") or []
-    declared = {str(scenario.get("name")) for scenario in scenarios}
+    names = [str(scenario.get("name")) for scenario in scenarios]
     for name in REQUIRED_BUDGET_SCENARIOS:
-        if name not in declared:
+        if name not in names:
             findings.append({"violation": "missing_budget_scenario", "scenario": name,
                              "detail": "satisfiability must be proven for the straight-line and the retry scenario"})
+    for name in sorted({name for name in names if names.count(name) > 1}):
+        findings.append({"violation": "duplicate_budget_scenario", "scenario": name,
+                         "detail": f"scenario name declared {names.count(name)} times; each name is declared once"})
+    if round_cost < 1:
+        findings.append({"violation": "round_without_model_calls",
+                         "detail": "role_calls_per_round sums to zero, so a rework round would cost nothing and "
+                                   "the retry scenario would prove nothing"})
     for scenario in scenarios:
         rounds = int(scenario.get("rework_rounds", 0))
+        if scenario.get("name") == "straight_line" and rounds != 0:
+            findings.append({"violation": "straight_line_scenario_has_rework", "scenario": "straight_line",
+                             "rework_rounds": rounds, "detail": "straight_line is by definition zero rework rounds"})
+        if scenario.get("name") == "retry" and rounds < 1:
+            findings.append({"violation": "retry_scenario_without_rework", "scenario": "retry",
+                             "rework_rounds": rounds, "detail": "retry must budget at least one rework round"})
         required = bootstrap + (1 + rounds) * round_cost + gate_cost
         if required > ceiling:
             findings.append({"violation": "gate_call_constraints_unsatisfiable", "scenario": scenario.get("name"),

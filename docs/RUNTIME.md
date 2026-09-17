@@ -216,7 +216,7 @@ achados do Checker em rodadas consecutivas → `stagnation` (a regra da fila seq
 | Depois de cada chamada de modelo | `HEAD` e branch comparados antes/depois: worker que faz commit, checkout ou merge por conta própria é `unexpected_tree_state` e para o lote | a detecção é a posteriori; o harness sem allowlist ainda consegue executar `git` |
 | Antes de descartar árvore | toda restauração (escopo, artefato de portão, Checker que escreveu, unidade parada) grava antes o estado atual em `refs/tl/discarded/<lote>/<n>` e anota no journal; `clean -fd` roda antes do `read-tree`, com as regras de ignore em vigor, para que um arquivo ignorado só pelas regras descartadas fique no disco | nada é apagado sem cópia (arquivos ignorados não entram na cópia, mas também nunca são apagados); limpar as refs é tarefa do operador |
 | Antes de cada unidade | árvore suja antes do `prepare` para o lote (`unexpected_tree_state`), inclusive quando a branch da unidade já está em checkout: edição do operador nunca vira commit do runtime | sujeira produzida pelo próprio runtime (crash no meio do Maker) é reconhecida pelo journal e vira checkpoint |
-| Depois de cada Maker | `sensitive_paths` e varredura de padrões de segredo no diff **integral** e nos bytes de cada arquivo alterado (binário incluso; AWS, chaves privadas, GitHub, Anthropic/OpenAI, Slack, Google) têm precedência e param o lote; depois `dirty_paths ⊆ scope_paths` e `do_not_touch`, com os dois lados de um rename (`secrets/x -> pkg/x` é toque em `secrets/`); só o pack do Checker é limitado por `max_diff_bytes` | varredura por padrão, não prova de ausência de segredo |
+| Depois de cada Maker (sob `AUTO_STORY`, `do_not_touch` inclui os `forbidden_paths` e `protected_paths` do filho vinculado) | `sensitive_paths` e varredura de padrões de segredo no diff **integral** e nos bytes de cada arquivo alterado (binário incluso; AWS, chaves privadas, GitHub, Anthropic/OpenAI, Slack, Google) têm precedência e param o lote; depois `dirty_paths ⊆ scope_paths` e `do_not_touch`, com os dois lados de um rename (`secrets/x -> pkg/x` é toque em `secrets/`); só o pack do Checker é limitado por `max_diff_bytes` | varredura por padrão, não prova de ausência de segredo |
 | Em todo comando git do runtime | `core.hooksPath` aponta para um diretório vazio (git ≥ 2.31): hooks do repositório (`post-checkout`, `pre-push`, ...) não rodam dentro de checkout, commit, merge ou push do runtime; a verificação é dos portões | workers e portões não herdam essa variável e podem acionar hooks por conta própria |
 | Antes de cada pack | todo pack passa por redação dos mesmos padrões de segredo (`[REDACTED:...]`), inclusive saída de portão e fatia de CI; o manifesto registra `redactions` | redação por padrão, não prova |
 | Antes de cada commit | a árvore de trabalho tem de ser exatamente a árvore aprovada pelo Checker; edição feita durante uma parada vai para `refs/tl/...` e a unidade fica em `awaiting_operator` | — |
@@ -318,7 +318,12 @@ formato:
 AUTORIZO STORY <work_ref> sha256:<root_authority_digest>
 ```
 
-Qualquer coisa diferente — prefixo, caixa, digest truncado, outra Story — é recusada. Só
+Qualquer coisa diferente — prefixo, caixa, digest truncado, outra Story — é recusada. A frase
+é julgada **byte a byte, exatamente como foi capturada**: nada é aparado, dobrado ou coagido
+antes. Espaço, tab ou quebra de linha no início, no fim ou no lugar dos dois espaços internos,
+BOM, espaço não separável e qualquer valor que não seja string são outra elocução, não uma
+quase-autorização, e o envelope persiste o literal como foi emitido. A mesma comparação exata
+roda de novo ao carregar o envelope. Só
 depois disso o envelope é congelado e a derivação de lotes filhos é liberada. Ao carregar,
 o digest é recalculado e comparado byte a byte; divergência é `HARD STOP` por
 `state_integrity`. Conceitualmente isto é *digest-bound explicit operator authorization*, não
@@ -398,6 +403,58 @@ outras coisas:
   parâmetros de hash/snapshot).
 - Nenhum efeito além dos autorizados, spec congelada, orçamento dentro do saldo restante,
   `max_child_batches`, `max_consecutive_failed_batches` e `wall_clock_deadline`.
+- Linhagem decidida pela ordem do journal: só o **primeiro** filho de uma Story pode declarar
+  `parent_child_batch_id: null`; todo filho posterior declara um pai que foi derivado sob esta
+  autoridade, está **fechado** (`child_closed`), é o último filho que um Checker revisou e fechou
+  `changes_requested`. Pai inexistente, pai apenas `derived`/`open`/`failed`, pai `approved` e
+  "segundo filho que se apresenta como primeiro" são `HARD STOP`. Um filho com pai não é
+  verificável sem os apontamentos residuais de que deriva.
+- `unresolved_action_items_digest` cobre também o que o Checker declarou sobre derivabilidade
+  (`scope_status`, `spec_status`, `derivation_blockers`): um apontamento do qual se removeu um
+  bloqueio é outro apontamento, e a proposta do filho não tem campo para bloqueio — logo um
+  apontamento bloqueado nunca digere como um derivável.
+
+### Registro da derivação e vínculo do lote executável
+
+Os digests que um lote declara em `authorization` são **alegações**. A fonte de verdade é o
+evento `child_derived` do journal da autoridade, que carrega, num único append atômico, a
+`child_proposal` e a `derivation_proof` inteiras além dos seus digests.
+
+- `record_child_derived()` não journala nada por confiança: recalcula os digests dos dois
+  documentos, exige que a prova seja a desta proposta, desta autoridade e da cadeia que o journal
+  registra, re-prova o envelope e a linhagem, e recusa registrar de novo, de forma diferente, um
+  filho já registrado (registro idêntico é replay idempotente e não acrescenta evento). No replay
+  do journal a primeira derivação de um filho é a registrada; uma segunda, divergente, escrita
+  por fora desse portão impede o ledger de abrir (`state_integrity`).
+- Antes de **qualquer** worker, sob o lease da autoridade, o runtime chama
+  `bind_child_batch()`: recupera a proposta e a prova registradas para exatamente `batch.id`,
+  recalcula ambos os digests, exige igualdade com os do evento e com os declarados pelo lote,
+  re-prova envelope, linhagem, cadeia e — para filho com pai — a elegibilidade patch-only contra
+  o caminho real da spec da unidade, e então prova que o lote não pede nada além do filho:
+  `work_ref` dentro da Story, spec de cada unidade igual a `authorized_spec_sha256`,
+  `scope_paths ⊆ required ∪ conditional` e fora de `forbidden_paths`/`protected_paths`,
+  `permitted_effects` dentro de `allowed_effects` (`pull_request_merge` ↔ `merge`; efeito sem
+  correspondente no envelope, como `ci_rerun`, não foi autorizado) e
+  `budget.max_model_calls ≤ model_call_budget`. O `functional_parent_checkpoint` usado pelo
+  runtime é o da proposta verificada. Qualquer falha é `HARD STOP` journalado e recusa de
+  iniciar, sem batch journal aberto, sem reserva de chamada e com os dois leases liberados.
+- `verify_derivation`, `record_child_derived` e `bind_child_batch` executam os **mesmos**
+  geradores de prova (`envelope_checks`, `lineage_checks`, `derivation_chain`,
+  `patch_only_check`); não existe uma segunda implementação no runtime que possa divergir.
+  Ficam só em `verify_derivation` as checagens que dependem do instante (saldo restante, filho
+  ativo, deadline, sequência de falhas), que o ledger volta a impor a cada reserva.
+- **Forbidden aninhado em escopo amplo continua proibido.** Um alvo dentro de um path proibido
+  é recusado na derivação; o inverso — `forbidden_paths: [pkg/blocked.txt, pkg/vault/]` sob
+  `scope_paths: [pkg/]` — é legítimo e vira política executável: o vínculo entrega
+  `forbidden_paths` e os padrões de `protected_paths` do filho como `do_not_touch` de cada
+  unidade, de modo que aparecem no Context Pack **antes** do Maker e a contenção pós-Maker
+  recusa a rodada e restaura a árvore para qualquer dirty path coberto (criação, alteração,
+  deleção e os dois lados de um rename). A proibição da Story é julgada pelo **mesmo matcher
+  que provou a derivação** (`paths_denied`), não pelo `path_within` legado, de modo que um path
+  de topo iniciado por ponto (`.github/workflows`, `.env`) é contido mesmo sob
+  `scope_paths: [.]`. Nada proibido chega a commit, a checkpoint funcional ou a `main`; a árvore
+  descartada fica, como em toda violação de escopo, apenas no ref local `refs/tl/discarded/...`. Limite herdado da contenção: ela enxerga o que `git status` enxerga, portanto um
+  arquivo ignorado pelo `.gitignore` não é visto (e tampouco é commitado).
 
 ### Linhagem funcional entre lotes filhos
 
@@ -472,7 +529,15 @@ O plano referencia unicamente `assertion_id` e parâmetros tipados; `execution-p
 torna estruturalmente impossível uma string de asserção livre. Asserção desconhecida ⟹ **FAIL
 CLOSED**; asserção numa fase incompatível ⟹ **FAIL CLOSED**. O validador também prova
 `gate_call_constraints_are_satisfiable_under_budget` contra os cenários obrigatórios
-`straight_line` e `retry`.
+`straight_line` e `retry`. Os nomes têm significado: `straight_line` tem exatamente
+`rework_rounds = 0` e `retry` tem `rework_rounds >= 1` — um `retry` com zero rodadas só provaria
+o caminho feliz duas vezes (`retry_scenario_without_rework`,
+`straight_line_scenario_has_rework`). Cada nome de cenário é declarado uma única vez
+(`duplicate_budget_scenario`), uma rodada precisa custar ao menos uma chamada
+(`round_without_model_calls`) e todo cenário declarado tem de caber no teto
+(`gate_call_constraints_unsatisfiable`). O validador de schema aplica `pattern` com a semântica
+ECMA-262 do JSON Schema: `$` é fim da entrada, então um valor seguido de quebra de linha não casa
+`^...$`.
 
 Protected paths são de primeira classe, em três modos:
 
@@ -515,8 +580,12 @@ rerun de infraestrutura e reconciliação de merge.
 `test_auto_story_replay.py` (replay canônico B013→B014 do canário Lynvia, com repositório Git
 real e recibo T028 assinado), `test_auto_story_runtime_integration.py` (contraprova da barreira
 cognitiva dentro do runtime real, teto global vencendo o ledger do filho, checkpoint funcional
-materializado e retrocompatibilidade do lote legado), `test_story_authority_digest.py`,
-`test_story_child_derivation.py`, `test_story_functional_lineage.py`,
+materializado, vínculo do lote à derivação registrada — lote não derivado, digest adulterado,
+journal editado, lote maior que o filho e segundo filho forjado como primeiro recusados antes de
+qualquer worker —, forbidden aninhado em escopo amplo contido e restaurado, filho derivado
+executado ponta a ponta a partir do checkpoint e retrocompatibilidade do lote legado),
+`test_story_authority_digest.py`, `test_story_child_derivation.py`,
+`test_story_derivation_binding.py`, `test_story_functional_lineage.py`,
 `test_story_global_accounting.py`, `test_story_protected_paths.py`,
 `test_story_operational_limits.py`, `test_story_cognitive_barrier.py` e
 `test_execution_plan_validator.py`.

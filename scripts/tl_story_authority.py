@@ -142,7 +142,7 @@ DERIVATION_HARD_STOP_REASONS = (
     "new_boundary", "migration", "capability_expansion",
 )
 
-AUTHORIZATION_LITERAL_RE = re.compile(r"^AUTORIZO STORY (?P<work_ref>\S+) sha256:(?P<digest>[0-9a-f]{64})$")
+AUTHORIZATION_LITERAL_RE = re.compile(r"^AUTORIZO STORY (?P<work_ref>\S+) sha256:(?P<digest>[0-9a-f]{64})\Z")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _TIMESTAMP_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 
@@ -235,7 +235,11 @@ def authorization_literal(work_ref: str, digest: str) -> str:
 
 
 def parse_authorization_literal(literal: str) -> tuple[str, str]:
-    match = AUTHORIZATION_LITERAL_RE.match(str(literal).strip())
+    if not isinstance(literal, str):
+        raise Refusal(
+            "authority_missing_or_ambiguous: the operator authorization must be exactly "
+            "'AUTORIZO STORY <work_ref> sha256:<root_authority_digest>'", 2)
+    match = AUTHORIZATION_LITERAL_RE.match(literal)
     if not match:
         raise Refusal(
             "authority_missing_or_ambiguous: the operator authorization must be exactly "
@@ -802,11 +806,95 @@ class StoryAuthority:
 
     # ---- children ----------------------------------------------------------------------
 
+    def child_proposal_path(self, child_batch_id: str) -> Path:
+        return self.runtime_dir / "proposals" / f"{child_batch_id}.proposal.json"
+
+    def child_proof_path(self, child_batch_id: str) -> Path:
+        return self.runtime_dir / "proposals" / f"{child_batch_id}.proof.json"
+
+    def get_child_proposal(self, child_batch_id: str) -> dict | None:
+        path = self.child_proposal_path(child_batch_id)
+        if path.is_file():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+        return None
+
+    def get_child_proof(self, child_batch_id: str) -> dict | None:
+        path = self.child_proof_path(child_batch_id)
+        if path.is_file():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+        return None
+
+    @staticmethod
+    def _read_canonical(path: Path, what: str, child_batch_id: str) -> dict:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise HardStop("state_integrity",
+                           f"the {what} of child batch {child_batch_id} is unreadable at "
+                           f"{path.as_posix()}: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise HardStop("state_integrity", f"the {what} of child batch {child_batch_id} is not an object")
+        return payload
+
+    def load_child_derivation(self, child_batch_id: str) -> tuple[dict, dict]:
+        """Recover the canonical child proposal and its derivation proof, re-digesting both.
+
+        A digest a batch declares is worth nothing unless the object it digests can be produced
+        and hashed again, so this reads the persisted objects and recomputes. A missing
+        derivation event, an unreadable file, or a digest that does not reproduce is a hard stop;
+        nothing here falls back to "close enough".
+        """
+        self.refold()
+        derivation = (self.state.children.get(child_batch_id) or {}).get("derivation")
+        if not derivation:
+            raise HardStop(
+                "authority_missing_or_ambiguous",
+                f"story authority {self.authority_id} never derived child batch {child_batch_id}; "
+                "a batch cannot claim an authority that did not authorize it",
+                child_batch_id=child_batch_id, derived=sorted(self.state.children))
+        proposal = self._read_canonical(self.child_proposal_path(child_batch_id), "child proposal", child_batch_id)
+        proof = self._read_canonical(self.child_proof_path(child_batch_id), "derivation proof", child_batch_id)
+
+        proposal_digest = digest_of(proposal)
+        if proposal_digest != derivation.get("child_proposal_digest"):
+            raise HardStop("state_integrity",
+                           f"the persisted child proposal of {child_batch_id} digests to {proposal_digest} but the "
+                           f"journal recorded {derivation.get('child_proposal_digest')}",
+                           recomputed=proposal_digest, journaled=derivation.get("child_proposal_digest"))
+        # The proof digests itself by construction, so it is recomputed over the proof without
+        # the field that only exists because the digest was already taken.
+        recomputed = digest_of({k: v for k, v in proof.items() if k != "derivation_proof_digest"})
+        if recomputed != proof.get("derivation_proof_digest") or recomputed != derivation.get("derivation_proof_digest"):
+            raise HardStop("state_integrity",
+                           f"the derivation proof of {child_batch_id} digests to {recomputed} but the proof declares "
+                           f"{proof.get('derivation_proof_digest')} and the journal recorded "
+                           f"{derivation.get('derivation_proof_digest')}")
+        if proof.get("child_proposal_digest") != proposal_digest:
+            raise HardStop("state_integrity",
+                           f"the derivation proof of {child_batch_id} was taken over a different child proposal")
+        if proof.get("root_authority_digest") != self.root_digest:
+            raise HardStop("authority_missing_or_ambiguous",
+                           f"the derivation proof of {child_batch_id} is anchored in authority "
+                           f"{proof.get('root_authority_digest')}, not {self.root_digest}")
+        return proposal, proof
+
     def record_child_derived(self, proposal: dict, proof: dict) -> dict:
         self._require_lease()
         self._require_open()
+        child_id = proposal["child_batch_id"]
+        # The digests below are only verifiable if the objects survive: persist them in canonical
+        # form so a later run can re-read and re-hash them instead of trusting a hex string.
+        (self.runtime_dir / "proposals").mkdir(parents=True, exist_ok=True)
+        _write_json_atomic(self.child_proposal_path(child_id), proposal)
+        _write_json_atomic(self.child_proof_path(child_id), proof)
         event = self.journal.append(
-            "child_derived", authority_id=self.authority_id, child_batch_id=proposal["child_batch_id"],
+            "child_derived", authority_id=self.authority_id, child_batch_id=child_id,
             parent_child_batch_id=proposal.get("parent_child_batch_id"),
             root_authority_digest=proof["root_authority_digest"],
             parent_authority_digest=proof["parent_authority_digest"],
@@ -994,6 +1082,9 @@ def _within(path: str, scopes: Iterable[str]) -> bool:
         if candidate in {"", "."} or normalized == candidate or normalized.startswith(candidate + "/"):
             return True
     return False
+
+
+within_scope = _within
 
 
 def _item_locations(item: dict) -> list[str]:
@@ -1235,6 +1326,19 @@ def verify_derivation(
           f"{state.consecutive_failures} consecutive child batches without progress")
 
     previous_id = child_proposal.get("parent_child_batch_id")
+    if previous_id:
+        # A parent this authority never derived is not a parent. Treating an unknown id as
+        # "no predecessor" would let a child skip the functional checkpoint entirely by naming
+        # a batch that does not exist.
+        check("parent_child_batch_known", previous_id in state.children, "state_integrity",
+              f"parent_child_batch_id {previous_id!r} was never derived under this authority",
+              known=sorted(state.children))
+        check("parent_child_batch_closed", state.closure_of(previous_id) is not None, "state_integrity",
+              f"child batch {previous_id!r} has not closed; its reviewed commit does not exist yet")
+    else:
+        existing_children = [cid for cid in state.children if cid != child_proposal["child_batch_id"]]
+        check("first_child_has_no_predecessor", len(existing_children) == 0, "state_integrity",
+              f"story authority {authority.authority_id} already has children {existing_children}; subsequent child must declare parent_child_batch_id")
     previous_closure = state.closure_of(previous_id) if previous_id else None
     unresolved_digest = ""
     if action_items is not None:
@@ -1365,6 +1469,69 @@ def assert_batch_within_story(payload: dict, work_refs: Iterable[str]) -> None:
     """Every unit of a child batch must belong to the one authorized Story."""
     for work_ref in sorted(set(work_refs)):
         assert_story_boundary(payload, work_ref)
+
+
+# Batch `permitted_effects` key -> child proposal `allowed_effects` key. `ci_rerun` has no
+# counterpart: re-running a CI job mutates nothing in the repository, so the envelope does not
+# govern it. Everything else must map, and an unmapped key is refused rather than ignored.
+_EFFECT_MAP = {
+    "local_write": "local_write", "local_commit": "local_commit", "local_merge": "local_merge",
+    "pull_request": "pull_request", "push": "push", "tag": "tag", "release": "release",
+    "pull_request_merge": "merge",
+}
+_UNGOVERNED_EFFECTS = ("ci_rerun",)
+
+
+def assert_batch_matches_child_proposal(*, batch: dict, units: Iterable[Any], proposal: dict, payload: dict) -> None:
+    """Prove that the batch about to run is no wider than its derived child proposal."""
+    auth = batch.get("authorization") or {}
+    if auth.get("story_authority_id") != proposal["authority_id"]:
+        raise HardStop("authority_missing_or_ambiguous",
+                       f"batch names authority {auth.get('story_authority_id')!r} but the proposal is for "
+                       f"{proposal['authority_id']!r}")
+    if auth.get("child_proposal_digest") != digest_of(proposal):
+        raise HardStop("state_integrity", "batch child_proposal_digest does not reproduce the derived proposal")
+
+    story_ref = payload["work_ref"]
+    authorized_union = list(proposal["required_mutation_targets"]) + list(proposal["conditional_mutation_targets"])
+    forbidden = list(proposal["forbidden_paths"])
+    observed = list(units)
+    if len(observed) != 1:
+        raise HardStop("new_work_outside_frozen_batch",
+                       f"AUTO_STORY v1 derives one authorized Story per child batch, got {len(observed)} units")
+    unit = observed[0]
+    work_ref = str(getattr(unit, "id", ""))
+    if work_ref != story_ref:
+        raise HardStop("bad_spec", f"child batch unit {work_ref!r} is not the authorized Story {story_ref!r}")
+    if str(getattr(unit, "spec_digest", "")) != payload["authorized_spec_sha256"]:
+        raise HardStop("unexpected_revision_drift",
+                       f"unit {work_ref} specification differs from the hash frozen in Story Authority")
+
+    scope_paths = list(getattr(unit, "scope_paths", []) or [])
+    outside = sorted({path for path in scope_paths if not _within(path, authorized_union)})
+    if outside:
+        raise HardStop("scope_expansion",
+                       f"unit {work_ref} may write {outside}, outside the derived proposal", outside=outside)
+    collides = sorted({path for path in scope_paths if _within(path, forbidden)})
+    if collides:
+        raise HardStop("scope_expansion",
+                       f"unit {work_ref} may write {collides}, which the proposal forbids", collides=collides)
+
+    effects = auth.get("permitted_effects") or {}
+    unmapped = sorted(set(effects) - set(_EFFECT_MAP) - set(_UNGOVERNED_EFFECTS))
+    if unmapped:
+        raise HardStop("effect_expansion", f"batch declares ungoverned effect(s): {unmapped}")
+    expanded = sorted(key for key, mapped in _EFFECT_MAP.items()
+                      if effects.get(key) and not proposal["allowed_effects"].get(mapped))
+    if expanded:
+        raise HardStop("effect_expansion",
+                       f"batch enables effect(s) the derived proposal denies: {expanded}", effects=expanded)
+
+    granted = int(proposal["model_call_budget"])
+    declared = int((batch.get("budget") or {}).get("max_model_calls", 0))
+    if declared > granted:
+        raise HardStop("model_call_budget_exhausted",
+                       f"batch declares {declared} model calls but the child proposal grants {granted}")
 
 
 def assert_merge_authority(payload: dict, receipt: Any, *, trust_root: Any = None, expected_repo: str | None = None) -> Any:

@@ -196,6 +196,46 @@ class AutoStoryRuntimeTest(unittest.TestCase):
             fx.runtime()
         self.assertIn("authority_missing_or_ambiguous", str(raised.exception))
 
+    def test_auto_story_refuses_tampered_child_and_proof_digests(self) -> None:
+        fx = self.auto_story_fixture()
+        original = json.loads(fx.batch_path.read_text(encoding="utf-8"))
+        for field in ("child_proposal_digest", "derivation_proof_digest"):
+            with self.subTest(field=field):
+                batch = json.loads(json.dumps(original))
+                batch["authorization"][field] = "f" * 64
+                fx.batch_path.write_text(json.dumps(batch), encoding="utf-8")
+                with self.assertRaises(tl_runtime.Refusal) as raised:
+                    fx.runtime().acquire()
+                self.assertIn("authority_missing_or_ambiguous", str(raised.exception))
+        fx.batch_path.write_text(json.dumps(original), encoding="utf-8")
+
+    def test_auto_story_refuses_unregistered_child_batch(self) -> None:
+        fx = self.auto_story_fixture()
+        batch = json.loads(fx.batch_path.read_text(encoding="utf-8"))
+        batch["id"] = "B999"
+        fx.batch_path.write_text(json.dumps(batch), encoding="utf-8")
+        with self.assertRaises(tl_runtime.Refusal) as raised:
+            fx.runtime().acquire()
+        self.assertIn("never derived child batch B999", str(raised.exception))
+
+    def test_auto_story_refuses_effect_expansion_against_child_proposal(self) -> None:
+        fx = self.auto_story_fixture()
+        batch = json.loads(fx.batch_path.read_text(encoding="utf-8"))
+        batch["authorization"]["permitted_effects"]["push"] = True
+        fx.batch_path.write_text(json.dumps(batch), encoding="utf-8")
+        with self.assertRaises(tl_runtime.Refusal) as raised:
+            fx.runtime().acquire()
+        self.assertIn("effect_expansion", str(raised.exception))
+
+    def test_auto_story_refuses_batch_budget_above_child_allocation(self) -> None:
+        fx = self.auto_story_fixture(budget=4, max_calls=4)
+        batch = json.loads(fx.batch_path.read_text(encoding="utf-8"))
+        batch["budget"]["max_model_calls"] = 5
+        fx.batch_path.write_text(json.dumps(batch), encoding="utf-8")
+        with self.assertRaises(tl_runtime.Refusal) as raised:
+            fx.runtime().acquire()
+        self.assertIn("model_call_budget_exhausted", str(raised.exception))
+
     # ---- §2.11 functional lineage from a real rework-exhausted child ----------------------
 
     def test_rework_limit_exhausted_preserves_the_reviewed_commit_unmerged(self) -> None:

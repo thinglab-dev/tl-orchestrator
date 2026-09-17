@@ -104,6 +104,24 @@ class ChildDerivationTest(StoryCase):
         # "Not approved" alone never derives a child: an empty residual set is refused too.
         self.assertEqual(story.derivation_eligibility([], auth.payload, SPEC_PATHS)[0], False)
 
+    def test_child_cannot_name_an_unknown_parent_to_skip_lineage(self) -> None:
+        auth = self.authority()
+        first = self.base_child(auth)
+        proof = story.verify_derivation(auth, first)
+        auth.record_child_derived(first, proof)
+        auth.record_child_closed(
+            child_batch_id="B013", governance_base_commit=self.governance_base,
+            checker_reviewed_commit=self.governance_base, checker_reviewed_tree=self.git.tree(),
+            functional_checkpoint_commit=self.governance_base, functional_checkpoint_tree=self.git.tree(),
+            checker_verdict="changes_requested", unresolved_action_items=[self.patch_item("R5")])
+        child = story.derive_child_proposal(
+            authority=auth, child_batch_id="B014", action_items=[], previous_child_id="B999",
+            model_call_budget=2, governance_base_commit=self.governance_base,
+            story_baseline_commit=self.governance_base)
+        stop = self.assert_hard_stop(auth, child, "state_integrity")
+        self.assertIn("B999", stop.detail)
+        self.assertIn("never derived", stop.detail)
+
     def test_parent_conditional_path_can_become_child_required(self) -> None:
         """9. §2.4: the union is what must be contained, so a conditional path may become required."""
         auth = self.authority()

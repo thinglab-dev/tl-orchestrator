@@ -557,12 +557,22 @@ def gate_call_constraints_are_satisfiable_under_budget(plan: dict) -> list[dict]
     gate_cost = sum(int(gate.get("model_calls", 0)) for gate in plan.get("gates") or [])
     scenarios = plan.get("scenarios") or []
     declared = {str(scenario.get("name")) for scenario in scenarios}
+    if len(declared) != len(scenarios):
+        findings.append({"violation": "duplicate_budget_scenario",
+                         "detail": "scenario names within scenarios array must be unique"})
     for name in REQUIRED_BUDGET_SCENARIOS:
         if name not in declared:
             findings.append({"violation": "missing_budget_scenario", "scenario": name,
                              "detail": "satisfiability must be proven for the straight-line and the retry scenario"})
     for scenario in scenarios:
+        name = str(scenario.get("name"))
         rounds = int(scenario.get("rework_rounds", 0))
+        if name == "straight_line" and rounds != 0:
+            findings.append({"violation": "invalid_budget_scenario_rounds", "scenario": "straight_line",
+                             "rework_rounds": rounds, "detail": "straight_line scenario must specify rework_rounds == 0"})
+        elif name == "retry" and rounds < 1:
+            findings.append({"violation": "invalid_budget_scenario_rounds", "scenario": "retry",
+                             "rework_rounds": rounds, "detail": "retry scenario must specify at least 1 rework round (rework_rounds >= 1)"})
         required = bootstrap + (1 + rounds) * round_cost + gate_cost
         if required > ceiling:
             findings.append({"violation": "gate_call_constraints_unsatisfiable", "scenario": scenario.get("name"),

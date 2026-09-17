@@ -461,6 +461,9 @@ class Git:
     def current_branch(self) -> str:
         return self.run("rev-parse", "--abbrev-ref", "HEAD")
 
+    def tree(self, ref: str = "HEAD") -> str:
+        return self.run("rev-parse", f"{ref}^{{tree}}")
+
     def rev(self, ref: str) -> str | None:
         record = run_argv([self.exe, "rev-parse", "--verify", "--quiet", ref + "^{commit}"], self.repo, 60)
         return record["stdout"].strip() or None
@@ -1312,6 +1315,32 @@ class Runtime:
 
     # ---- lease and journal --------------------------------------------------------------
 
+    def _bind_and_verify_auto_story_child(self) -> None:
+        """Bind the executable batch to one persisted, verified child derivation (T032)."""
+        # The authority journal is the source of truth. A batch-supplied digest or an arbitrary
+        # proposal file beside the batch is not authority. Recover the objects that were actually
+        # derived, re-hash them, and then bind the executable batch to that exact proposal.
+        proposal, proof = self.authority.load_child_derivation(self.batch_id)
+        auth = self.batch["authorization"]
+
+        if auth["child_proposal_digest"] != story_authority.digest_of(proposal):
+            raise Refusal("authority_missing_or_ambiguous: child proposal digest does not match the authority journal", 2)
+        if auth["derivation_proof_digest"] != proof["derivation_proof_digest"]:
+            raise Refusal("authority_missing_or_ambiguous: derivation proof digest does not match the authority journal", 2)
+
+        story_authority.assert_batch_matches_child_proposal(
+            batch=self.batch, units=self.units.values(), proposal=proposal, payload=self.authority.payload)
+
+        checkpoint = proposal.get("functional_parent_checkpoint")
+        if checkpoint:
+            story_authority.verify_functional_checkpoint(self.repo, checkpoint)
+
+        child_state = (self.authority.state.children.get(self.batch_id) or {}).get("state")
+        if child_state not in {"open", "closed", "failed"}:
+            branch = self.git.current_branch() or self.config.get("base_branch", "")
+            self.authority.record_child_open(
+                self.batch_id, branch=branch, head_commit=self.git.head(), tree=self.git.tree())
+
     def acquire(self) -> None:
         if self._lease is not None:
             return
@@ -1328,10 +1357,12 @@ class Runtime:
             # One holder of the authority lease at a time: the global budget has a single writer.
             try:
                 self.authority.acquire()
-                story_authority.assert_batch_within_story(self.authority.payload, self.units)
-            except story_authority.HardStop as stop:
+                self._bind_and_verify_auto_story_child()
+            except (story_authority.HardStop, Refusal) as err:
                 self.release()
-                raise Refusal(f"{stop.reason}: {stop.detail}", 2) from stop
+                if isinstance(err, Refusal):
+                    raise
+                raise Refusal(f"{err.reason}: {err.detail}", 2) from err
         self.fold = self.journal.fold()
         if self.fold.invalid_lines:
             raise Refusal(f"unrecoverable_harness_failure_or_ambiguous_dispatch: journal has {self.fold.invalid_lines} invalid line(s); inspect journal.jsonl", 2)

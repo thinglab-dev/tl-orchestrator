@@ -89,6 +89,12 @@ class RootAuthorityDigestTest(StoryCase):
             f"AUTORIZO STORY connector:2-11 sha256:{digest}",
             f"AUTORIZO STORY connector:2-10 sha256:{other_digest}",
             f"AUTORIZO STORY connector:2-10 sha256:{digest} --force",
+            f" AUTORIZO STORY connector:2-10 sha256:{digest}",
+            f"AUTORIZO STORY connector:2-10 sha256:{digest} ",
+            f"\nAUTORIZO STORY connector:2-10 sha256:{digest}",
+            f"AUTORIZO STORY connector:2-10 sha256:{digest}\n",
+            f"\tAUTORIZO STORY connector:2-10 sha256:{digest}",
+            f"AUTORIZO STORY connector:2-10 sha256:{digest}\t",
         ):
             with self.assertRaises(story.Refusal, msg=literal):
                 story.freeze_authority(payload, authorized_literal=literal, authority_source="operator-terminal",

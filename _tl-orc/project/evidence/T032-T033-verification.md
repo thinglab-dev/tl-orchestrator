@@ -6,8 +6,36 @@ Ele não substitui a revisão de Checker independente exigida pelo contrato: T03
 
 Branch: `feat/t032-t033-auto-story-and-plan-validator`, criada a partir de `origin/main` em
 `69d8351`. A branch local preexistente `feat/t032-short-resume-protocol` (Short Resume Protocol,
-7 commits, tip `0ad7014`) **não** foi tocada; ela não reserva o ID T032, que foi alocado a partir
-do `next_task_id: 32` de `origin/main`.
+tip `0ad7014`) **não** foi tocada por esta entrega. A inspeção de 2026-09-17 confirmou, porém,
+que ela também criou `_tl-orc/project/tasks/T032-protocolo-de-retomada-curta-e-transicao-entre-ciclos.md`
+a partir de uma linha de governança em que `next_task_id` ainda era 32. Portanto existe uma
+**colisão real de identidade T032 entre branches**, a ser reconciliada antes da release estável;
+ela não altera os bytes funcionais de Story Authority, mas impede tratar o backlog como consistente.
+
+## Checker independente r01 e correções
+
+O Checker r01 foi OpenAI Codex `gpt-5.6-terra`/high, em modo read-only, contra o head `d4ea387`.
+Veredito: `changes_requested`, com quatro itens: R1 (literal canônico aceitava whitespace),
+R2 (crítico: o runtime não vinculava o batch executável à proposta/prova filha registrada),
+R3 (cenário `retry` podia declarar zero reworks) e R4 (full gate não estava recuperavelmente
+vinculado ao SHA revisado). O JSON integral está em `evidence/T032-T033-r01/review-result.json`.
+
+O rework recuperado da sessão anterior foi concluído e endurecido nesta sessão: o runtime agora
+recupera proposta + prova exclusivamente do journal/storage da Story Authority, re-hash os objetos,
+vincula spec, scope, efeitos e orçamento do batch à proposta derivada e rejeita child não registrado.
+Também foram adicionadas contraprovas de digest adulterado, child inexistente, expansão de efeito,
+orçamento acima da subalocação e `parent_child_batch_id` inexistente. R1 e R3 receberam as
+contraprovas solicitadas.
+
+Verificação focal após o rework, ainda antes do commit candidato:
+
+- `test_story_*.py`: 52 testes, exit 0;
+- replay + integração AUTO_STORY + execution-plan validator: 33 testes, exit 0;
+- `scripts/validate_repository.py`: OK, 54 arquivos;
+- `scripts/audit_lineage.py`: exit 0 (warnings históricos apenas);
+- `git diff --check`: limpo.
+
+O full gate final e uma nova revisão independente serão vinculados ao SHA candidato após o commit.
 
 ## Portões executados
 

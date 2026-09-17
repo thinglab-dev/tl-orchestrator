@@ -137,6 +137,16 @@ class ExecutionPlanValidatorTest(unittest.TestCase):
         self.assertIn("missing_budget_scenario", violations(result))
         self.assertIn("retry", {e.get("scenario") for e in result["errors"]})
 
+    def test_retry_scenario_with_zero_rework_rounds_is_refused(self) -> None:
+        plan = self.plan()
+        plan["scenarios"] = [
+            {"name": "straight_line", "rework_rounds": 0},
+            {"name": "retry", "rework_rounds": 0},
+        ]
+        result = validate(plan)
+        self.assertIn("invalid_budget_scenario_rounds", violations(result))
+        self.assertFalse(result["approved"])
+
     def test_protected_paths_are_verified_against_a_real_tree(self) -> None:
         with tempfile.TemporaryDirectory(prefix="tl-plan-paths-") as tmp:
             root = Path(tmp)

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "verdict": "changes_requested",
+  "action_items": [
+    {
+      "id": "R1",
+      "severity": "high",
+      "category": "patch",
+      "target_role": "maker",
+      "location": "scripts/tl_story_authority.py:237",
+      "problem": "A autorização humana aceita texto não canônico: `parse_authorization_literal()` aplica `strip()` antes da regex. Portanto, espaços ou quebras de linha antes/depois da frase ainda congelam uma autoridade, contrariando o requisito de literal canônico exato.",
+      "evidence": "`parse_authorization_literal` usa `str(literal).strip()` (linha 238); o teste de contraprova em tests/test_story_authority_digest.py:81-95 não cobre whitespace periférico.",
+      "required_action": "Validar o literal sem normalização e com correspondência integral; adicionar contraprovas para espaço, tab e newline antes/depois do literal, todas recusadas.",
+      "scope_status": "inside_parent_envelope",
+      "spec_status": "unchanged",
+      "derivation_blockers": [
+        "security"
+      ]
+    },
+    {
+      "id": "R2",
+      "severity": "critical",
+      "category": "patch",
+      "target_role": "maker",
+      "location": "scripts/tl_runtime.py:673; scripts/tl_runtime.py:1283; scripts/tl_runtime.py:1327; scripts/tl_story_authority.py:1237",
+      "problem": "Um batch AUTO_STORY não é vinculado à proposta filha nem à prova de derivação. O runtime exige apenas que quatro campos existam, compara somente o root digest e checa os work_refs; nunca localiza/recalcula `child_proposal_digest` ou `derivation_proof_digest`, nunca chama `verify_derivation()` e não registra a abertura do filho. Além disso, `verify_derivation()` trata um `parent_child_batch_id` inexistente como se fosse primeiro filho. Assim, um batch com digests hexadecimais arbitrários pode executar com escopo e efeitos do próprio batch, sem provar subconjunto, protected paths, saldo alocado, findings patch-only ou checkpoint funcional.",
+      "evidence": "load_batch só verifica presença dos campos em scripts/tl_runtime.py:673-678; a inicialização só compara root digest em 1283-1297; acquire só chama `assert_batch_within_story` em 1327-1334. O verificador cai em `first_child_has_no_checkpoint` quando não encontra closure, inclusive para parent id inexistente (scripts/tl_story_authority.py:1237-1267). A fixture de integração pré-registra derivação manualmente (tests/test_auto_story_runtime_integration.py:73-80), mascarando a ausência dessa vinculação no runtime.",
+      "required_action": "Sob o lease da autoridade, tornar o runtime derivar/registrar ou recuperar uma proposta filha canônica e sua prova, recomputar ambos os digests e exigir correspondência com batch, ledger, escopo, efeitos, orçamento e checkpoint antes de qualquer worker. Rejeitar parent inexistente e toda segunda derivação sem a closure do predecessor. Adicionar contraprovas que adulterem cada digest, usem proposal não registrada, parent inexistente e scope/efeitos fora do envelope.",
+      "scope_status": "inside_parent_envelope",
+      "spec_status": "unchanged",
+      "derivation_blockers": [
+        "security"
+      ]
+    },
+    {
+      "id": "R3",
+      "severity": "medium",
+      "category": "patch",
+      "target_role": "maker",
+      "location": "scripts/validate_execution_plan.py:544; schemas/execution-plan.schema.json:69",
+      "problem": "A prova de orçamento aceita um cenário chamado `retry` com `rework_rounds: 0`, idêntico ao happy path. Isso permite declarar ambos os nomes exigidos e aprovar um teto que não cobre nenhuma tentativa de retry.",
+      "evidence": "O schema admite `rework_rounds` mínimo 0 (schemas/execution-plan.schema.json:84-87). O validador só verifica presença nominal dos cenários e calcula cada valor declarado (scripts/validate_execution_plan.py:559-570), sem exigir que `retry` tenha ao menos uma rodada adicional. Os testes cobrem cenário retry ausente e retry caro, mas não retry com zero rodadas (tests/test_execution_plan_validator.py:110-138).",
+      "required_action": "Exigir cenários únicos `straight_line` e `retry`, com `straight_line` em zero e `retry` em pelo menos uma rodada de rework, e adicionar a contraprova de retry com zero rodadas sob orçamento apenas de happy path.",
+      "scope_status": "inside_parent_envelope",
+      "spec_status": "unchanged"
+    },
+    {
+      "id": "R4",
+      "severity": "medium",
+      "category": "intent_gap",
+      "target_role": "human",
+      "location": "_tl-orc/project/evidence/T032-T033-verification.md:14; _tl-orc/project/evidence/T032-T033-verification.md:34",
+      "problem": "verificacao_pendente: a evidência versionada mede a árvore 17d08a9 e declara CI verde apenas para 17d08a9 e 29fc59d, não para o commit-alvo d4ea38742eeca75b3f67e98c0f491f32b32ae5a3. Como o escopo é integration_boundary, o full gate precisa estar recuperavelmente vinculado ao SHA revisado.",
+      "evidence": "O registro diz “Medidos sobre a árvore do commit `17d08a9`” e sua tabela de Actions lista somente `17d08a9` e `29fc59d`; d4ea387 adiciona justamente essa alegação de CI. A consulta pública ao Run ID informado não foi recuperável neste ambiente.",
+      "required_action": "Fornecer artefato recuperável do workflow canônico executado no SHA d4ea38742eeca75b3f67e98c0f491f32b32ae5a3, ou reexecutar os quatro portões no SHA e registrar run, commit e resultado.",
+      "scope_status": "unprovable",
+      "spec_status": "unchanged",
+      "derivation_blockers": [
+        "human"
+      ]
+    }
+  ],
+  "deferred": [],
+  "rejected": []
+}

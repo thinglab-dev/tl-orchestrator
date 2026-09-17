@@ -11,9 +11,13 @@ do `next_task_id: 32` de `origin/main`.
 
 ## Portões executados
 
+Medidos sobre a árvore do commit `17d08a9`.
+
 | Comando | Resultado |
 | :--- | :--- |
-| `python3 -m unittest discover -s tests` (só as suítes novas) | 79 testes, exit 0 |
+| `python3 -m unittest discover -s tests` (só as suítes novas de T032/T033) | 79 testes, exit 0 |
+| `python3 -m unittest discover -s tests` (completo) | `Ran 312 tests` — `FAILED (failures=38, skipped=4)`; **as 38 são todas de `test_tl_job`**, ver §1 abaixo |
+| `python3 -m unittest discover -s scripts/tests` | `Ran 614 tests` — `FAILED (failures=1, errors=5, skipped=6)`; **as 6 são todas de `test_tl_graft`**, ver §2 abaixo |
 | `python3 -m unittest scripts.tests.test_tl_runtime scripts.tests.test_automatic_mode scripts.tests.test_release_guardrails scripts.tests.test_tl_merge_guard` | 198 testes, exit 0 |
 | `python3 scripts/validate_repository.py` | OK, 54 arquivos de pacote, v0.19.0 |
 | `python3 scripts/audit_lineage.py` | exit 0, 0 blockers (apenas warnings L12 preexistentes) |

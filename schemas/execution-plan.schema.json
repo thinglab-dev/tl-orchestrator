@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tl-orchestrator Execution Plan",
+  "description": "T033: the machine-checkable part of a proposal. Gates carry a lifecycle_phase and reference assertions exclusively by assertion_id from the closed registry in scripts/validate_execution_plan.py, with typed parameters. Free-form assertion strings are structurally impossible.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_id",
+    "work_ref",
+    "budget",
+    "scenarios",
+    "gates"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "work_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authority_id": {
+      "type": "string",
+      "pattern": "^A[0-9]{3,}$",
+      "description": "Story Authority this plan executes under; absent for a legacy single-batch plan."
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_model_calls",
+        "role_calls_per_round"
+      ],
+      "properties": {
+        "max_model_calls": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bootstrap_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cognitive calls consumed before the first Maker round (classification, planning)."
+        },
+        "role_calls_per_round": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "enum": [
+              "classifier",
+              "planner",
+              "maker",
+              "checker",
+              "advisor",
+              "searcher"
+            ]
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "rework_rounds"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rework_rounds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "gate_id",
+          "lifecycle_phase",
+          "assertions"
+        ],
+        "properties": {
+          "gate_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "lifecycle_phase": {
+            "type": "string",
+            "enum": [
+              "pre_execution",
+              "post_maker_pre_review",
+              "post_checker_pre_merge",
+              "post_merge_pre_close",
+              "post_terminal"
+            ]
+          },
+          "model_calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "assertions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "assertion_id"
+              ],
+              "properties": {
+                "assertion_id": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$"
+                },
+                "parameters": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "protected_paths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/protected_path"
+      }
+    }
+  },
+  "$defs": {
+    "protected_path": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pattern",
+        "policy"
+      ],
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policy": {
+          "type": "string",
+          "enum": [
+            "read_only",
+            "exact_file_hash",
+            "exact_set_snapshot"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "snapshot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entries",
+            "digest"
+          ],
+          "properties": {
+            "pattern": {
+              "type": "string"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "type",
+                  "size",
+                  "sha256"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "file",
+                      "symlink"
+                    ]
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "policy"
+            ],
+            "properties": {
+              "policy": {
+                "const": "exact_file_hash"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "sha256"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "policy"
+            ],
+            "properties": {
+              "policy": {
+                "const": "exact_set_snapshot"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "snapshot"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

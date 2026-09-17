@@ -112,8 +112,58 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
           "description": "T028: Canonical target repository (owner/repo) explicitly authorized for pull request and merge operations."
+        },
+        "story_authority_mode": {
+          "type": "string",
+          "enum": [
+            "direct_proposal",
+            "AUTO_STORY"
+          ],
+          "description": "T032: optional and strictly opt-in. Absent means direct_proposal, which is the legacy single-batch semantics: one human authorization per proposal digest."
+        },
+        "story_authority_id": {
+          "type": "string",
+          "pattern": "^A[0-9]{3,}$",
+          "description": "T032: the Story Authority this batch runs under. Required when story_authority_mode is AUTO_STORY."
+        },
+        "child_proposal_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "T032: SHA256(canonical_json(child_proposal)) of the derived child batch proposal."
+        },
+        "derivation_proof_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "T032: SHA256(canonical_json(derivation_proof)). The derived authority is proven by this chain, never by a synthesized signature."
+        },
+        "root_authority_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "T032: SHA256(canonical_json(authority_payload)) of the one envelope the operator authorized."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "story_authority_mode"
+            ],
+            "properties": {
+              "story_authority_mode": {
+                "const": "AUTO_STORY"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "story_authority_id",
+              "root_authority_digest",
+              "child_proposal_digest",
+              "derivation_proof_digest"
+            ]
+          }
+        }
+      ]
     },
     "frozen_scope": {
       "type": "object",
@@ -407,6 +457,11 @@
             },
             "dispatched_at": {
               "type": "string"
+            },
+            "global_attempt_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "T032: the physical provider attempt this pending call holds a slot for. The same id is the one recorded in the Story Authority journal, so the two ledgers cannot charge the call twice."
             }
           }
         }

@@ -21,6 +21,7 @@ onde o perfil é declarado.
 | `Task` | Unidade executável com resultado verificável. | `id`, `type`, `deliverable` ou `standalone: true`, `method`, `status`, `state_revision`, `depends_on`, `blocked_by`, `origin`, `decisions`, `spec_author`, `spec_revision`, `rework_round`, `affects_context`, `content_id`, `content_paths` |
 | `Standalone Task` | Task sem Deliverable. Não implica tier `simple`. | os mesmos de Task |
 | `Batch` | Lote finito de unidades com escopo e orçamento congelados para execução autônoma autorizada. | `id`, `status`, `batch_revision`, `authorization`, `frozen_scope`, `budget`, `execution` |
+| `Story Authority` | Envelope imutável de autoridade humana que cobre uma Story inteira sob `AUTO_STORY`, com teto global de chamadas e escopo monotônico decrescente. Nunca reescrito para registrar saldo. | `authority_payload` (`authority_id`, `work_ref`, `authorized_spec_revision`, `authorized_spec_sha256`, `authorized_write_scope`, `allowed_effects`, `protected_paths`, `global_model_call_budget`, `max_child_batches`, `max_consecutive_failed_batches`, `wall_clock_deadline`, `hard_stops`), `root_authority_digest`, `operator_authorization` |
 | `Decision` | Decisão consolidada com justificativa. | `id`, `kind`, `status`, `context`, `options`, `choice`, `rationale`, `origin` |
 | `Discussion` | Síntese de um debate, com estado. | `id`, `status`, `question`, `context_refs`, `options`, `confirmed_decisions`, `hypotheses`, `open_questions`, `resulting_work` |
 
@@ -48,6 +49,7 @@ _tl-orc/
     ├── STATUS.md                   # coordenação, projeção de lote e tabela derivada
     ├── CONTEXT.md                  # contexto global curto
     ├── batches/Bnnn.md             # batches autorizados do Modo Automático
+    ├── story-authorities/Annn.json # envelopes imutáveis de autoridade de Story (AUTO_STORY)
     ├── tasks/Tnnn-slug.md
     ├── deliverables/Dnnn-slug.md
     ├── decisions/DECnnn-slug.md    # um arquivo por decisão
@@ -975,8 +977,8 @@ O lote transita para `CLOSE` quando:
 4. `active_batch` em `STATUS.md` é atualizado para `none` e `batch_status: none`;
 5. É gerado o relatório terminal ao usuário contendo sumário de unidades, chamadas consumidas e evidências;
 6. O sistema retorna ao estado `IDLE`.
-- **Invariante terminal:** O fechamento de um lote **nunca** cria ou dispara outro lote automaticamente.
-- **Runtime durável (opcional, v0.17.0):** os estados `EXECUTE` → `CLOSE` de um lote já congelado podem ser conduzidos por [`scripts/tl_runtime.py`](RUNTIME.md) sem sessão de Orquestrador aberta. Ele preserva estes invariantes (lote finito, efeitos permitidos, reserva de verificação, condições de parada, fechamento sem novo lote) e acrescenta journal de steps com retomada após crash. `DISCOVER`, `PROPOSE` e `AUTHORIZE` continuam humanos/Orquestrador.
+- **Invariante terminal:** O fechamento de um lote **nunca** cria ou dispara outro lote automaticamente, exceto sob `AUTO_STORY` (seção 10), em que a autorização humana já cobre explicitamente a Story inteira e o lote filho é derivado — não autorizado de novo.
+- **Runtime durável (opcional, v0.19.0):** os estados `EXECUTE` → `CLOSE` de um lote já congelado podem ser conduzidos por [`scripts/tl_runtime.py`](RUNTIME.md) sem sessão de Orquestrador aberta. Ele preserva estes invariantes (lote finito, efeitos permitidos, reserva de verificação, condições de parada, fechamento sem novo lote) e acrescenta journal de steps com retomada após crash. `DISCOVER`, `PROPOSE` e `AUTHORIZE` continuam humanos/Orquestrador.
 
 ### 9. Autoridade de Merge Out-of-Band, Vinculação de Commits e Modos Operacionais (T028)
 
@@ -1011,6 +1013,65 @@ A fronteira entre preparação técnica e autorização executiva de merge obede
   * O envelope de autorização trafega fora da árvore da branch candidata (via PR Comment metadata formatado estritamente como bloco markdown de código `json:tl-merge-authorization`).
   * O parser do transporte é determinístico e estrito: 0 envelopes → ausência de autorização; 1 envelope válido → verificação prossegue; >1 envelopes válidos distintos → parada imediata por ambiguidade (`FAIL_CLOSED: ambiguous_merge_authorization`).
   * **Invalidação imediata por drift:** Qualquer avanço na ponta da base (`base drift`) ou novo commit na branch do PR (`head drift`) invalida instantaneamente a autorização.
+
+### 10. Story Authority Envelope e lotes filhos autônomos (`AUTO_STORY`, T032)
+
+Motivação empírica: no ciclo real B013→B014 da Story 2.10 do projeto Lynvia, o lote B013
+executou Classifier, Maker, Checker R01, Classifier de rework, Maker de rework e Checker R02,
+atingiu `rework_limit_exhausted` com 98% da implementação aprovada e restaram dois apontamentos
+cirúrgicos. Como a autoridade era por digest pontual de proposta, o sistema foi obrigado a parar
+e exigir do operador uma nova autorização criptográfica manual só para abrir o B014 — que
+herdou o commit funcional preservado, corrigiu os dois pontos e fechou a Story. `AUTO_STORY`
+remove esse atrito artificial sem afrouxar nenhuma garantia.
+
+- **Opt-in estrito e retrocompatibilidade:** `authorization.story_authority_mode` ausente
+  significa `direct_proposal` — a semântica de lote único, validada contra
+  `schemas/batch.schema.json`, inalterada. Nenhuma migração de histórico é exigida.
+- **Separação entre autoridade e consumo:** o envelope imutável vive em
+  `_tl-orc/project/story-authorities/<authority_id>.json` e nunca é reescrito para registrar
+  saldo. O estado operacional mutável vive em
+  `_tl-orc/runtime/story-authorities/<authority_id>/` (`journal.jsonl` append-only com
+  write-ahead, fsync, hash-chain e escritor único sob `lease.lock`; `status.json` é
+  exclusivamente projeção reconstruível).
+- **Autorização acíclica por digest:** `root_authority_digest = SHA256(canonical_json(authority_payload))`,
+  onde `authority_payload` contém exclusivamente os doze campos submetidos à decisão humana. O
+  próprio digest, `authorized_at`, `authorized_literal` e qualquer metadado posterior ficam
+  fora do cálculo. A autorização é a frase canônica exata
+  `AUTORIZO STORY <work_ref> sha256:<root_authority_digest>`; ao carregar, o digest é
+  recalculado e qualquer divergência é `HARD STOP` por `state_integrity`.
+- **Derivação sem assinatura fabricada:** o runtime nunca inventa autorização para o filho. A
+  autoridade derivada é provada pela cadeia `root_authority_digest` + `parent_authority_digest`
+  + `parent_batch_digest` + `child_proposal_digest` + `derivation_proof_digest`, e só existe
+  porque o filho é subconjunto estrito e verificável do envelope original.
+- **Escopo monotônico:** é a **união** `child.required ∪ child.conditional` que precisa estar
+  contida em `parent.authorized_write_scope`; um path condicional no pai pode virar obrigatório
+  no filho após apontamento factual do Checker. `forbidden_paths` e `protected_paths` só podem
+  crescer, e os itens herdados de `protected_paths` preservam policy e parâmetros idênticos.
+- **Derivação estritamente patch-only:** todos os apontamentos residuais precisam ser
+  `target_role = maker`, `category = patch`, `scope_status = inside_parent_envelope` e
+  `spec_status = unchanged`, com os dois últimos recalculados mecanicamente contra o envelope.
+  `bad_spec`, `intent_gap`, `human`, `security`, `scope_expansion`, `new_boundary`, `migration`,
+  `capability_expansion` ou dúvida de intenção interrompem e devolvem o controle ao operador. A
+  heurística "lote não aprovado ⟹ criar próximo lote" é proibida.
+- **Contabilidade global única:** o ledger da Story Authority é a fonte de verdade do orçamento
+  global; o budget do filho é subalocação/projeção. Uma chamada física conta exatamente uma vez,
+  sob um `global_attempt_id` que os dois ledgers referenciam. `logical_call_id` identifica a
+  operação cognitiva; cada tentativa física recebe um `global_attempt_id` novo, com estados
+  `reserved`, `consumed`, `released` e `ambiguous` (contado conservadoramente como consumido).
+  Na retomada o journal da autoridade é autoritativo e o ledger do filho é reconciliado a partir
+  dele, nunca o inverso.
+- **Linhagem funcional:** `governance base`, `functional checkpoint` e `integration candidate`
+  são coisas distintas. Um filho que termina `changes_requested` com apontamentos elegíveis não
+  é mesclado em `main`, e o próximo filho não reinicia da base de governança: nasce exatamente
+  do `checker_reviewed_commit` preservado. O Checker seguinte revisa o candidato cumulativo
+  `story_baseline_commit..integration_candidate_commit`.
+- **Subordinação ao T028 e fronteira da Story:** `allowed_effects.merge = true` é flag de
+  capacidade técnica e não constitui bypass do `MergeAuthorityGate`/`AuthorityReceipt`.
+  `AUTO_STORY` encerra compulsoriamente quando a Story autorizada atinge `CLOSE`/`done`; avançar
+  para a próxima Story do backlog sem nova autorização humana é terminantemente proibido.
+
+O ciclo de vida completo, os eventos do journal, o registro fechado de asserções e os modos de
+protected path estão em [RUNTIME.md](RUNTIME.md#auto_story-uma-autorização-humana-por-story-t032).
 
 ## Autorizações de escrita
 

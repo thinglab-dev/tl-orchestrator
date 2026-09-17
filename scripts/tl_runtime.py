@@ -65,9 +65,17 @@ except ImportError:
         def validate_post_review_delta(*_a, **_kw):
             return False, "merge_guard_unavailable"
 
+try:  # T032: AUTO_STORY is opt-in; without this module the runtime runs legacy single batches only.
+    import tl_story_authority as story_authority
+except ImportError:
+    try:
+        from scripts import tl_story_authority as story_authority  # type: ignore[no-redef]
+    except ImportError:
+        story_authority = None  # type: ignore[assignment]
+
 
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
-RUNTIME_VERSION = "0.17.0"
+RUNTIME_VERSION = "0.19.0"
 JOURNAL_FORMAT = 1
 STATE_DIR_NAME = "_tl-orc/runtime"
 RESULT_DIR_NAME = ".tl-runtime"
@@ -657,6 +665,17 @@ def load_batch(path: Path) -> dict:
         for dep in unit.get("dependencies", []):
             if dep not in ids:
                 raise Refusal(f"new_work_outside_frozen_batch: {unit['work_ref']} depends on {dep} outside the batch", 2)
+    # T032: strictly opt-in. A batch with no story_authority_mode keeps the legacy single-batch
+    # semantics (direct_proposal) unchanged, which is what every pre-T032 fixture declares.
+    mode = auth.get("story_authority_mode", "direct_proposal")
+    if mode not in {"direct_proposal", "AUTO_STORY"}:
+        raise Refusal(f"authorization.story_authority_mode must be direct_proposal or AUTO_STORY, got {mode!r}", 2)
+    if mode == "AUTO_STORY":
+        if story_authority is None:
+            raise Refusal("AUTO_STORY requires scripts/tl_story_authority.py, which could not be imported", 2)
+        for key in ("story_authority_id", "root_authority_digest", "child_proposal_digest", "derivation_proof_digest"):
+            if not auth.get(key):
+                raise Refusal(f"authority_missing_or_ambiguous: AUTO_STORY batch is missing authorization.{key}", 2)
     return batch
 
 
@@ -727,10 +746,14 @@ def load_unit(batch_unit: dict, repo: Path, tasks_dir: str) -> Unit:
 class Policy:
     """Deterministic boundary. Workers never see the journal, the batch or the operator's env."""
 
-    def __init__(self, config: dict, batch: dict):
+    def __init__(self, config: dict, batch: dict, cognitive_barrier: Path | None = None):
         self.config = config
         self.effects = batch["authorization"]["permitted_effects"]
         self.sensitive = [str(p) for p in config.get("sensitive_paths", [])]
+        # T032 §2.8: under AUTO_STORY the worker environment mechanically shadows every cognitive
+        # CLI, so a direct `agy`/`codex`/`claude`/`gemini` invocation fails before it reaches a
+        # provider instead of spending budget nobody journaled.
+        self.cognitive_barrier = cognitive_barrier
 
     def effect_allowed(self, effect: str) -> bool:
         return bool(self.effects.get(effect, False))
@@ -740,6 +763,8 @@ class Policy:
         env = {k: v for k, v in os.environ.items() if k.upper() in allowed}
         env.update({str(k): str(v) for k, v in (self.config.get("env_set") or {}).items()})
         env["DO_NOT_TRACK"] = "1"
+        if self.cognitive_barrier is not None and story_authority is not None:
+            env = story_authority.barrier_worker_env(env, self.cognitive_barrier)
         return env
 
     def check_containment(self, unit: Unit, dirty: list[str], diff_text: str) -> tuple[str, str]:
@@ -1250,7 +1275,26 @@ class Runtime:
         os.environ[f"GIT_CONFIG_VALUE_{slot}"] = str(self.state_dir / "no-hooks")
         os.environ["GIT_CONFIG_COUNT"] = str(max(hooks_count, slot + 1))
         self.git = Git(self.repo, self.config["git_executable"])
-        self.policy = Policy(self.config, self.batch)
+        self.authority = None
+        self.barrier_report = None
+        self.authority_mode = str(self.batch["authorization"].get("story_authority_mode", "direct_proposal"))
+        barrier_dir = self.state_dir / "cognitive-barrier" if self.authority_mode == "AUTO_STORY" else None
+        self.policy = Policy(self.config, self.batch, cognitive_barrier=barrier_dir)
+        if self.authority_mode == "AUTO_STORY":
+            try:
+                # Proven in the environment the worker will actually get, and refused rather than
+                # degraded: a barrier that might not hold is not a barrier.
+                self.barrier_report = story_authority.require_cognitive_barrier(
+                    barrier_dir, env=self.policy.worker_env())
+                self.authority = story_authority.StoryAuthority.open_for(
+                    self.repo, self.batch["authorization"]["story_authority_id"])
+            except story_authority.HardStop as stop:
+                raise Refusal(f"{stop.reason}: {stop.detail}", 2) from stop
+            declared = self.batch["authorization"]["root_authority_digest"]
+            if self.authority.root_digest != declared:
+                raise Refusal(
+                    f"authority_missing_or_ambiguous: batch declares root_authority_digest {declared} but the "
+                    f"envelope digests to {self.authority.root_digest}", 2)
         self.harness = Harness(self.config, self.repo, self.state_dir / "jobs", self.policy)
         self.compiler = ContextCompiler(self.config, self.repo, self.git)
         target_repo = self.config.get("target_repository") or self.batch.get("authorization", {}).get("target_repository")
@@ -1280,6 +1324,14 @@ class Runtime:
             raise Refusal("coordinator_conflict: another runtime holds the lease for this batch", 5)
         self._lease = handle
         self.git.ensure_exclude()
+        if self.authority is not None:
+            # One holder of the authority lease at a time: the global budget has a single writer.
+            try:
+                self.authority.acquire()
+                story_authority.assert_batch_within_story(self.authority.payload, self.units)
+            except story_authority.HardStop as stop:
+                self.release()
+                raise Refusal(f"{stop.reason}: {stop.detail}", 2) from stop
         self.fold = self.journal.fold()
         if self.fold.invalid_lines:
             raise Refusal(f"unrecoverable_harness_failure_or_ambiguous_dispatch: journal has {self.fold.invalid_lines} invalid line(s); inspect journal.jsonl", 2)
@@ -1294,6 +1346,8 @@ class Runtime:
             self.fold = self.journal.fold()
 
     def release(self) -> None:
+        if self.authority is not None:
+            self.authority.release()
         if self._lease is not None:
             tl_job.unlock_exclusive(self._lease)
             self._lease.close()
@@ -1386,12 +1440,46 @@ class Runtime:
         return sum(1 for role in ("maker", "checker")
                    if not any(k.startswith(f"{uid}:r{round_no}:{role}") and v.get("status") == "ok" for k, v in self.fold.steps.items()))
 
+    def budgeted_dispatch(self, role: str, step_id: str, phase: str, payload_digest: str, dispatch) -> dict:
+        """Every control-plane model call goes through here. Under AUTO_STORY it is also the only
+        place the global Story budget is reserved and settled, so a physical provider attempt is
+        charged exactly once even though it also appears in this child batch's ledger."""
+        if self.authority is None:
+            return dispatch()
+        context = story_authority.AuthorityDispatchContext(self.authority, self.batch_id, step_id)
+        try:
+            context.reserve(role=role, phase=phase, payload_digest=payload_digest)
+        except story_authority.HardStop as stop:
+            raise StopBatch(stop.reason, stop.detail) from stop
+        try:
+            record = dispatch()
+        except BaseException:
+            # The call may already have reached the provider: never released on doubt.
+            context.consume(outcome="ambiguous", receipt={"detail": "dispatch raised before a receipt was observed"})
+            raise
+        state = str((record or {}).get("state", ""))
+        if state in NO_DISPATCH_STATES:
+            context.release(proof=f"transport state {state!r}: the dispatch never started")
+        elif state in {"indeterminate", "unknown", "running", ""}:
+            context.consume(outcome="ambiguous", receipt={"state": state})
+        else:
+            context.consume(outcome="consumed", receipt={"state": state})
+        record["global_attempt_id"] = context.global_attempt_id
+        return record
+
     def check_budget(self, needed_calls: int = 0) -> None:
         budget = self.batch["budget"]
         max_calls = int(budget.get("max_model_calls", 0))
         if max_calls and self.model_calls_consumed() + needed_calls > max_calls:
             reason = "insufficient_budget_for_unit_verification" if needed_calls > 1 else "model_call_budget_exhausted"
             raise StopBatch(reason, f"{self.model_calls_consumed()} consumed + {needed_calls} needed > {max_calls}")
+        if self.authority is not None:
+            # The child allocation is a projection: the Story ceiling binds before the local one.
+            remaining = self.authority.remaining_global_budget
+            if remaining < needed_calls or remaining <= 0:
+                reason = "insufficient_budget_for_unit_verification" if needed_calls > 1 else "model_call_budget_exhausted"
+                raise StopBatch(reason, f"story authority {self.authority.authority_id} has {remaining} model "
+                                        f"call(s) left and {needed_calls} are needed")
         max_wall = self.limits.get("max_wall_clock_seconds")
         if max_wall and self.fold.started_at:
             started = calendar.timegm(time.strptime(self.fold.started_at, "%Y-%m-%dT%H:%M:%SZ"))
@@ -1443,6 +1531,7 @@ class Runtime:
                 self.unit_state(uid, "retryable", f"batch stopped: {reason}", phase=record.phase)
         self.journal.append("batch_state", state="stopped", reason=reason, detail=detail[:500])
         self.refold()
+        self._close_child_batch("stopped")
         self.project()
         self.notify({"event": "batch_stopped", "batch": self.batch_id, "reason": reason})
         return "stopped"
@@ -1480,6 +1569,7 @@ class Runtime:
             self.journal.append("batch_state", state="blocked", reason=reason, detail=canonical(states))
             state = "blocked"
         self.refold()
+        self._close_child_batch(state)
         self.project()
         self.notify({"event": "batch_closed", "batch": self.batch_id, "state": state})
         return state
@@ -1501,6 +1591,12 @@ class Runtime:
             self.unit_state(uid, "completed", "", phase="complete", finished_at=now_iso())
             self.notify({"event": "unit_completed", "batch": self.batch_id, "unit": uid, "pr": self.fold.units[uid].pr})
         except UnitPark as park:
+            if self.authority is not None and self.fold.units[uid].findings:
+                # §2.11: this child ends `changes_requested` (rework_limit_exhausted, and equally
+                # stagnation or a detected loop), so `deliver` never ran and no commit exists for
+                # the tree the Checker just reviewed. Materialize it before the tree is restored:
+                # the next child inherits exactly this commit, unmerged.
+                self._preserve_functional_checkpoint(uid, park.reason)
             self._park_cleanup(uid)
             self.unit_state(uid, park.state, park.reason, phase=self.fold.units[uid].phase, finished_at=now_iso(), decision=park.decision)
             self.notify({"event": "unit_" + park.state, "batch": self.batch_id, "unit": uid, "reason": park.reason})
@@ -1509,6 +1605,64 @@ class Runtime:
                 raise StopBatch("max_parked_units", f"{parked} units parked")
         finally:
             self._leave_branch()
+
+    def _reviewed_tree(self, uid: str) -> str:
+        """The exact tree the last journaled Checker reviewed, not whatever is on disk now."""
+        reviewed = ""
+        for step_id, event in self.fold.steps.items():
+            if step_id.startswith(f"{uid}:r") and ":checker" in step_id and event.get("status") == "ok":
+                candidate = (event.get("result") or {}).get("tree")
+                if candidate:
+                    reviewed = candidate
+        return reviewed or self.fold.units[uid].tree or self.git.worktree_tree()
+
+    def _preserve_functional_checkpoint(self, uid: str, reason: str) -> dict | None:
+        """Commit the reviewed tree and journal the child's lineage on the Story Authority.
+
+        The commit is kept under `refs/tl/functional-checkpoints/...`, never merged into the
+        protected branch: merging a `changes_requested` child only to carry state forward is
+        exactly what §2.11 forbids.
+        """
+        record = self.fold.units.get(uid)
+        if record is None or not record.branch or self.git.current_branch() != record.branch:
+            return None
+        self.authority.refold()
+        if self.authority.state.closure_of(self.batch_id) is not None:
+            return None  # this child already recorded its lineage; a closure is written once
+        tree = self._reviewed_tree(uid)
+        ref = f"refs/tl/functional-checkpoints/{self.batch_id}/{uid}"
+        commit = self.git.checkpoint(tree, f"functional checkpoint {self.batch_id}/{uid}: tree reviewed by the Checker ({reason[:80]})", ref)
+        base = self.git.rev(self.base_branch) or record.base_commit or commit
+        closure = self.authority.record_child_closed(
+            child_batch_id=self.batch_id, governance_base_commit=base, checker_reviewed_commit=commit,
+            checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,
+            checker_verdict="changes_requested", unresolved_action_items=list(record.findings or []))
+        self.note(f"{uid}: functional checkpoint {commit[:12]} preserved at {ref}; a derived child batch starts there",
+                  unit=uid, ref=ref, commit=commit, tree=tree)
+        return closure
+
+    def _close_child_batch(self, state: str) -> None:
+        """Journal the child's lineage when it closes approved, if the park path did not already."""
+        if self.authority is None:
+            return
+        self.authority.refold()
+        child = self.authority.state.children.get(self.batch_id) or {}
+        if child.get("closure") is not None or child.get("failure") is not None:
+            return  # a terminal state is journaled once; re-running `close` never re-counts it
+        completed = [uid for uid, record in self.fold.units.items() if record.state == "completed"]
+        if state != "done" or not completed:
+            self.authority.record_child_failed(self.batch_id, reason=self.fold.stop_reason or state,
+                                               detail=canonical({u: r.state for u, r in self.fold.units.items()}))
+            return
+        record = self.fold.units[completed[-1]]
+        commit = record.candidate_commit or record.checker_commit or record.commit
+        if not _COMMIT_RE.match(str(commit)):
+            return
+        tree = self.git.run("rev-parse", f"{commit}^{{tree}}")
+        self.authority.record_child_closed(
+            child_batch_id=self.batch_id, governance_base_commit=self.git.rev(self.base_branch) or record.base_commit,
+            checker_reviewed_commit=commit, checker_reviewed_tree=tree, functional_checkpoint_commit=commit,
+            functional_checkpoint_tree=tree, checker_verdict="approved", unresolved_action_items=[])
 
     def restore(self, tree: str, why: str, uid: str = "") -> None:
         """Restore the working tree; anything that would be lost is kept at refs/tl/discarded/... and noted."""
@@ -1532,11 +1686,23 @@ class Runtime:
             with contextlib.suppress(Refusal):
                 self.git.run("checkout", "--quiet", base)
 
+    @property
+    def functional_checkpoint(self) -> dict | None:
+        """T032 §2.11: the unmerged commit the previous Checker reviewed, as the authority recorded it."""
+        if self.authority is None:
+            return None
+        derivation = (self.authority.state.children.get(self.batch_id) or {}).get("derivation") or {}
+        return derivation.get("functional_parent_checkpoint") or None
+
     def base_ref(self, unit: Unit) -> str:
         base = self.base_branch
         unmerged = [d for d in unit.dependencies if not self.fold.units[d].merged]
         if not unmerged:
-            return base
+            # A derived child continues the functional lineage: it starts exactly at the commit the
+            # previous Checker reviewed, never back at the governance base, and that commit is never
+            # merged into the protected branch just to carry state forward.
+            checkpoint = self.functional_checkpoint
+            return str(checkpoint["commit"]) if checkpoint else base
         return self.fold.units[unmerged[-1]].branch or base
 
     def prepare(self, unit: Unit) -> None:
@@ -1575,6 +1741,16 @@ class Runtime:
             raise UnitPark("awaiting_operator", result["detail"][:200], decision={"options": ["retry", "skip"]})
         if self.git.current_branch() != branch:
             self.git.run("checkout", "--quiet", branch)
+        checkpoint = self.functional_checkpoint
+        if checkpoint and record.phase == "prepare":
+            # Proven before the Maker touches anything: the commit exists, HEAD is exactly it, it
+            # carries the recorded tree, and the working tree is clean. Anything else is a hard stop
+            # and the previous child stays immutable as historical evidence.
+            try:
+                story_authority.verify_functional_checkpoint(self.repo, checkpoint)
+            except story_authority.HardStop as stop:
+                raise StopBatch(stop.reason if stop.reason in {"unexpected_tree_state"} else "unexpected_tree_state",
+                                f"{stop.reason}: {stop.detail}") from stop
         if record.phase == "prepare":
             self.unit_state(uid, "running", "", phase="implement", branch=branch, base=base, commit=result.get("base_commit", ""), base_commit=result.get("base_commit", ""))
 
@@ -1645,7 +1821,10 @@ class Runtime:
 
         def do(intent: dict) -> dict:
             self.check_budget(needed_calls=1)
-            dispatch = self.harness.dispatch("maker", step_id, pack_path, pack_text, result_rel, self.batch["authorization"]["proposal_digest"], digest_of(intent))
+            dispatch = self.budgeted_dispatch(
+                "maker", step_id, "implementation", digest_of(intent),
+                lambda: self.harness.dispatch("maker", step_id, pack_path, pack_text, result_rel,
+                                              self.batch["authorization"]["proposal_digest"], digest_of(intent)))
             result = load_result(self.repo / result_rel, "unit_result")
             klass, signature, detail = classify_dispatch(dispatch, result, "unit_result")
             return {"_status": "released" if dispatch.get("state") in NO_DISPATCH_STATES else "ok","dispatch": {k: v for k, v in dispatch.items() if k != "receipt"} | {"receipt_state": (dispatch.get("receipt") or {}).get("state")},
@@ -1755,7 +1934,10 @@ class Runtime:
 
         def do(intent: dict) -> dict:
             self.check_budget(needed_calls=1)
-            dispatch = self.harness.dispatch("checker", step_id, pack_path, pack_text, result_rel, self.batch["authorization"]["proposal_digest"], digest_of(intent))
+            dispatch = self.budgeted_dispatch(
+                "checker", step_id, "review", digest_of(intent),
+                lambda: self.harness.dispatch("checker", step_id, pack_path, pack_text, result_rel,
+                                              self.batch["authorization"]["proposal_digest"], digest_of(intent)))
             result = load_result(self.repo / result_rel, "review_result")
             klass, signature, detail = classify_dispatch(dispatch, result, "review_result")
             after = self.git.worktree_tree()
@@ -2081,6 +2263,15 @@ class Runtime:
                                 "fabricated_authority_receipt_rejected: receipt failed authenticity check against trust root",
                                 decision={"options": ["retry", "skip"]},
                             )
+                        if self.authority is not None:
+                            # T032 §2.9: allowed_effects.merge is a capability flag, never a bypass.
+                            # The Story Authority is subordinate to the T028 gate, not above it.
+                            try:
+                                story_authority.assert_merge_authority(
+                                    self.authority.payload, receipt, trust_root=trust_root, expected_repo=expected_repo)
+                            except story_authority.HardStop as stop:
+                                raise UnitPark("awaiting_operator", f"{stop.reason}: {stop.detail}"[:200],
+                                               decision={"options": ["retry", "skip"]}) from stop
                     else:
                         raise UnitPark("awaiting_operator", "merge_authority_unavailable: MergeAuthorityGate could not be loaded", decision={"options": ["skip"]})
 
@@ -2264,6 +2455,24 @@ class Runtime:
 
     def reconcile(self) -> None:
         """Resolve every intent that has no result, with evidence, before scheduling anything."""
+        if self.authority is not None:
+            # The authority journal is authoritative on resume: reservations it still holds are
+            # settled here, and the child ledger is then rebuilt from that state, never the reverse.
+            open_steps = {intent["step_id"] for intent in self.fold.open_intents}
+
+            def verdict(attempt: dict) -> str:
+                step_id = attempt.get("logical_call_id", "")
+                prior = self.fold.steps.get(step_id)
+                if prior and prior.get("status") == "released":
+                    return "released"
+                if prior and prior.get("status") == "ok":
+                    return "consumed"
+                if step_id in open_steps:
+                    return "ambiguous"
+                return "ambiguous"
+
+            self.authority.reconcile_orphan_reservations(self.batch_id, verdict)
+            self.authority.reconcile_child_batch(self.batch, self.batch_id)
         for intent in list(self.fold.open_intents):
             step_id = intent["step_id"]
             effect = intent.get("effect_class")

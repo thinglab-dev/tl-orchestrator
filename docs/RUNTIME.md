@@ -23,7 +23,10 @@ runtime nasce no `FREEZE_BATCH` e morre no `CLOSE`; um crash vira pausa, e a ret
   contra Git, remoto ou `gh`; sem evidência suficiente, a unidade espera o operador.
 - Não inventa custo nem tokens: uso não observado fica `unknown`, e um teto em dólar só é
   aplicado sobre chamadas cujo adapter reportou custo.
-- Não abre outro lote ao fechar.
+- Não abre outro lote ao fechar — salvo sob `AUTO_STORY` (T032), em que uma única autorização
+  humana cobre a Story inteira e o runtime deriva lotes filhos estritamente *patch-only* dentro
+  daquele envelope. Mesmo aí ele nunca avança para a próxima Story do backlog, nunca fabrica
+  assinatura para o lote filho e nunca ultrapassa o teto global de chamadas.
 
 ## Instalar e usar
 
@@ -268,6 +271,234 @@ checkpoint); `skip` marca `failed`. Um lote `blocked` (só por decisões) reabre
 `run`; um lote `stopped` (segurança, orçamento, autorização, integridade) nunca reabre:
 nova autorização.
 
+## `AUTO_STORY`: uma autorização humana por Story (T032)
+
+`AUTO_STORY` é **estritamente opt-in**. Um lote sem `authorization.story_authority_mode`
+continua sendo `direct_proposal`: a semântica de lote único, um digest de proposta por
+autorização humana, exatamente como antes. Nada em histórico precisa migrar.
+
+Sob `AUTO_STORY`, uma única decisão humana cobre a Story inteira, com teto global estrito de
+chamadas e escopo monotonicamente decrescente. O runtime deriva e abre sozinho os lotes filhos
+necessários para resolver apontamentos residuais do Checker — e só esses.
+
+### Autoridade imutável e consumo mutável
+
+Os dois nunca se misturam.
+
+| | Caminho | Natureza |
+| :--- | :--- | :--- |
+| Autoridade | `_tl-orc/project/story-authorities/<authority_id>.json` | Imutável. Nunca reescrita para registrar saldo. |
+| Consumo | `_tl-orc/runtime/story-authorities/<authority_id>/` | `journal.jsonl` (append-only, write-ahead, fsync, hash-chain, escritor único sob `lease.lock`) e `status.json`, que é só projeção. |
+
+O envelope tem três partes, e a separação existe para quebrar a circularidade:
+
+```json
+{
+  "authority_payload": { "…exatamente os 12 campos submetidos ao humano…" },
+  "root_authority_digest": "sha256 do canonical_json(authority_payload)",
+  "operator_authorization": { "authority_source": "…", "authorized_at": "…", "authorized_literal": "…" }
+}
+```
+
+`root_authority_digest = SHA256(canonical_json(authority_payload))`. `canonical_json` é
+UTF-8, chaves ordenadas lexicograficamente, separadores compactos (`,`, `:`), zero whitespace
+incidental, ordem de array preservada e nenhum float. O payload contém **apenas**
+`authority_id`, `work_ref`, `authorized_spec_revision`, `authorized_spec_sha256`,
+`authorized_write_scope`, `allowed_effects`, `protected_paths`, `global_model_call_budget`,
+`max_child_batches`, `max_consecutive_failed_batches`, `wall_clock_deadline` e `hard_stops`.
+O próprio digest, `authorized_at`, `authorized_literal` e qualquer metadado produzido depois
+da decisão humana ficam fora: incluí-los faria o digest depender de valores que só existem
+porque o digest já havia sido calculado.
+
+O fluxo de autorização é: o runtime formula o payload em modo somente-leitura, calcula o
+digest, apresenta ambos ao operador e espera **uma** autorização explícita, exatamente neste
+formato:
+
+```text
+AUTORIZO STORY <work_ref> sha256:<root_authority_digest>
+```
+
+Qualquer coisa diferente — prefixo, caixa, digest truncado, outra Story — é recusada. Só
+depois disso o envelope é congelado e a derivação de lotes filhos é liberada. Ao carregar,
+o digest é recalculado e comparado byte a byte; divergência é `HARD STOP` por
+`state_integrity`. Conceitualmente isto é *digest-bound explicit operator authorization*, não
+assinatura: não há chave assimétrica envolvida.
+
+```
+python scripts/tl_story_authority.py present --payload payload.json
+python scripts/tl_story_authority.py freeze  --payload payload.json --authorization "AUTORIZO STORY connector:2-10 sha256:…" --source operator-terminal --repo .
+python scripts/tl_story_authority.py status  --authority-id A001 --repo .
+```
+
+### Orçamento global sem double-spend
+
+O journal da autoridade é a **única** fonte de verdade do orçamento. O ledger do lote filho é
+projeção dele, nunca uma segunda contabilidade. Eventos mínimos: `authority_open`,
+`model_call_reserved`, `model_call_consumed`, `model_call_released`, `child_derived`,
+`child_open`, `child_closed`, `child_failed`, `hard_stop`, `authority_closed`.
+
+Antes de qualquer reserva ou abertura de filho: adquirir o lease exclusivo, reconstruir o
+consumo pelo replay do journal, validar `remaining_global_budget >= requested_calls`,
+persistir a reserva write-ahead com fsync e só então executar o efeito. Em v1,
+`max_active_child_batches = 1`.
+
+Chamadas são identificadas em dois níveis:
+
+- `logical_call_id` — a operação cognitiva abstrata (`B014-checker-review-r01`).
+- `global_attempt_id` — cada tentativa física que **pode** ter alcançado o provider
+  (`A001-attempt-004`). Um retry sempre gera um id novo; duas tentativas físicas consomem dois
+  slots. Estados: `reserved`, `consumed`, `released` (comprovadamente pré-despacho) e
+  `ambiguous` (resultado incerto, contado conservadoramente como consumido). Reprocessar o
+  mesmo `global_attempt_id` após um crash não repete a chamada física nem o débito.
+
+`tl_job.budgeted_model_dispatch` aceita `authority_context`: a reserva global é escrita antes
+da local e liquidada antes dela, de modo que o ledger do filho só pode ser projeção de um
+débito que já existe globalmente. Na retomada, `reconcile_orphan_reservations` liquida
+conservadoramente o que ficou aberto e o ledger do filho é reconstruído a partir do journal da
+autoridade — nunca o inverso.
+
+### Bloqueio mecânico de chamadas fora do ledger
+
+Além da obrigação de passar pelo despacho orçado, o ambiente do worker recebe um *cognitive
+call barrier*: um diretório à frente do `PATH` com shims determinísticos para `agy`, `codex`,
+`claude` e `gemini`. Uma invocação direta falha com código 97 antes de tocar a rede. O runtime
+instala e **prova** a barreira no ambiente real do worker; se o sistema não suportar o
+isolamento, a capability fica `unavailable` e a inicialização de `AUTO_STORY` é recusada. Não
+há modo degradado.
+
+Limitação declarada, não contornada: a barreira sombreia a resolução por **nome**. Um worker
+que já conheça o caminho absoluto de uma CLI real ainda consegue executá-la — por isso o
+despacho orçado continua sendo a obrigação primária do plano de controle, e a barreira é a
+segunda linha, não a única.
+
+### Derivação estritamente patch-only
+
+Um lote filho só é derivado automaticamente se **todos** os apontamentos residuais do Checker
+forem `target_role = maker`, `category = patch`, `scope_status = inside_parent_envelope` e
+`spec_status = unchanged`. Os dois últimos são recalculados mecanicamente contra o envelope; a
+declaração do Checker (`scope_status`, `spec_status`, `derivation_blockers` em
+`review-result.schema.json`) é necessária mas nunca suficiente, e divergência entre o
+declarado e o provado é `HARD STOP`.
+
+Qualquer `bad_spec`, `intent_gap`, `human`, `security`, `scope_expansion`, `new_boundary`,
+`migration`, `capability_expansion` ou dúvida de intenção devolve o controle ao operador. A
+heurística genérica "lote não aprovado ⟹ criar próximo lote" é proibida: uma lista vazia de
+apontamentos também não deriva nada.
+
+A autoridade do filho é puramente derivada, provada pela cadeia
+`root_authority_digest` + `parent_authority_digest` + `parent_batch_digest` +
+`child_proposal_digest` + `derivation_proof_digest`. `verify_derivation()` prova, entre
+outras coisas:
+
+- `child.required ∪ child.conditional ⊆ parent.authorized_write_scope` — é a **união** que
+  precisa estar contida. Um path autorizado como condicional no pai pode legitimamente virar
+  obrigatório no filho depois de um apontamento factual do Checker.
+- `child.forbidden_paths ⊇ parent.forbidden_paths` e `child.protected_paths ⊇
+  parent.protected_paths`, este com igualdade estrutural dos itens herdados (padrão, policy e
+  parâmetros de hash/snapshot).
+- Nenhum efeito além dos autorizados, spec congelada, orçamento dentro do saldo restante,
+  `max_child_batches`, `max_consecutive_failed_batches` e `wall_clock_deadline`.
+
+### Linhagem funcional entre lotes filhos
+
+`AUTO_STORY` separa *governance base*, *functional checkpoint* e *integration candidate*.
+
+```text
+main / governance base
+        |
+        | B013 trabalha isolado
+        v
+B013 checker_reviewed_commit
+        |
+        | changes_requested / rework_limit_exhausted — NÃO MERGE
+        v
+functional checkpoint preservado
+        |
+        | derived child
+        v
+B014 parte EXATAMENTE desse checkpoint
+        |
+        | patch residual
+        v
+integration_candidate_commit
+        |
+        | Checker final approved (revisa story_baseline..integration_candidate)
+        v
+merge em main (sob T028)
+```
+
+Um filho que termina `changes_requested` nunca chega ao `deliver`, portanto não tem commit de
+entrega. O runtime materializa a árvore exata que o Checker revisou como commit em
+`refs/tl/functional-checkpoints/<batch>/<unit>` e registra no evento `child_closed`:
+`child_batch_id`, `governance_base_commit`, `checker_reviewed_commit`, `checker_reviewed_tree`,
+`functional_checkpoint_commit`, `functional_checkpoint_tree`, `checker_verdict` e
+`unresolved_action_items_digest`. Esse commit **não** é mesclado em `main` só para transportar
+estado — isso é terminantemente proibido.
+
+O filho seguinte nasce com `functional_parent_checkpoint = previous_child.checker_reviewed_commit`
+e, antes de qualquer intervenção do Maker, prova deterministicamente: o commit existe
+(`git cat-file -e`), `HEAD` é exatamente ele, a árvore bate com a registrada e a working tree
+está limpa. Ausência, adulteração ou ambiguidade é `HARD STOP` por `state_integrity` /
+`unexpected_tree_state`, e o filho anterior permanece imutável como evidência histórica.
+
+O Checker do filho seguinte revisa o candidato **cumulativo**
+(`story_baseline_commit..integration_candidate_commit`), não apenas o patch do filho corrente.
+Assim a entrega final sempre tem `checker_reviewed_commit == integration_candidate_commit` e
+esse commit carrega toda a linhagem funcional.
+
+### Subordinação ao T028
+
+`allowed_effects.merge = true` é uma *flag de capacidade técnica*, nunca um bypass. Operações
+em branches protegidas continuam exigindo o `MergeAuthorityGate`, o `AuthorityReceipt`
+autêntico e a autoridade out-of-band do T028. `AUTO_STORY` encerra compulsoriamente quando a
+Story autorizada atinge `CLOSE`/`done`; avançar para a próxima Story do backlog exige nova
+autorização humana e falha com `next_story_without_authorization`.
+
+## Validador de plano de execução e protected paths (T033)
+
+`scripts/validate_execution_plan.py` valida o plano de execução de uma proposta contra um
+registro **fechado** de asserções. Cada `assertion_id` declara em quais fases do ciclo de vida
+sua resposta é decidível:
+
+| `lifecycle_phase` | asserções |
+| :--- | :--- |
+| `pre_execution` | `working_tree_clean`, `functional_checkpoint_matches`, `spec_digest_unchanged`, `protected_paths_intact`, `budget_not_exhausted` |
+| `post_maker_pre_review` | `spec_digest_unchanged`, `protected_paths_intact`, `budget_not_exhausted` |
+| `post_checker_pre_merge` | `checker_approved`, `main_not_merged`, `spec_digest_unchanged`, `protected_paths_intact`, `budget_not_exhausted` |
+| `post_merge_pre_close` | `merge_commit_exists`, `canonical_gate_passed`, `working_tree_clean`, `spec_digest_unchanged`, `protected_paths_intact` |
+| `post_terminal` | `origin_synced`, `merge_commit_exists`, `canonical_gate_passed`, `working_tree_clean`, `spec_digest_unchanged`, `protected_paths_intact` |
+
+O plano referencia unicamente `assertion_id` e parâmetros tipados; `execution-plan.schema.json`
+torna estruturalmente impossível uma string de asserção livre. Asserção desconhecida ⟹ **FAIL
+CLOSED**; asserção numa fase incompatível ⟹ **FAIL CLOSED**. O validador também prova
+`gate_call_constraints_are_satisfiable_under_budget` contra os cenários obrigatórios
+`straight_line` e `retry`.
+
+Protected paths são de primeira classe, em três modos:
+
+- `read_only` — qualquer mutação sob o padrão é violação; sem baseline e sem git a resposta é
+  `protected_read_only_unverifiable`, nunca um passe silencioso.
+- `exact_file_hash` — o arquivo precisa existir como arquivo regular com exatamente aquele
+  SHA-256; symlink ou ausência falha antes de qualquer comparação de hash.
+- `exact_set_snapshot` — compara recursivamente `path`, `type` (file vs. symlink), `size` e
+  `sha256`. Adição de arquivo untracked, deleção, alteração de bytes ou conversão de arquivo em
+  symlink falham imediatamente.
+
+A monotonicidade é semântica, não textual: para todo padrão herdado o filho preserva a mesma
+policy e os mesmos parâmetros (hash esperado, snapshot de referência). Pode acrescentar
+proteção; nunca remover padrão, reduzir cobertura, trocar por policy mais permissiva ou
+substituir o hash/snapshot herdado.
+
+O validador de schema embutido é um subconjunto estrito de Draft 2020-12 em biblioteca padrão
+que **recusa** qualquer keyword que não implemente, em vez de ignorá-la — é assim que
+validadores parciais deixam de aplicar silenciosamente a restrição que o autor achava ter
+escrito.
+
+```
+python scripts/validate_execution_plan.py --plan plan.json --repo . --verify-protected-paths
+python scripts/validate_execution_plan.py --print-registry
+```
+
 ## Testes e prova
 
 `scripts/tests/test_tl_runtime.py` cobre, com harness e `gh` falsos scriptados e Git real:
@@ -279,6 +510,16 @@ backoff, bloqueio por autorização, e injeção de falha por `TL_RUNTIME_FAULT`
 do efeito do Maker, depois do efeito do Maker, depois do commit, depois do push, depois do
 PR, remoto divergente, journal corrompido, versão obsoleta), além do laço de CI com fatia,
 rerun de infraestrutura e reconciliação de merge.
+
+`AUTO_STORY` e o validador de plano têm suítes próprias em `tests/`:
+`test_auto_story_replay.py` (replay canônico B013→B014 do canário Lynvia, com repositório Git
+real e recibo T028 assinado), `test_auto_story_runtime_integration.py` (contraprova da barreira
+cognitiva dentro do runtime real, teto global vencendo o ledger do filho, checkpoint funcional
+materializado e retrocompatibilidade do lote legado), `test_story_authority_digest.py`,
+`test_story_child_derivation.py`, `test_story_functional_lineage.py`,
+`test_story_global_accounting.py`, `test_story_protected_paths.py`,
+`test_story_operational_limits.py`, `test_story_cognitive_barrier.py` e
+`test_execution_plan_validator.py`.
 
 ## Limites conhecidos
 

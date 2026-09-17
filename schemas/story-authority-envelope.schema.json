@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tl-orchestrator Story Authority Envelope",
+  "description": "T032: the immutable envelope persisted at _tl-orc/project/story-authorities/<authority_id>.json. authority_payload holds exclusively the fields submitted to the human decision; root_authority_digest is SHA256(canonical_json(authority_payload)) and is never part of what it digests; operator_authorization holds only what was captured after that decision. This file is never rewritten to record balance or consumption: that lives in the mutable ledger under _tl-orc/runtime/story-authorities/<authority_id>/.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "authority_payload",
+    "root_authority_digest",
+    "operator_authorization"
+  ],
+  "properties": {
+    "authority_payload": {
+      "$ref": "#/$defs/authority_payload"
+    },
+    "root_authority_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "operator_authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_source",
+        "authorized_at",
+        "authorized_literal"
+      ],
+      "properties": {
+        "authority_source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifies the channel through which the human decision was captured."
+        },
+        "authorized_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "description": "Real capture timestamp. Produced after the decision, therefore never part of root_authority_digest."
+        },
+        "authorized_literal": {
+          "type": "string",
+          "pattern": "^AUTORIZO STORY \\S+ sha256:[0-9a-f]{64}$",
+          "description": "The exact canonical literal the operator issued: AUTORIZO STORY <work_ref> sha256:<root_authority_digest>."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "authority_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_id",
+        "work_ref",
+        "authorized_spec_revision",
+        "authorized_spec_sha256",
+        "authorized_write_scope",
+        "allowed_effects",
+        "protected_paths",
+        "global_model_call_budget",
+        "max_child_batches",
+        "max_consecutive_failed_batches",
+        "wall_clock_deadline",
+        "hard_stops"
+      ],
+      "properties": {
+        "authority_id": {
+          "type": "string",
+          "pattern": "^A[0-9]{3,}$"
+        },
+        "work_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The single Story this authority covers. AUTO_STORY ends when it reaches CLOSE/done."
+        },
+        "authorized_spec_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorized_spec_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "authorized_write_scope": {
+          "$ref": "#/$defs/write_scope"
+        },
+        "allowed_effects": {
+          "$ref": "#/$defs/allowed_effects"
+        },
+        "protected_paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/protected_path"
+          }
+        },
+        "global_model_call_budget": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Strict global ceiling of physical provider attempts for the whole Story, across every child batch."
+        },
+        "max_child_batches": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_consecutive_failed_batches": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "wall_clock_deadline": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        },
+        "hard_stops": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "authority_missing_or_ambiguous",
+              "state_integrity",
+              "unexpected_tree_state",
+              "unexpected_revision_drift",
+              "scope_expansion",
+              "new_boundary",
+              "migration",
+              "capability_expansion",
+              "bad_spec",
+              "intent_gap",
+              "human",
+              "security",
+              "protected_path_violation",
+              "effect_expansion",
+              "model_call_budget_exhausted",
+              "consecutive_batch_failures_exhausted",
+              "max_child_batches_exhausted",
+              "wall_clock_deadline_exceeded",
+              "next_story_without_authorization",
+              "cognitive_call_barrier_unavailable"
+            ]
+          }
+        }
+      }
+    },
+    "write_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_mutation_targets",
+        "conditional_mutation_targets",
+        "forbidden_paths"
+      ],
+      "properties": {
+        "required_mutation_targets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Paths the Story is expected to change."
+        },
+        "conditional_mutation_targets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Paths the Story may change if a factual finding demands it. A child batch may promote one of these to required."
+        },
+        "forbidden_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Paths no batch under this authority may touch. A child may only add to this set."
+        }
+      }
+    },
+    "allowed_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "local_write",
+        "local_commit",
+        "local_merge",
+        "pull_request",
+        "push",
+        "tag",
+        "release",
+        "merge"
+      ],
+      "properties": {
+        "local_write": {
+          "type": "boolean"
+        },
+        "local_commit": {
+          "type": "boolean"
+        },
+        "local_merge": {
+          "type": "boolean"
+        },
+        "pull_request": {
+          "type": "boolean"
+        },
+        "push": {
+          "type": "boolean"
+        },
+        "tag": {
+          "type": "boolean"
+        },
+        "release": {
+          "type": "boolean"
+        },
+        "merge": {
+          "type": "boolean",
+          "description": "Technical capability flag only. T028 still governs execution: a merge on a protected branch requires the out-of-band MergeAuthorityGate receipt regardless of this value."
+        }
+      }
+    },
+    "protected_path": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pattern",
+        "policy"
+      ],
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policy": {
+          "type": "string",
+          "enum": [
+            "read_only",
+            "exact_file_hash",
+            "exact_set_snapshot"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "snapshot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entries",
+            "digest"
+          ],
+          "properties": {
+            "pattern": {
+              "type": "string"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "type",
+                  "size",
+                  "sha256"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "file",
+                      "symlink"
+                    ]
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "policy"
+            ],
+            "properties": {
+              "policy": {
+                "const": "exact_file_hash"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "sha256"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "policy"
+            ],
+            "properties": {
+              "policy": {
+                "const": "exact_set_snapshot"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "snapshot"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

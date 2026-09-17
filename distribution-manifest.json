@@ -1,7 +1,7 @@
 {
   "format_version": 1,
-  "package_version": "0.18.0",
-  "package_file_count": 49,
+  "package_version": "0.19.0",
+  "package_file_count": 54,
   "package_files": [
     "README.md",
     "SKILL.md",
@@ -26,6 +26,9 @@
     "schemas/ambiguity-register.schema.json",
     "schemas/runtime-config.schema.json",
     "schemas/step-journal.schema.json",
+    "schemas/execution-plan.schema.json",
+    "schemas/story-authority-envelope.schema.json",
+    "schemas/story-child-proposal.schema.json",
     "docs/PROJECT_CONFIGURATION.md",
     "docs/MODEL_ROUTING.md",
     "docs/EVOLUTION.md",
@@ -51,6 +54,8 @@
     "scripts/fixtures/workflow_quality/tasks.json",
     "scripts/extract_tool_result.py",
     "scripts/context_ledger.py",
-    "scripts/context_lib.py"
+    "scripts/context_lib.py",
+    "scripts/tl_story_authority.py",
+    "scripts/validate_execution_plan.py"
   ]
 }

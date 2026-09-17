@@ -68,6 +68,37 @@ O envelope de despacho declara, em texto ou em arquivo:
 Referência é por caminho e hash. Não cole conteúdo de arquivo, log ou transcrição no envelope
 quando o destinatário puder abrir o caminho; o hash é o que prende o parecer ao conteúdo revisado.
 
+#### Execução sob `AUTO_STORY` (T032)
+
+Quando o lote declara `authorization.story_authority_mode: "AUTO_STORY"`, o `authority_ref` do
+envelope é a Story Authority (`_tl-orc/project/story-authorities/<authority_id>.json`), e não a
+proposta pontual. Três obrigações se somam ao protocolo acima:
+
+1. **Despacho orçado sob a autoridade.** `budgeted_model_dispatch` recebe o contexto da
+   autoridade e escreve a reserva global antes da reserva local, liquidando-a antes também. O
+   `pending_call` do lote passa a carregar `global_attempt_id`: o mesmo identificador que o
+   journal da autoridade registra, de modo que uma chamada física conte exatamente uma vez nos
+   dois ledgers. Retry sempre gera `global_attempt_id` novo; reprocessar um já liquidado após
+   crash não repete a chamada nem o débito.
+2. **Barreira cognitiva mecânica.** O ambiente do worker recebe um diretório à frente do `PATH`
+   com shims determinísticos para `agy`, `codex`, `claude` e `gemini`: invocação direta falha com
+   código 97 antes de tocar a rede. A barreira é instalada e provada no ambiente real do worker;
+   se o sistema não suportar, a capability fica `unavailable` e `AUTO_STORY` recusa iniciar. A
+   limitação declarada é que a barreira sombreia resolução por **nome**, não por caminho absoluto
+   — por isso o despacho orçado continua sendo a obrigação primária.
+3. **Plano de execução validado.** O plano da proposta referencia asserções apenas por
+   `assertion_id` do registro fechado em `scripts/validate_execution_plan.py`, com parâmetros
+   tipados e `lifecycle_phase` declarado. Asserção desconhecida ou avaliada em fase incompatível
+   ⟹ **FAIL CLOSED**. O validador ainda prova a satisfatibilidade aritmética do orçamento contra
+   os cenários obrigatórios `straight_line` e `retry`, e verifica os `protected_paths` nos modos
+   `read_only`, `exact_file_hash` e `exact_set_snapshot`.
+
+Um lote filho derivado só existe se todos os apontamentos residuais do Checker forem
+estritamente patch-only; o commit que o Checker revisou é preservado sem merge e o filho seguinte
+nasce exatamente dele. Ver
+[WORK_MODEL.md](WORK_MODEL.md#10-story-authority-envelope-e-lotes-filhos-autônomos-auto_story-t032)
+e [RUNTIME.md](RUNTIME.md#auto_story-uma-autorização-humana-por-story-t032).
+
 `workflow_quality` ausente desativa essa camada. Quando presente, ele é um objeto com os caminhos
 relativos obrigatórios `profile`, `register`, `spec` e `acceptance`. `proof`, se declarado, é um
 objeto com `path`, `code_id` e `fixture_id` correntes. `gate_reuse`, se declarado, é um objeto com

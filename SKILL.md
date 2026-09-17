@@ -5,7 +5,7 @@ description: Planeja, debate decisões e conduz mudanças por mecanismo com Orqu
 
 # Ativação do método
 
-Versão atual do pacote: **0.18.0**.
+Versão atual do pacote: **0.19.0**.
 
 ## Regra do dono: o Orquestrador não trabalha manualmente no consumidor
 

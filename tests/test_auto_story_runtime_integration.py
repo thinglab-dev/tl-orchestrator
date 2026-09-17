@@ -227,6 +227,56 @@ class AutoStoryRuntimeTest(unittest.TestCase):
             fx.runtime().acquire()
         self.assertIn("effect_expansion", str(raised.exception))
 
+    def test_auto_story_enforces_nested_forbidden_path_in_runtime_containment(self) -> None:
+        # The task owns the broad pkg scope. Make a narrower descendant forbidden only in
+        # Story Authority; this is the case pre-bind scope checks alone cannot protect.
+        forbidden = "pkg/blocked.txt"
+        fx = Fixture(self.root, units=1, max_calls=8, max_rework=2)
+        spec_sha = hashlib.sha256(SPEC_A.encode()).hexdigest()
+        payload = story.build_authority_payload(
+            authority_id="A001", work_ref="T001", authorized_spec_revision=spec_sha[:16],
+            authorized_spec_sha256=spec_sha,
+            authorized_write_scope={"required_mutation_targets": ["pkg"],
+                                    "conditional_mutation_targets": [],
+                                    "forbidden_paths": [forbidden]},
+            allowed_effects={"local_write": True, "local_commit": True, "local_merge": True,
+                             "pull_request": False, "push": False, "tag": False, "release": False,
+                             "merge": False},
+            protected_paths=[], global_model_call_budget=8, max_child_batches=2,
+            max_consecutive_failed_batches=2, wall_clock_deadline="2027-01-01T00:00:00Z",
+            hard_stops=["scope_expansion", "model_call_budget_exhausted", "state_integrity"])
+        envelope = story.freeze_authority(
+            payload, authorized_literal=story.authorization_literal("T001", story.root_authority_digest(payload)),
+            authority_source="operator-terminal", authorized_at="2026-09-17T09:00:00Z")
+        story.publish_authority(fx.repo, envelope)
+        git(fx.repo, "add", "-A")
+        git(fx.repo, "commit", "-q", "-m", "freeze nested forbidden authority")
+        with story.StoryAuthority.open_for(fx.repo, "A001") as auth:
+            proposal = story.derive_child_proposal(
+                authority=auth, child_batch_id="B001", action_items=[], previous_child_id=None,
+                model_call_budget=8, governance_base_commit=git(fx.repo, "rev-parse", "HEAD"),
+                story_baseline_commit=git(fx.repo, "rev-parse", "HEAD"))
+            proof = story.verify_derivation(auth, proposal)
+            auth.record_child_derived(proposal, proof)
+        fx.batch["authorization"].update({
+            "story_authority_mode": "AUTO_STORY", "story_authority_id": "A001",
+            "root_authority_digest": envelope["root_authority_digest"],
+            "child_proposal_digest": proof["child_proposal_digest"],
+            "derivation_proof_digest": proof["derivation_proof_digest"],
+        })
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        runtime = fx.runtime()
+        runtime.acquire()
+        try:
+            unit = runtime.units["T001"]
+            self.assertIn(forbidden, unit.do_not_touch)
+            klass, detail = runtime.policy.check_containment(unit, [forbidden], "")
+            self.assertEqual(klass, "scope")
+            self.assertIn("scope_expansion", detail)
+            self.assertIn(forbidden, detail)
+        finally:
+            runtime.release()
+
     def test_auto_story_refuses_batch_budget_above_child_allocation(self) -> None:
         fx = self.auto_story_fixture(budget=4, max_calls=4)
         batch = json.loads(fx.batch_path.read_text(encoding="utf-8"))

@@ -1331,6 +1331,15 @@ class Runtime:
         story_authority.assert_batch_matches_child_proposal(
             batch=self.batch, units=self.units.values(), proposal=proposal, payload=self.authority.payload)
 
+        # The child proposal's forbidden paths are part of the executable containment policy,
+        # not just derivation metadata. Merge them into each Unit so the Maker sees them in its
+        # context pack and the post-Maker dirty-tree check rejects forbidden descendants even
+        # when the unit owns a broader parent directory (for example scope `pkg/` with
+        # forbidden `pkg/secrets/`).
+        forbidden = {str(path) for path in proposal.get("forbidden_paths") or []}
+        for unit in self.units.values():
+            unit.do_not_touch = sorted(set(unit.do_not_touch) | forbidden)
+
         checkpoint = proposal.get("functional_parent_checkpoint")
         if checkpoint:
             story_authority.verify_functional_checkpoint(self.repo, checkpoint)

@@ -24,6 +24,21 @@ Medidos sobre a árvore do commit `17d08a9`.
 | `git diff --check` | limpo |
 | `python3 scripts/validate_execution_plan.py --plan tests/fixtures/auto_story_b013_b014/execution-plan.json` | approved, exit 0 |
 
+## Portões do §6.2 na plataforma canônica: verdes
+
+O workflow `.github/workflows` (`Validate repository`, `ubuntu-latest`) executa exatamente os
+quatro portões exigidos pelo §6.2 — `scripts/validate_repository.py`,
+`unittest discover -s tests`, `unittest discover -s scripts/tests` e `scripts/audit_lineage.py` —
+e **passou** nos dois commits desta branch:
+
+| commit | run | conclusão |
+| :--- | :--- | :--- |
+| `17d08a9` | Actions run 35271473792 | success |
+| `29fc59d` (head) | mesma workflow | success |
+
+Ou seja: **as duas suítes atingem exit 0 no Linux**. A seção seguinte documenta por que elas
+não atingem exit 0 *nesta máquina macOS*, e prova que a causa é o host, não a mudança.
+
 ## Incompatibilidade de ambiente registrada (não corrigida, não mascarada)
 
 `python3 -m unittest discover -s tests` e `discover -s scripts/tests` **não** atingem exit 0
@@ -87,7 +102,8 @@ na árvore sem nenhuma modificação rastreada.
 
 Nenhuma das duas foi aplicada: pertencem ao escopo das tasks que governam esses módulos, e
 alterá-las aqui seria retirar contraprova de outra entrega para deixar esta suíte verde. O sinal
-canônico para estes dois arquivos é o CI Linux.
+canônico para estes dois arquivos é o CI Linux, que está verde — as duas correções são
+conveniência de desenvolvimento em macOS, não requisito de aceite.
 
 ## Lacunas de governança registradas (herdadas, não introduzidas)
 

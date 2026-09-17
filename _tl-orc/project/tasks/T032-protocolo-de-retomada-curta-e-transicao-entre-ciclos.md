@@ -54,7 +54,8 @@ expected:
 impact: confere robustez deterministica a conducao do Orquestrador, viabilizando ciclos longos de desenvolvimento sem degradacao cognitiva, sem perda de governanca e sem acumulo de contexto obsoleto.
 dedup: T022 construiu a biblioteca inicial de selective retrieval e schema de manifest; T023 produziu a evidencia experimental comparativa; T032 institucionaliza o protocolo no pacote distribuido.
 
-## Spec (Phase A - Draft Provisorio para Freeze)
+## Spec
+### Phase A (Draft Provisorio para Freeze)
 ### Intent
 Institucionalizar o protocolo deterministico de reconstrucao seletiva de contexto e transicao curta entre ciclos de trabalho do Orquestrador, integrando contratos, schemas, validadores de integridade pre-despacho e playbooks operacionais.
 

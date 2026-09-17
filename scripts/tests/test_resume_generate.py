@@ -308,14 +308,14 @@ class TestResumeGenerate(unittest.TestCase):
 
     # AC01: Schema Extendido validates state_revision, generated_at, generator_version, bootstrap_budget
     def test_ac01_schema_extended_validation(self):
-        import jsonschema
-        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        from scripts.tl_usage import validate_against_schema
         task_file = "_tl-orc/project/tasks/T032-protocolo-de-retomada-curta-e-transicao-entre-ciclos.md"
         code, out, err = self.run_cli("--task", task_file)
         self.assertEqual(code, 0, f"CLI generate failed: {err}")
         manifest = json.loads(out)
         # Must validate cleanly against schema
-        jsonschema.validate(instance=manifest, schema=schema)
+        valid, errs = validate_against_schema(manifest, str(SCHEMA_PATH))
+        self.assertTrue(valid, f"Schema validation failed: {errs}")
         self.assertIsInstance(manifest["state_revision"], int)
         self.assertGreaterEqual(manifest["state_revision"], 0)
         self.assertIsInstance(manifest["generated_at"], str)
@@ -576,7 +576,152 @@ class TestResumeGenerate(unittest.TestCase):
             self.assertIn("manifest_file_digest", data_v)
             self.assertEqual(len(data_v["manifest_file_digest"]), 64)
 
+    # R6: Corrupted log fail-closed, journal budget audit, rg command audit, and verify override rejection
+    def test_r6_corrupted_log_fail_closed_and_journal_budget(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            shutil.copytree(ROOT / "_tl-orc", temp_root / "_tl-orc")
+            shutil.copytree(ROOT / "schemas", temp_root / "schemas")
+            shutil.copytree(ROOT / "scripts", temp_root / "scripts")
+
+            from scripts.resume_generate import generate_resume_manifest
+
+            task_file = temp_root / "_tl-orc/project/tasks/T032-protocolo-de-retomada-curta-e-transicao-entre-ciclos.md"
+            manifest = generate_resume_manifest(temp_root, task_file, "implementation")
+            manifest_path = temp_root / "resume.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+            # 1. Corrupted transcript with non-JSON line fails closed
+            bad_transcript = temp_root / "bad-transcript.jsonl"
+            bad_transcript.write_text('{"step_index": 1}\nNOT_VALID_JSON_LINE\n', encoding="utf-8")
+            code_bad, _, err_bad = self.run_cli(
+                "--verify", str(manifest_path), "--transcript", str(bad_transcript), cwd=temp_root
+            )
+            self.assertNotEqual(code_bad, 0, "Corrupted transcript must fail closed")
+
+            # 2. Corrupted journal with non-JSON line fails closed
+            bad_journal = temp_root / "bad-journal.jsonl"
+            bad_journal.write_text('{"kind": "step_intent"}\nINVALID_LINE\n', encoding="utf-8")
+            code_bad_j, _, _ = self.run_cli(
+                "--verify", str(manifest_path), "--journal", str(bad_journal), cwd=temp_root
+            )
+            self.assertNotEqual(code_bad_j, 0, "Corrupted journal must fail closed")
+
+            # 3. Transcript with `rg` command counted towards budget
+            rg_lines = [
+                {"step_index": i, "kind": "turn", "tool_calls": [{"tool": "bash", "parameters": {"CommandLine": f"rg pattern_{i} file_{i}.py"}}]}
+                for i in range(1, 7)
+            ] + [{"step_index": 7, "kind": "step_intent", "effect_class": "model_call", "step_id": "dispatch:maker"}]
+            rg_transcript = temp_root / "rg-transcript.jsonl"
+            rg_transcript.write_text("\n".join(json.dumps(l) for l in rg_lines) + "\n", encoding="utf-8")
+            code_rg, out_rg, _ = self.run_cli(
+                "--verify", str(manifest_path), "--transcript", str(rg_transcript), "--json", cwd=temp_root
+            )
+            self.assertEqual(code_rg, 1)
+            data_rg = json.loads(out_rg)
+            self.assertEqual(data_rg["status"], "bootstrap_budget_exceeded")
+            self.assertEqual(data_rg["bootstrap_budget_check"]["reads_count"], 6)
+
+            # 4. Journal with 6 read events fails closed
+            j_lines_6 = [
+                {"kind": "step_intent", "effect_class": "local_read", "intent": {"action": "read"}}
+                for _ in range(6)
+            ] + [{"kind": "step_intent", "effect_class": "model_call", "step_id": "dispatch:maker"}]
+            journal_file = temp_root / "journal.jsonl"
+            journal_file.write_text("\n".join(json.dumps(l) for l in j_lines_6) + "\n", encoding="utf-8")
+            code_j, out_j, _ = self.run_cli(
+                "--verify", str(manifest_path), "--journal", str(journal_file), "--json", cwd=temp_root
+            )
+            self.assertEqual(code_j, 1)
+            data_j = json.loads(out_j)
+            self.assertEqual(data_j["status"], "bootstrap_budget_exceeded")
+            self.assertEqual(data_j["bootstrap_budget_check"]["reads_count"], 6)
+
+            # 5. Overriding --max-budget in --verify is rejected
+            code_v_ovr, out_v_ovr, _ = self.run_cli(
+                "--verify", str(manifest_path), "--max-budget", "10", "--json", cwd=temp_root
+            )
+            self.assertEqual(code_v_ovr, 1)
+            data_v_ovr = json.loads(out_v_ovr)
+            self.assertEqual(data_v_ovr["status"], "unauthorized_override")
+
+    # R7: Semantic RFC 3339 / ISO 8601 calendar validation
+    def test_r7_semantic_iso_calendar_validation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            shutil.copytree(ROOT / "_tl-orc", temp_root / "_tl-orc")
+            shutil.copytree(ROOT / "schemas", temp_root / "schemas")
+            shutil.copytree(ROOT / "scripts", temp_root / "scripts")
+
+            from scripts.resume_generate import generate_resume_manifest, verify_resume_manifest_structured
+
+            task_file = temp_root / "_tl-orc/project/tasks/T032-protocolo-de-retomada-curta-e-transicao-entre-ciclos.md"
+            manifest = generate_resume_manifest(temp_root, task_file, "implementation")
+
+            # Test invalid semantic calendar dates
+            invalid_dates = [
+                "2026-99-99T99:99:99Z",
+                "2026-02-30T12:00:00Z",
+                "2026-13-01T12:00:00Z",
+                "2026-09-31T12:00:00Z",
+                "2026-09-17T25:00:00Z",
+                "2026-09-17T12:60:00Z",
+                "not-an-iso-time",
+            ]
+            for inv_date in invalid_dates:
+                m = dict(manifest)
+                m["generated_at"] = inv_date
+                res = verify_resume_manifest_structured(m, temp_root)
+                self.assertEqual(res["status"], "schema_invalid", f"Date '{inv_date}' must be rejected as schema_invalid")
+                self.assertFalse(res["ok"])
+
+    # R8: Atomic publication temporary file cleanup on failure
+    def test_r8_atomic_publication_temporary_file_cleanup_on_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            shutil.copytree(ROOT / "_tl-orc", temp_root / "_tl-orc")
+            shutil.copytree(ROOT / "schemas", temp_root / "schemas")
+            shutil.copytree(ROOT / "scripts", temp_root / "scripts")
+
+            task_file = temp_root / "_tl-orc/project/tasks/T032-protocolo-de-retomada-curta-e-transicao-entre-ciclos.md"
+            out_file = temp_root / "dest" / "output.json"
+            out_file.parent.mkdir(parents=True)
+
+            # Test that no orphan .tmp-resume-* files remain when writing succeeds
+            code, _, _ = self.run_cli("--task", str(task_file), "--output", str(out_file), cwd=temp_root)
+            self.assertEqual(code, 0)
+            orphans = list(out_file.parent.glob(".tmp-resume-*"))
+            self.assertEqual(len(orphans), 0, "No orphan temp files should remain after successful publish")
+
+    # R9: Pre-publication double check and pre-dispatch verification under concurrent mutation
+    def test_r9_concurrent_mutation_detection_and_defense_in_depth(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            shutil.copytree(ROOT / "_tl-orc", temp_root / "_tl-orc")
+            shutil.copytree(ROOT / "schemas", temp_root / "schemas")
+            shutil.copytree(ROOT / "scripts", temp_root / "scripts")
+
+            task_file = temp_root / "_tl-orc/project/tasks/T032-protocolo-de-retomada-curta-e-transicao-entre-ciclos.md"
+            out_file = temp_root / "published-resume.json"
+
+            # 1. Publish resume.json
+            code_p, _, _ = self.run_cli("--task", str(task_file), "--output", str(out_file), cwd=temp_root)
+            self.assertEqual(code_p, 0)
+
+            # 2. Simulate concurrent mutation on disk after publish
+            proj_file = temp_root / "_tl-orc" / "PROJECT.md"
+            orig_proj = proj_file.read_text(encoding="utf-8")
+            proj_file.write_text(orig_proj.replace("work_method: native", "work_method: mutated"), encoding="utf-8")
+
+            # 3. Pre-dispatch verify detects concurrent mutation fail-closed
+            code_v, out_v, _ = self.run_cli("--verify", str(out_file), "--json", cwd=temp_root)
+            self.assertEqual(code_v, 1)
+            data_v = json.loads(out_v)
+            self.assertEqual(data_v["status"], "stale_package_rejected")
+            self.assertFalse(data_v["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

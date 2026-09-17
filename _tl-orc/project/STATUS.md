@@ -2,12 +2,12 @@ format_version: 1
 work_method: native
 active_work_ref: native/task/T032@_tl-orc/project/tasks/T032-protocolo-de-retomada-curta-e-transicao-entre-ciclos.md
 current_role: orchestrator
-next_action: Despachar Checker independente (OpenAI Codex) para Rodada r02 de T032.
+next_action: Despachar Checker independente (OpenAI Codex) para Rodada r03 de T032.
 coordinator:
   harness: agy
   session: antigravity-c35bdc15
   started_at: 2026-09-17T14:55:00Z
-  last_write_at: 2026-09-17T15:53:00Z
+  last_write_at: 2026-09-17T16:03:00Z
   released: false
 active_batch: none
 batch_status: none
@@ -53,4 +53,4 @@ open_discussions: []
 | T029 | feat | none | done | [T026] | [] | 12 | evidence/T029-r11.md |
 | T030 | gov | none | done | [T029] | [] | 2 | evidence/T030-r01.md |
 | T031 | feat | package | done | [T019, T027] | [] | 2 | evidence/T031-r01.md |
-| T032 | feat | package | ready | [T022, T023] | [] | 4 | - |
+| T032 | feat | package | ready | [T022, T023] | [] | 5 | - |

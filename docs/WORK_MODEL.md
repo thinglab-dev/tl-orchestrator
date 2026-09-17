@@ -191,14 +191,17 @@ gerado deterministicamente sob demanda (`scripts/resume_generate.py`). O pacote 
    - A identidade verificável do pacote compreende estritamente `sources`, `resolved_context`,
      `spec_revision`, `state_revision`, `content_id` e `generator_version`.
 
-3. **Verificação mecânica pré-despacho (`fail-closed`):**
-   - Na publicação, o gerador auto-revalida o manifesto e substitui o arquivo com replace atômico (`fsync`),
-     prevenindo TOCTOU e arquivos parciais.
-   - Na sessão limpa subsequente à transição, o primeiro comando obrigatório é a validação mecânica
-     via `python3 scripts/resume_generate.py --verify <caminho> [--transcript <log.jsonl>] --json`.
-   - Se retornar `status: verified`, o agente vincula o despacho ao hash do artefato (`manifest_file_digest`),
-     consome as classes `inline` e realiza leituras `on_demand` estritamente guiadas pela necessidade,
-     respeitando o teto de bootstrap (`bootstrap_on_demand_budget`).
+3. **Verificação mecânica pré-despacho (`fail-closed`) e defesa em profundidade:**
+   - Na publicação, o gerador executa dupla validação de integridade contra o disco (antes da serialização e
+     imediatamente antes da substituição atômica via `fsync` e `os.replace`), prevenindo a emissão de pacotes
+     já divergentes ou arquivos parciais em caso de interrupção abrupta.
+   - Diante da ausência de travas transacionais no sistema de arquivos sobre múltiplos documentos Markdown,
+     a barreira definitiva contra mutações concorrentes entre a compilação e o despacho é a execução
+     mandatória e fail-closed de `python3 scripts/resume_generate.py --verify <caminho> [--transcript <log.jsonl>] --json`
+     como primeiro comando da nova sessão: qualquer mutação nas fontes oficiais invalida os digests e dispara
+     `status: stale_package_rejected`, descartando o pacote antes de qualquer ação do condutor.
+   - Se retornar `status: verified`, o agente vincula o despacho ao hash imutável do artefato (`manifest_file_digest`),
+     consome as classes `inline` e realiza leituras `on_demand` seletivas, respeitando o teto de bootstrap (`bootstrap_on_demand_budget`).
    - Se retornar `status: stale_package_rejected`, `source_missing`, `schema_invalid` ou `bootstrap_budget_exceeded`,
      o pacote é descartado imediatamente (ou a sessão é interrompida) e o agente reconstrói o estado diretamente
      das fontes oficiais em disco.

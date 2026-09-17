@@ -5,14 +5,14 @@ deliverable: package
 standalone: true
 method: native
 status: ready
-state_revision: 4
+state_revision: 5
 depends_on: [T022, T023]
 blocked_by: []
-origin: user (autorizacao formal em 2026-09-17 para institucionalizar as conclusoes de T023 e a base tecnica de T022; rework_round 1 ratificado para sanar acoplamento de limiar, metadata volátil e verificabilidade de bootstrap; rework_round 2 para sanar R1-R4 do Checker r01)
+origin: user (autorizacao formal em 2026-09-17 para institucionalizar as conclusoes de T023 e a base tecnica de T022; rework_round 1 ratificado para sanar acoplamento de limiar, metadata volátil e verificabilidade de bootstrap; rework_round 2 para sanar R1-R4; rework_round 3 para sanar R5-R9)
 decisions: []
 spec_author: orchestrator
 spec_revision: 83a410d9244726c8
-rework_round: 2
+rework_round: 3
 affects_context: []
 effective_authors: [google, anthropic]
 checker_independence: required
@@ -134,3 +134,15 @@ A execucao de Phase B e estrita aos seguintes 10 caminhos de arquivo:
   - R3 (`patch`, severity medium, maker): Prevenção de janela TOCTOU na publicação de `resume.json` via pré-validação antes da escrita e publicação por substituição atômica (`tempfile`, `flush`, `fsync` e `os.replace`).
   - R4 (`intent_gap`, severity medium, human): Preservação de log bruto completo da execução da suíte de testes e sondas contrafactuais vinculado ao commit SHA da entrega para auditabilidade em sandbox somente leitura.
 - Rework r02 executado pelo Maker sanando integralmente R1, R2, R3 e registrando a evidência de execução para R4.
+
+### Rodada r02 (2026-09-17)
+- Checker: OpenAI Codex `gpt-5.6-terra / high` (independente, cross-family sob `checker_independence: required`)
+- Target commit: `a583713b76a3421cdd5b91bf30928d7eda89dbc1`
+- Parecer: `changes_requested` (JSON íntegro em `_tl-orc/project/evidence/T032-support/phase-b/02-review/r02/review-result.json`)
+- Ações Requeridas (Action Items):
+  - R5 (`patch`, severity high, maker): Exclusão dos 11 artefatos de suporte das fases A e B do tracking do git para coincidir estritamente com os 10 `content_paths` congelados.
+  - R6 (`patch`, severity high, maker): Formato de log fechado com rejeição de linhas JSON inválidas (fail-closed), suporte ampliado a ferramentas de leitura (`rg`, `grep_search`, `find_by_name`, `list_dir`, etc.) e rejeição de `--max-budget` conflitante em `--verify`.
+  - R7 (`patch`, severity high, maker): Validação semântica explícita de calendário RFC 3339 / ISO 8601 em `generated_at` e regex com limites de mês/dia/hora.
+  - R8 (`patch`, severity medium, maker): Limpeza garantida de arquivos temporários `.tmp-resume-*` via `try/finally` em todos os caminhos de falha na publicação atômica.
+  - R9 (`patch`, severity medium, maker): Dupla validação antes do replace atômico, alinhamento honesto da garantia em `docs/WORK_MODEL.md` (defesa em profundidade com validação fail-closed pré-despacho no consumidor) e teste contrafactual de mutação concorrente.
+- Rework r03 executado pelo Maker sanando integralmente R5, R6, R7, R8 e R9.

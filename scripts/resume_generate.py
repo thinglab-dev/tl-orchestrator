@@ -16,13 +16,6 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Optional
-
-import jsonschema
-
-DEFAULT_GENERATOR_VERSION = "resume_generate/1.0.0 (T032)"
-DEFAULT_BOOTSTRAP_BUDGET = 5
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.context_lib import (
@@ -33,6 +26,10 @@ from scripts.context_lib import (
     mask_volatile_fields,
     select_section,
 )
+from scripts.tl_usage import validate_against_schema
+
+DEFAULT_GENERATOR_VERSION = "resume_generate/1.0.0 (T032)"
+DEFAULT_BOOTSTRAP_BUDGET = 5
 
 VALID_POLICY_CLASSES = {
     "active_unit.spec",
@@ -368,7 +365,8 @@ def extract_bootstrap_reads_from_transcript(
     transcript_path: Path,
 ) -> tuple[int, list[dict[str, Any]], Optional[str]]:
     """
-    Extract on-demand read tool calls from transcript prior to first model dispatch event (AC06, R2).
+    Extract on-demand read tool calls from transcript prior to first model dispatch event (AC06, R2, R6).
+    Fails closed if the transcript contains corrupted/non-JSON lines.
     Returns (reads_count, reads_list, first_dispatch_marker).
     """
     if not transcript_path.is_file():
@@ -376,16 +374,19 @@ def extract_bootstrap_reads_from_transcript(
 
     reads: list[dict[str, Any]] = []
     first_dispatch: Optional[str] = None
-    direct_read_tools = {"read", "view", "view_file", "section", "cat", "grep", "glob", "read_url_content"}
+    direct_read_tools = {
+        "read", "view", "view_file", "section", "cat", "grep", "grep_search",
+        "glob", "find_by_name", "read_url_content", "read_browser_page", "list_dir"
+    }
 
-    for line in transcript_path.read_text(encoding="utf-8").splitlines():
+    for line_idx, line in enumerate(transcript_path.read_text(encoding="utf-8").splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
         try:
             step = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as jde:
+            raise ValueError(f"Corrupted transcript log at line {line_idx}: invalid JSON - {jde}")
 
         # 1. Step kind step_intent with effect_class model_call marks first dispatch
         if step.get("kind") == "step_intent" and step.get("effect_class") == "model_call":
@@ -413,7 +414,7 @@ def extract_bootstrap_reads_from_transcript(
 
             cmd = str(params.get("CommandLine") or params.get("command") or params.get("cmd") or "")
             if cmd and any(k in tool_name for k in ["bash", "command", "shell", "exec", "terminal"]):
-                if re.search(r"\b(cat|head|tail|grep|sed|awk)\b", cmd):
+                if re.search(r"\b(cat|head|tail|grep|rg|ripgrep|sed|awk|less|more|od|xxd)\b", cmd):
                     reads.append({
                         "tool": tool_name,
                         "command": cmd,
@@ -430,7 +431,8 @@ def extract_bootstrap_reads_from_journal(
     journal_path: Path,
 ) -> tuple[int, list[dict[str, Any]], Optional[str]]:
     """
-    Extract on-demand read events from journal.jsonl prior to first model dispatch event (AC06, R2).
+    Extract on-demand read events from journal.jsonl prior to first model dispatch event (AC06, R2, R6).
+    Fails closed if the journal contains corrupted/non-JSON lines.
     Returns (reads_count, reads_list, first_dispatch_step_id).
     """
     if not journal_path.is_file():
@@ -439,14 +441,14 @@ def extract_bootstrap_reads_from_journal(
     reads: list[dict[str, Any]] = []
     first_dispatch: Optional[str] = None
 
-    for line in journal_path.read_text(encoding="utf-8").splitlines():
+    for line_idx, line in enumerate(journal_path.read_text(encoding="utf-8").splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
         try:
             event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as jde:
+            raise ValueError(f"Corrupted journal log at line {line_idx}: invalid JSON - {jde}")
 
         kind = event.get("kind")
         if kind == "step_intent" and event.get("effect_class") == "model_call":
@@ -468,10 +470,10 @@ def verify_resume_manifest_structured(
     repo_root: Path,
 ) -> dict[str, Any]:
     """
-    Verify pre-dispatch integrity of manifest against current disk content (AC01, AC03, AC15, R1).
-    Performs full Draft 2020-12 schema validation, inspects each source declared in manifest["sources"],
-    reads section with select_section, computes canonical digest (masking volatile fields for frontmatter),
-    and compares to manifest digest.
+    Verify pre-dispatch integrity of manifest against current disk content (AC01, AC03, AC15, R1, R7).
+    Performs full Draft 2020-12 schema validation, semantic ISO 8601 calendar verification,
+    inspects each source declared in manifest["sources"], reads section with select_section,
+    computes canonical digest (masking volatile fields for frontmatter), and compares to manifest digest.
     Returns dictionary with:
       - status: 'verified', 'stale_package_rejected', 'source_missing', or 'schema_invalid'
       - ok: bool
@@ -496,17 +498,15 @@ def verify_resume_manifest_structured(
     schema_path = repo_root / "schemas" / "resume-manifest.schema.json"
     if schema_path.is_file():
         try:
-            schema_data = json.loads(schema_path.read_text(encoding="utf-8"))
-            validator = jsonschema.Draft202012Validator(schema_data)
-            schema_errors = sorted(validator.iter_errors(manifest), key=lambda e: list(e.path))
-            if schema_errors:
+            valid, schema_errors = validate_against_schema(manifest, str(schema_path))
+            if not valid:
                 for s_err in schema_errors:
-                    loc = "/".join(str(p) for p in s_err.path) if s_err.path else "root"
-                    errors.append(f"Schema error at {loc}: {s_err.message}")
+                    loc = s_err.split(":")[0].strip()
+                    errors.append(f"Schema error at {loc}: {s_err}")
                     mismatches.append({
                         "type": "schema_validation_error",
                         "path": loc,
-                        "message": s_err.message,
+                        "message": s_err,
                     })
                 return {
                     "status": "schema_invalid",
@@ -523,6 +523,31 @@ def verify_resume_manifest_structured(
                 "checked_sources_count": 0,
                 "errors": errors,
                 "mismatches": [{"type": "schema_load_error", "error": str(exc)}],
+            }
+
+    # 2. Semantic RFC 3339 / ISO 8601 calendar verification for generated_at (R7)
+    gen_at = manifest.get("generated_at")
+    if isinstance(gen_at, str):
+        try:
+            dt_val = gen_at
+            if dt_val.endswith("Z"):
+                dt_val = dt_val[:-1] + "+00:00"
+            parsed_dt = datetime.datetime.fromisoformat(dt_val)
+            if parsed_dt.tzinfo is None:
+                raise ValueError("timestamp must include explicit timezone (UTC 'Z' or offset)")
+        except Exception as dt_err:
+            errors.append(f"Invalid semantic ISO 8601 / RFC 3339 timestamp in 'generated_at' ('{gen_at}'): {dt_err}")
+            return {
+                "status": "schema_invalid",
+                "ok": False,
+                "checked_sources_count": 0,
+                "errors": errors,
+                "mismatches": [{
+                    "type": "invalid_semantic_timestamp",
+                    "path": "generated_at",
+                    "value": gen_at,
+                    "error": str(dt_err),
+                }],
             }
 
     sources = manifest.get("sources")
@@ -1017,6 +1042,20 @@ def main() -> None:
         result = verify_resume_manifest_structured(manifest_to_verify, repo_root)
         result["manifest_file_digest"] = manifest_file_digest
 
+        # Reject conflicting --max-budget in --verify (R6)
+        manifest_budget = manifest_to_verify.get("bootstrap_budget", {}).get("max_on_demand_reads")
+        if manifest_budget is not None and args.max_budget != DEFAULT_BOOTSTRAP_BUDGET and args.max_budget != manifest_budget:
+            err_msg = f"ERROR: cannot override --max-budget ({args.max_budget}) ad hoc when manifest defines bootstrap_budget ({manifest_budget})"
+            if args.json:
+                print(json.dumps({
+                    "status": "unauthorized_override",
+                    "ok": False,
+                    "error": err_msg,
+                }, indent=2))
+            else:
+                print(err_msg, file=sys.stderr)
+            sys.exit(1)
+
         # Mechanical bootstrap read audit if transcript or journal is supplied
         reads_count = None
         first_dispatch = None
@@ -1080,7 +1119,7 @@ def main() -> None:
         print(f"ERROR: resume_generate failed: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    # Revalidate manifest against current disk content prior to publication (TOCTOU guard, R3)
+    # Revalidate manifest against current disk content prior to publication (TOCTOU guard, R3, R9)
     v_res = verify_resume_manifest_structured(manifest, repo_root)
     if not v_res.get("ok"):
         print(f"ERROR: pre-publication verification failed: {v_res.get('status')} - {v_res.get('errors')}", file=sys.stderr)
@@ -1092,19 +1131,35 @@ def main() -> None:
     if args.output and args.output != "-":
         out_path = Path(args.output).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        # Atomic replace via fsynced temporary file in the target directory (R3)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=str(out_path.parent),
-            prefix=".tmp-resume-",
-            delete=False,
-        ) as tf:
-            tf.write(formatted)
-            tf.flush()
-            os.fsync(tf.fileno())
-            temp_name = tf.name
-        os.replace(temp_name, str(out_path))
+        # Atomic replace via fsynced temporary file with guaranteed cleanup (R3, R8, R9)
+        temp_name = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(out_path.parent),
+                prefix=".tmp-resume-",
+                delete=False,
+            ) as tf:
+                temp_name = tf.name
+                tf.write(formatted)
+                tf.flush()
+                os.fsync(tf.fileno())
+
+            # Double-check validation immediately before atomic replace (R9)
+            v_recheck = verify_resume_manifest_structured(manifest, repo_root)
+            if not v_recheck.get("ok"):
+                print(f"ERROR: concurrent modification detected before publication: {v_recheck.get('status')}", file=sys.stderr)
+                sys.exit(1)
+
+            os.replace(temp_name, str(out_path))
+            temp_name = None  # Replaced successfully
+        finally:
+            if temp_name and os.path.exists(temp_name):
+                try:
+                    os.unlink(temp_name)
+                except OSError:
+                    pass
     else:
         sys.stdout.write(formatted)
 

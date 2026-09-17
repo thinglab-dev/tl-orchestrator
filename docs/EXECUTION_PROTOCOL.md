@@ -20,8 +20,13 @@ leitura isolada. Por isso estas regras são verificáveis:
 - diagnóstico que exija código do condutor vira unidade de manutenção ou sessão nova, nunca leitura
   exploratória na conversa do Orquestrador;
 - não envie mensagens de status entre passos triviais e agrupe comandos independentes numa chamada;
-- acima de aproximadamente 120 mil tokens de contexto, grave um handoff curto em arquivo e
-  recomende sessão nova.
+- acima do limiar recomendado de contexto (default operacional centralizado: aproximadamente 120 mil
+  tokens de contexto, configurável e sobrescrevível por projeto, modelo ou política em `docs/CONTEXT_POLICY.md`),
+  avalie os critérios de continuidade de [docs/WORK_MODEL.md](WORK_MODEL.md#protocolo-de-retomada-curta-ciclo-de-vida-e-barreira-de-autoridade-resumejson).
+  Não havendo critério absoluto de continuidade que imponha a permanência na sessão (tais como batch ativo,
+  fase de debate ou árvore instável), grave um handoff curto determinístico em arquivo (`resume.json`) e
+  recomende a transição para sessão limpa. A retomada curta visa governança e integridade cognitiva,
+  não presumindo economia universal de tokens brutos ou custos monetários.
 
 Essas regras também delimitam ownership: salvo permissão manual explícita e específica, o
 Orquestrador não edita nem diagnostica o consumidor; despacha trabalho e lê recibos.

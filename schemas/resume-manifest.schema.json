@@ -8,6 +8,9 @@
     "active_work_ref",
     "phase",
     "spec_revision",
+    "state_revision",
+    "generated_at",
+    "generator_version",
     "sources",
     "resolved_context",
     "effective_authors",
@@ -33,6 +36,24 @@
       ]
     },
     "spec_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "content_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generator_version": {
       "type": "string",
       "minLength": 1
     },
@@ -69,6 +90,23 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/always_read_entry"
+      }
+    },
+    "bootstrap_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_on_demand_reads",
+        "unit"
+      ],
+      "properties": {
+        "max_on_demand_reads": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unit": {
+          "const": "on_demand_reads"
+        }
       }
     }
   },

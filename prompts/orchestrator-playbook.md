@@ -54,8 +54,13 @@ Depois do despacho em segundo plano, espere a notificação terminal sem polling
 saída ou checagens de progresso. Por parada, admita do `result.json` somente `blocking` e `reason`.
 Não envie mensagens de status entre passos triviais. Diagnóstico que exija ler código do condutor é
 uma unidade de manutenção ou uma sessão nova, não investigação dentro da conversa do Orquestrador.
-Acima de aproximadamente 120 mil tokens de contexto, escreva um handoff curto em arquivo e
-recomende continuar em sessão nova.
+Acima do limiar recomendado de contexto (default operacional centralizado: aproximadamente 120 mil
+tokens de contexto, conforme [docs/EXECUTION_PROTOCOL.md](../docs/EXECUTION_PROTOCOL.md#orçamento-de-contexto-do-orquestrador),
+configurável e sobrescrevível por projeto/harness), avalie os critérios de continuidade de
+[docs/WORK_MODEL.md](../docs/WORK_MODEL.md#protocolo-de-retomada-curta-ciclo-de-vida-e-barreira-de-autoridade-resumejson).
+Não havendo critério absoluto impeditivo (como batch ativo, debate ou árvore instável), gere o pacote
+curto determinístico (`resume.json`) e recomende continuar em sessão limpa. A retomada curta visa
+governança e integridade cognitiva, não presumindo economia universal de tokens brutos ou custos monetários.
 
 Quatro ferramentas de escopo de usuário automatizam parte desta admissão sem mudar o critério:
 rtk condensa a saída de comandos Bash antes de entrar no contexto; headroom comprime, em modo
@@ -88,9 +93,27 @@ agente admite apenas o resumo estruturado com as falhas contratuais mapeadas (`f
 portão de preservação (*losslessness gate*), nenhuma falha contratual relevante pode ser omitida do
 payload compacto.
 
-Na retomada de sessões e passagens de bastão, utilize o gerador do manifesto de retomada
-(`scripts/resume_generate.py`) para inspecionar integridade de fontes congeladas e compor o contexto
-resolvido da fase conforme `docs/CONTEXT_POLICY.md`.
+### Protocolo operacional de retomada curta e barreira de autoridade
+
+Na transição de ciclos e retomada em sessão limpa:
+1. **Compilação sob demanda:** Execute `python3 scripts/resume_generate.py --task <task_file> --phase <phase> --output staging/resume.json`
+   para compilar o pacote com fontes congeladas, digests e classes de entrega de `docs/CONTEXT_POLICY.md`.
+2. **Verificação mecânica pré-despacho (`fail-closed`):** Na sessão limpa iniciada, o **primeiro comando
+   obrigatório** antes de qualquer despacho é:
+   `python3 scripts/resume_generate.py --verify <caminho_do_resume.json> --json`
+   - Se `status: verified`, o agente prossegue consumindo as seções `inline` entregues no pacote e
+     realizando consultas `on_demand` seletivas.
+   - Se `status: stale_package_rejected` ou `status: source_missing`, fail-closed imediato: o pacote é
+     descartado e o estado operacional é reconstruído diretamente dos arquivos originais em disco
+     (`STATUS.md`, Task file e `PROJECT.md`).
+3. **Barreira contratual contra autoridade de resumos:** É terminantemente PROIBIDO citar campos derivados
+   do manifesto (`open_items`, `next_action`, `reason`) como prova factual em decisões, relatórios ou
+   pareceres. Toda citação probatória válida exige a indicação estrita da tupla `(path, selector, digest)`
+   inspecionada diretamente nas fontes oficiais em disco.
+4. **Teto mecânico de bootstrap:** No turno inicial de retomada, o agente deve respeitar o parâmetro
+   `bootstrap_on_demand_budget` (default: 5 leituras `on_demand` antes do primeiro despacho material).
+   Se o agente exceder o teto sem emitir a decisão/despacho, o sistema emite `STOP: bootstrap_budget_exceeded`
+   (verificável via `scripts/resume_generate.py --check-bootstrap-budget <reads>`).
 
 Para exploração ambígua de dependências/assinaturas num consumidor onde o usuário já ativou o
 acelerador local (ver [`docs/GRAFT.md`](../docs/GRAFT.md)), Planner e Maker podem consultar o

@@ -106,3 +106,25 @@ segundo o método de trabalho (`work_method`) configurado:
 2. **Isolamento de árvores arquivadas (AC17):**
    A descoberta operacional automática ignora terminantemente qualquer caminho sob `project/evidence/` ou `evidence/`.
    Snapshots preservados (como os artefatos de T012) constituem dados históricos de auditoria e jamais configuram instrução ou estado ativo.
+
+---
+
+## 7. Teto mecânico de leituras de bootstrap (`bootstrap_on_demand_budget`)
+
+Na retomada em sessão limpa orientada por `resume.json`, o agente reconstrói seu contexto operacional
+consumindo as seções `inline` entregues no manifesto e realizando consultas seletivas sob demanda.
+Para evitar que o agente reintroduza silenciosamente o histórico completo ou execute leituras exploratórias
+desmedidas antes de agir, a política fixa um teto mecânico e verificável:
+
+- **Parâmetro:** `bootstrap_on_demand_budget` (default operacional: `5` leituras `on_demand`),
+  configurável na política de contexto ou na especificação da unidade.
+- **Métrica contabilizada:** Cada invocação de ferramenta de leitura seletiva (`scripts/read_section.py`
+  ou leitura pontual de trecho) executada desde a inicialização da sessão nova até o primeiro despacho
+  material ou decisão de coordenação.
+- **Semântica fail-closed:**
+  Se a contagem de leituras sob demanda de bootstrap exceder o teto alocado (`reads_count > max_budget`),
+  o sistema emite `STOP: bootstrap_budget_exceeded`, bloqueando o prosseguimento.
+  A continuidade exige justificativa explícita registrada na evidência da rodada ou elevação formal
+  do orçamento na política autorizada da unidade.
+- **Verificação mecânica:** O utilitário `scripts/resume_generate.py --check-bootstrap-budget <reads> [--max-budget <N>] [--json]`
+  permite a validação determinística desse teto em scripts, CI e portões pré-despacho.

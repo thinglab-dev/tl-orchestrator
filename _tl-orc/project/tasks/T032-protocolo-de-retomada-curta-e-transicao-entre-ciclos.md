@@ -5,7 +5,7 @@ deliverable: package
 standalone: true
 method: native
 status: ready
-state_revision: 2
+state_revision: 3
 depends_on: [T022, T023]
 blocked_by: []
 origin: user (autorizacao formal em 2026-09-17 para institucionalizar as conclusoes de T023 e a base tecnica de T022; rework_round 1 ratificado para sanar acoplamento de limiar, metadata volátil e verificabilidade de bootstrap)
@@ -14,7 +14,7 @@ spec_author: orchestrator
 spec_revision: 83a410d9244726c8
 rework_round: 1
 affects_context: []
-effective_authors: [google]
+effective_authors: [google, anthropic]
 checker_independence: required
 content_paths:
   - docs/WORK_MODEL.md

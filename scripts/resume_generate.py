@@ -8,11 +8,15 @@ resolved phase context, and strict pre-dispatch integrity verification (AC02, AC
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
+
+DEFAULT_GENERATOR_VERSION = "resume_generate/1.0.0 (T032)"
+DEFAULT_BOOTSTRAP_BUDGET = 5
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -55,6 +59,7 @@ DEFAULT_CONTEXT_POLICY: dict[str, Any] = {
         "raw_logs",
         "full_architecture",
     ],
+    "bootstrap_on_demand_budget": DEFAULT_BOOTSTRAP_BUDGET,
     "phases": {
         "planning": {
             "active_unit.spec": "inline",
@@ -150,6 +155,13 @@ def validate_context_policy(policy: dict[str, Any]) -> None:
                 raise ValueError(f"Invalid class '{k}' in phase '{req_phase}'")
             if v not in VALID_POLICY_DELIVERIES:
                 raise ValueError(f"Invalid delivery mode '{v}' for class '{k}' in phase '{req_phase}'")
+
+    if "bootstrap_on_demand_budget" in policy:
+        budget = policy["bootstrap_on_demand_budget"]
+        if not isinstance(budget, int) or budget < 0:
+            raise ValueError(
+                f"Context policy 'bootstrap_on_demand_budget' must be an integer >= 0, got {budget}"
+            )
 
 
 def parse_frontmatter(text: str) -> dict[str, Any]:
@@ -320,27 +332,81 @@ def derive_next_action(task_id: str, method: str, status: str, phase: str) -> st
     return f"Execute {phase} phase for {method} unit {task_id} (status: {status})."
 
 
-def verify_resume_manifest(manifest: dict[str, Any], repo_root: Path) -> tuple[bool, list[str]]:
+def check_bootstrap_budget(
+    reads_count: int,
+    max_budget: int = DEFAULT_BOOTSTRAP_BUDGET,
+) -> tuple[bool, str]:
     """
-    Verify pre-dispatch integrity of manifest against current disk content (AC15).
+    Evaluate whether on-demand bootstrap reads exceeded the allocated budget (AC06).
+    Returns (True, message) if within budget, or (False, 'STOP: bootstrap_budget_exceeded: ...').
+    """
+    if reads_count < 0:
+        return False, "Invalid negative reads count"
+    if reads_count > max_budget:
+        return (
+            False,
+            f"STOP: bootstrap_budget_exceeded (reads: {reads_count}, max_budget: {max_budget})",
+        )
+    return True, f"OK: bootstrap budget preserved ({reads_count}/{max_budget} reads used)"
+
+
+def verify_resume_manifest_structured(
+    manifest: dict[str, Any],
+    repo_root: Path,
+) -> dict[str, Any]:
+    """
+    Verify pre-dispatch integrity of manifest against current disk content (AC03, AC15).
     Inspects each source declared in manifest["sources"], reads section with select_section,
-    computes canonical digest (masking volatile fields for STATUS.md frontmatter),
+    computes canonical digest (masking volatile fields for frontmatter selectors),
     and compares to manifest digest.
-    Returns (True, []) or (False, list_of_errors).
+    Returns dictionary with:
+      - status: 'verified', 'stale_package_rejected', 'source_missing', or 'schema_invalid'
+      - ok: bool
+      - checked_sources_count: int
+      - errors: list of error strings
+      - mismatches: list of detailed mismatch dictionaries
     """
     errors: list[str] = []
-    sources = manifest.get("sources", [])
-    if not sources:
+    mismatches: list[dict[str, Any]] = []
+
+    if not isinstance(manifest, dict):
+        errors.append("Manifest must be a JSON object.")
+        return {
+            "status": "schema_invalid",
+            "ok": False,
+            "checked_sources_count": 0,
+            "errors": errors,
+            "mismatches": [],
+        }
+
+    sources = manifest.get("sources")
+    if not isinstance(sources, list) or not sources:
         errors.append("Manifest contains no sources to verify.")
-        return False, errors
+        return {
+            "status": "schema_invalid",
+            "ok": False,
+            "checked_sources_count": 0,
+            "errors": errors,
+            "mismatches": [],
+        }
+
+    has_missing_source = False
+    has_mismatch = False
 
     for src in sources:
+        if not isinstance(src, dict):
+            errors.append(f"Invalid source entry (not an object): {src}")
+            has_mismatch = True
+            continue
+
         rel_path = src.get("path")
         selector = src.get("selector")
         expected_digest = src.get("digest")
 
         if not rel_path or not selector or not expected_digest:
-            errors.append(f"Invalid source entry: {src}")
+            errors.append(f"Invalid source entry (missing path/selector/digest): {src}")
+            has_mismatch = True
+            mismatches.append({"source": src, "type": "invalid_source_entry"})
             continue
 
         src_file = repo_root / rel_path
@@ -348,15 +414,29 @@ def verify_resume_manifest(manifest: dict[str, Any], repo_root: Path) -> tuple[b
             resolved_root = repo_root.resolve()
             if not src_file.resolve().is_relative_to(resolved_root):
                 errors.append(f"Integrity check failed: source path escapes repository: '{rel_path}'")
+                has_missing_source = True
+                mismatches.append({"path": rel_path, "type": "path_escapes_repository"})
                 continue
         except (OSError, ValueError):
             errors.append(f"Integrity check failed: source path could not be resolved: '{rel_path}'")
-            continue
-        if not src_file.is_file():
-            errors.append(f"Integrity check failed: source file '{rel_path}' not found")
+            has_missing_source = True
+            mismatches.append({"path": rel_path, "type": "path_resolution_error"})
             continue
 
-        content = src_file.read_text(encoding="utf-8")
+        if not src_file.is_file():
+            errors.append(f"Integrity check failed: source file '{rel_path}' not found")
+            has_missing_source = True
+            mismatches.append({"path": rel_path, "type": "file_not_found"})
+            continue
+
+        try:
+            content = src_file.read_text(encoding="utf-8")
+        except Exception as exc:
+            errors.append(f"Integrity check failed: could not read '{rel_path}': {exc}")
+            has_missing_source = True
+            mismatches.append({"path": rel_path, "type": "read_error", "error": str(exc)})
+            continue
+
         if selector == "frontmatter":
             try:
                 sec = select_section(content, "frontmatter")
@@ -364,19 +444,20 @@ def verify_resume_manifest(manifest: dict[str, Any], repo_root: Path) -> tuple[b
             except SelectorNotFoundError:
                 section_content = content
 
-            if (rel_path == "_tl-orc/project/STATUS.md" or rel_path.endswith("STATUS.md")):
-                actual_digest = compute_sha256(mask_volatile_fields(section_content))
-            else:
-                actual_digest = compute_sha256(section_content)
+            actual_digest = compute_sha256(mask_volatile_fields(section_content))
         else:
             try:
                 sec = select_section(content, selector)
                 actual_digest = sec.sha256
             except SelectorNotFoundError:
                 errors.append(f"Integrity check failed: selector '{selector}' not found in '{rel_path}'")
+                has_mismatch = True
+                mismatches.append({"path": rel_path, "selector": selector, "type": "selector_not_found"})
                 continue
             except Exception as exc:
                 errors.append(f"Integrity check failed: error selecting '{selector}' in '{rel_path}': {exc}")
+                has_mismatch = True
+                mismatches.append({"path": rel_path, "selector": selector, "type": "selection_error", "error": str(exc)})
                 continue
 
         if actual_digest != expected_digest:
@@ -384,8 +465,40 @@ def verify_resume_manifest(manifest: dict[str, Any], repo_root: Path) -> tuple[b
                 f"Integrity check failed: digest mismatch for {rel_path} @ {selector}. "
                 f"Expected {expected_digest}, got {actual_digest}"
             )
+            has_mismatch = True
+            mismatches.append({
+                "path": rel_path,
+                "selector": selector,
+                "expected_digest": expected_digest,
+                "actual_digest": actual_digest,
+                "type": "digest_mismatch",
+            })
 
-    return (len(errors) == 0), errors
+    if has_missing_source:
+        status = "source_missing"
+    elif has_mismatch:
+        status = "stale_package_rejected"
+    elif errors:
+        status = "schema_invalid"
+    else:
+        status = "verified"
+
+    return {
+        "status": status,
+        "ok": (status == "verified"),
+        "checked_sources_count": len(sources),
+        "errors": errors,
+        "mismatches": mismatches,
+    }
+
+
+def verify_resume_manifest(manifest: dict[str, Any], repo_root: Path) -> tuple[bool, list[str]]:
+    """
+    Verify pre-dispatch integrity of manifest against current disk content (AC15).
+    Returns (True, []) or (False, list_of_errors).
+    """
+    res = verify_resume_manifest_structured(manifest, repo_root)
+    return res["ok"], res["errors"]
 
 
 def generate_resume_manifest(
@@ -394,6 +507,8 @@ def generate_resume_manifest(
     phase: str,
     policy_path: Optional[Path] = None,
     strict_integrity: bool = True,
+    generated_at: Optional[str] = None,
+    generator_version: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Build the deterministic resume manifest data.
@@ -413,6 +528,8 @@ def generate_resume_manifest(
     task_id = str(task_fm.get("id", task_path.stem.split("-")[0]))
     method = resolve_work_method(repo_root, task_fm)
     spec_revision = str(task_fm.get("spec_revision", "unknown"))
+    state_revision = int(task_fm.get("state_revision", 0))
+    content_id = task_fm.get("content_id")
     effective_authors = resolve_effective_authors(task_fm)
 
     try:
@@ -439,6 +556,14 @@ def generate_resume_manifest(
         if entry not in sources:
             sources.append(entry)
 
+    # Add active task frontmatter (AC02, Spec 4)
+    try:
+        task_fm_sec = select_section(task_text, "frontmatter")
+        task_fm_digest = compute_sha256(mask_volatile_fields(task_fm_sec.content))
+    except SelectorNotFoundError:
+        task_fm_digest = compute_sha256(mask_volatile_fields(task_text))
+    add_source(rel_task_path, "frontmatter", task_fm_digest)
+
     # Add STATUS.md source with volatile fields masked
     status_path = repo_root / "_tl-orc" / "project" / "STATUS.md"
     if status_path.is_file():
@@ -456,9 +581,9 @@ def generate_resume_manifest(
         proj_text = project_path.read_text(encoding="utf-8")
         try:
             proj_sec = select_section(proj_text, "frontmatter")
-            proj_digest = proj_sec.sha256
+            proj_digest = compute_sha256(mask_volatile_fields(proj_sec.content))
         except SelectorNotFoundError:
-            proj_digest = compute_sha256(proj_text)
+            proj_digest = compute_sha256(mask_volatile_fields(proj_text))
         add_source("_tl-orc/PROJECT.md", "frontmatter", proj_digest)
 
     review_section = None
@@ -558,11 +683,18 @@ def generate_resume_manifest(
 
     next_action = derive_next_action(task_id, method, str(task_fm.get("status", "unknown")), phase)
 
+    if generated_at is None:
+        generated_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     manifest = {
         "schema_version": 1,
         "active_work_ref": active_work_ref,
         "phase": phase,
         "spec_revision": spec_revision,
+        "state_revision": state_revision,
+        "content_id": content_id,
+        "generated_at": generated_at,
+        "generator_version": generator_version or DEFAULT_GENERATOR_VERSION,
         "sources": sources,
         "resolved_context": resolved_context,
         "effective_authors": effective_authors,
@@ -575,6 +707,10 @@ def generate_resume_manifest(
                 "reason": "Volatile coordinator block inside frontmatter must be read unconditionally",
             }
         ],
+        "bootstrap_budget": {
+            "max_on_demand_reads": policy.get("bootstrap_on_demand_budget", DEFAULT_BOOTSTRAP_BUDGET),
+            "unit": "on_demand_reads",
+        },
     }
 
     # Pre-dispatch Integrity Gate (AC15)
@@ -607,28 +743,91 @@ def main() -> None:
         "--verify",
         help="Verify pre-dispatch integrity of an existing resume manifest JSON file against disk.",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output structured JSON (used with --verify or --check-bootstrap-budget).",
+    )
+    parser.add_argument(
+        "--check-bootstrap-budget",
+        type=int,
+        metavar="READS_COUNT",
+        help="Check if on-demand reads count exceeds bootstrap budget.",
+    )
+    parser.add_argument(
+        "--max-budget",
+        type=int,
+        default=DEFAULT_BOOTSTRAP_BUDGET,
+        help=f"Max bootstrap budget for --check-bootstrap-budget (default: {DEFAULT_BOOTSTRAP_BUDGET}).",
+    )
+    parser.add_argument(
+        "--generated-at",
+        help="Explicit ISO timestamp for generated_at (default: current UTC timestamp).",
+    )
     args = parser.parse_args()
 
     repo_root = Path.cwd()
 
+    if args.check_bootstrap_budget is not None:
+        ok, msg = check_bootstrap_budget(args.check_bootstrap_budget, args.max_budget)
+        if args.json:
+            result = {
+                "status": "verified" if ok else "bootstrap_budget_exceeded",
+                "ok": ok,
+                "reads_count": args.check_bootstrap_budget,
+                "max_budget": args.max_budget,
+                "message": msg,
+            }
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            if ok:
+                print(msg)
+            else:
+                print(f"ERROR: {msg}", file=sys.stderr)
+        sys.exit(0 if ok else 1)
+
     if args.verify:
         verify_path = Path(args.verify)
         if not verify_path.is_file():
-            print(f"ERROR: manifest file to verify not found: {verify_path}", file=sys.stderr)
+            err_msg = f"manifest file to verify not found: {verify_path}"
+            if args.json:
+                print(json.dumps({
+                    "status": "source_missing",
+                    "ok": False,
+                    "checked_sources_count": 0,
+                    "errors": [err_msg],
+                    "mismatches": [{"path": str(verify_path), "type": "file_not_found"}]
+                }, indent=2, sort_keys=True))
+            else:
+                print(f"ERROR: {err_msg}", file=sys.stderr)
             sys.exit(1)
         try:
             manifest_to_verify = json.loads(verify_path.read_text(encoding="utf-8"))
         except Exception as exc:
-            print(f"ERROR: could not parse manifest JSON: {exc}", file=sys.stderr)
+            err_msg = f"could not parse manifest JSON: {exc}"
+            if args.json:
+                print(json.dumps({
+                    "status": "schema_invalid",
+                    "ok": False,
+                    "checked_sources_count": 0,
+                    "errors": [err_msg],
+                    "mismatches": []
+                }, indent=2, sort_keys=True))
+            else:
+                print(f"ERROR: {err_msg}", file=sys.stderr)
             sys.exit(1)
 
-        ok, errors = verify_resume_manifest(manifest_to_verify, repo_root)
-        if not ok:
-            for err in errors:
-                print(f"ERROR: {err}", file=sys.stderr)
-            sys.exit(1)
-        print("OK: Resume manifest integrity verified against disk.")
-        sys.exit(0)
+        result = verify_resume_manifest_structured(manifest_to_verify, repo_root)
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+            sys.exit(0 if result["ok"] else 1)
+        else:
+            if not result["ok"]:
+                for err in result["errors"]:
+                    print(f"ERROR: {err}", file=sys.stderr)
+                sys.exit(1)
+            print("OK: Resume manifest integrity verified against disk.")
+            sys.exit(0)
 
     try:
         task_path = find_active_task(repo_root, args.task)
@@ -643,6 +842,7 @@ def main() -> None:
             phase=phase,
             policy_path=policy_path,
             strict_integrity=not args.no_strict,
+            generated_at=args.generated_at,
         )
     except Exception as exc:
         print(f"ERROR: resume_generate failed: {exc}", file=sys.stderr)

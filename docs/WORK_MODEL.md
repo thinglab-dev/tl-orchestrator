@@ -164,22 +164,62 @@ Ordem de escrita, sem atomicidade: primeiro a unidade, depois as projeções loc
 atrasados; divergência esperada segue a [tabela de recuperação](#transição-e-recuperação) e não
 exige confirmação adicional.
 
-### Manifesto derivado de retomada (`resume.json`)
+### Protocolo de retomada curta, ciclo de vida e barreira de autoridade (`resume.json`)
 
-A retomada de sessão é coordenada pelo manifesto derivado `resume.json`, gerado deterministicamente
-(duas execuções sobre a mesma árvore produzem saída byte-a-byte idêntica). O manifesto carrega a própria
-procedência através de uma lista de `sources` com `path`, `selector` (por heading path) e `digest`
-(SHA-256 canônico).
+A transição entre ciclos de trabalho pode ser coordenada pelo manifesto derivado `resume.json`,
+gerado deterministicamente sob demanda (`scripts/resume_generate.py`). O pacote curto atua como um
+**índice de navegação e atestação mecânica de integridade**, nunca como autoridade normativa concorrente.
 
-Campos de coordenação (`effective_authors`, `open_items`, `next_action`) são cópia derivada para consumo
-rápido; a autoridade soberana permanece nos documentos originais (Task, `STATUS.md` e evidências). O
-manifesto inclui a seção `resolved_context` (Resolved Context Manifest), que mapeia cada classe de
-informação da política de contexto para o modo de entrega (`inline`, `excerpt`, `on_demand`)
-apropriado à fase.
+1. **Ciclo de vida e natureza sob demanda:**
+   - O `resume.json` é um artefato efêmero compilado para transporte e conferência pré-despacho, gerado
+     em diretório de trabalho temporário (`staging/` ou `scratch/`). Ele não é commitado nem mantido como
+     registro estático de autoridade; a autoridade soberana do método permanece nos documentos originais
+     (Task, `STATUS.md`, `PROJECT.md` e evidências duráveis).
+   - O manifesto carrega a própria procedência através de `sources`, relacionando cada fonte a seu `path`,
+     `selector` (por heading path ou `frontmatter`) e `digest` (SHA-256 canônico).
+   - Campos derivados (`open_items`, `next_action`, `reason`) são resumos auxiliares para navegação rápida.
+     **Barreira contratual contra autoridade indevida:** é expressamente PROIBIDO ao Orquestrador, Checker
+     ou qualquer agente citar campos derivados do pacote como prova em decisões, pareceres ou relatórios.
+     A única citação probatória válida é a tupla `(path, selector, digest)` inspecionada diretamente nos
+     documentos fontes oficiais em disco.
 
-Antes de qualquer despacho, o gerador do manifesto executa uma verificação estrita de integridade:
-se qualquer digest das fontes congeladas divergir dos arquivos atuais em disco, a operação encerra
-com erro, impedindo o prosseguimento com contexto corrompido ou stale.
+2. **Separação entre metadata não-identitária e identidade canônica:**
+   - O campo `generated_at` atua estritamente como **metadata temporal de proveniência não-identitária**:
+     não participa do `content_id`, dos digests de fontes nem dos critérios de rejeição de integridade.
+     Duas compilações sucessivas sobre a mesma árvore produzem exatamente a mesma identidade canônica e os
+     mesmos digests de fontes, ainda que exibam timestamps distintos.
+   - A identidade verificável do pacote compreende estritamente `sources`, `resolved_context`,
+     `spec_revision`, `state_revision`, `content_id` e `generator_version`.
+
+3. **Verificação mecânica pré-despacho (`fail-closed`):**
+   - Na sessão limpa subsequente à transição, o primeiro comando obrigatório é a validação mecânica
+     via `python3 scripts/resume_generate.py --verify <caminho> --json`.
+   - Se retornar `status: verified`, o agente consome as classes `inline` e realiza leituras `on_demand`
+     estritamente guiadas pela necessidade, respeitando o teto de bootstrap (`bootstrap_on_demand_budget`).
+   - Se retornar `status: stale_package_rejected` (divergência em qualquer fonte congelada, incluindo
+     frontmatter da Task ou STATUS.md) ou `status: source_missing`, o pacote é descartado imediatamente
+     e o agente reconstrói o estado diretamente das fontes oficiais em disco.
+
+4. **Critérios absolutos de continuidade (quando NÃO rotacionar sessão):**
+   A rotação de sessão visa mitigar a fadiga de contexto e a atenuação de atenção em conversas longas, mas
+   nunca deve ser executada de forma cega. Os critérios **absolutos** que impedem a rotação são:
+   - *Incompatibilidade ou falha de integridade:* árvore de trabalho em estado transiente, teste quebrado
+     ou falha de integridade que impeça a fixação de um checkpoint estável;
+   - *Lote finito em andamento:* execução ativa de batch (`active_batch != none` em `STATUS.md`), onde o
+     custo de interrupção e bootstrap sobrepuja a continuidade do condutor;
+   - *Modos conversacionais discursivos:* fases que exigem continuidade imediata de diálogo, como `debate`;
+   - *Content paths massivos:* unidade cujo escopo de caminhos seja tão vasto que a leitura seletiva
+     sob demanda degeneraria em releitura de quase todo o repositório;
+   - *Contexto confortavelmente abaixo do limiar:* sessão cujo consumo acumulado esteja muito aquém da
+     recomendação operacional daquele ambiente.
+
+5. **Não-presunção de economia universal de tokens ou custo:**
+   A retomada curta é um mecanismo de **governança, higiene de contexto e segurança cognitiva**
+   (comprovado na prevenção de vícios de histórico e violações operacionais). Ela NÃO garante redução
+   incondicional de custos monetários ou de tokens brutos: em ambientes com suporte a cache de prefixo
+   profundo sobre histórico linear, a reinicialização de sessão pode demandar mais tokens brutos na
+   reconstrução de contexto do que a continuidade. A decisão de rotacionar deve considerar os limites e
+   a infraestrutura de cada harness.
 
 ### Referências entre áreas
 

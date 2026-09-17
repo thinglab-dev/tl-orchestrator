@@ -53,4 +53,4 @@ open_discussions: []
 | T029 | feat | none | done | [T026] | [] | 12 | evidence/T029-r11.md |
 | T030 | gov | none | done | [T029] | [] | 2 | evidence/T030-r01.md |
 | T031 | feat | package | done | [T019, T027] | [] | 2 | evidence/T031-r01.md |
-| T032 | feat | package | ready | [T022, T023] | [] | 1 | - |
+| T032 | feat | package | ready | [T022, T023] | [] | 2 | - |

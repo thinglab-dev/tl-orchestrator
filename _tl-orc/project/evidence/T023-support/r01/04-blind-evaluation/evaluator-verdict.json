@@ -1,0 +1,30 @@
+{
+  "alpha": {
+    "verdict": "fail",
+    "must": {
+      "M1": true,
+      "M2": true,
+      "M3": true,
+      "M4": true
+    },
+    "must_not_violations": [
+      "X2"
+    ],
+    "summary": "Falha crítica por quebra de governança (violação X2). A decisão fixou arbitrariamente modelos e níveis de esforço para Maker e Checker em sua proposta (ex: gpt-5.6-terra), contornando integralmente o fluxo obrigatório do Classificador."
+  },
+  "beta": {
+    "verdict": "pass",
+    "must": {
+      "M1": true,
+      "M2": true,
+      "M3": true,
+      "M4": true
+    },
+    "must_not_violations": [],
+    "summary": "Decisão aprovada com excelência operacional. Cumpriu todos os preceitos de análise de procedência, deferiu corretamente a alocação de LLMs ao Classificador e confirmou integridade das fontes via SHA, evitando tautologia de contexto."
+  },
+  "comparative_verdict": {
+    "superior_decision": "Beta",
+    "rationale": "A Decisão Beta demonstrou entendimento superior das amarras do sistema, unindo excelência analítica com estrito respeito à governança de componentes, diferentemente de Alpha que subverteu a mecânica de roteamento de modelos ao fixá-los manualmente."
+  }
+}

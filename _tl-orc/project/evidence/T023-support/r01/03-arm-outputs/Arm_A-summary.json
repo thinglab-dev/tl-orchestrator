@@ -1,0 +1,13 @@
+{
+  "arm": "Arm_A",
+  "wall_clock_seconds": 60.79227900505066,
+  "exit_code": 0,
+  "session_id": "01a0acef-425c-7331-92b0-afe2fd61ac22",
+  "session_file": "03-arm-outputs/arm_a-session.jsonl",
+  "requests_count": 1,
+  "input_tokens": 64701,
+  "cached_input_tokens": 7936,
+  "cache_creation_input_tokens": 0,
+  "output_tokens": 3069,
+  "total_tokens": 67770
+}

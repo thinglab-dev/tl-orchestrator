@@ -67,6 +67,7 @@ e **passou com 100% de sucesso** em todos os commits desta branch:
 | `1bed19e` | 35276021525 | success | 4/4 portões canônicos verdes |
 | `84b45c1` | 35277289909 | success | 4/4 portões canônicos verdes |
 | `44364ce` | 35290129200 | success | 4/4 portões canônicos verdes |
+| `2cdfcc6` | 35291396267 | success | 4/4 portões canônicos verdes |
 
 ### Registro Canônico de Execução do Full Gate no commit 44364ce95b0db2d0c409fdef69d4564188d1670d:
 - **Run ID**: `35290129200`
@@ -77,6 +78,25 @@ e **passou com 100% de sucesso** em todos os commits desta branch:
 - **Status**: `completed`
 - **Conclusion**: `success`
 - **URL**: `https://github.com/thinglab-dev/tl-orchestrator/actions/runs/35290129200`
+- **Passos Executados e Aprovados (todos com conclusão success)**:
+  1. `Set up job`: success
+  2. `Checkout without persisted credentials`: success
+  3. `Validate repository structure` (`python3 scripts/validate_repository.py`): success
+  4. `Run behavior tests for the optional supervisor` (`python3 -m unittest discover -s tests -p "test_*.py" -v`): success (319 testes OK no Linux)
+  5. `Run contractual and domain test suites` (`python3 -m unittest discover -s scripts/tests -p "test_*.py" -v`): success (614 testes OK no Linux)
+  6. `Run mechanical lineage and governance audit` (`python3 scripts/audit_lineage.py`): success
+  7. `Post Checkout without persisted credentials`: success
+  8. `Complete job`: success
+
+### Registro Canônico de Execução do Full Gate no commit 2cdfcc654b58de44046c11bee1d6093da50009f7:
+- **Run ID**: `35291396267`
+- **Workflow**: `Validate repository` (`.github/workflows/validate.yml`)
+- **Runner**: `ubuntu-latest`
+- **Head SHA**: `2cdfcc654b58de44046c11bee1d6093da50009f7`
+- **Event**: `pull_request` (PR #60)
+- **Status**: `completed`
+- **Conclusion**: `success`
+- **URL**: `https://github.com/thinglab-dev/tl-orchestrator/actions/runs/35291396267`
 - **Passos Executados e Aprovados (todos com conclusão success)**:
   1. `Set up job`: success
   2. `Checkout without persisted credentials`: success

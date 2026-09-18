@@ -388,6 +388,241 @@ class AutoStoryRuntimeTest(unittest.TestCase):
             fx.runtime()
         self.assertIn("story_authority_mode", str(raised.exception))
 
+    # ---- §6 counterproofs against persisted self-digested expansion ----------------------
+
+    def test_auto_story_refuses_persisted_self_digested_proposal_with_expanded_effect(self) -> None:
+        """A persisted proposal with expanded effects (even self-digested) must HARD STOP before child_open."""
+        fx = Fixture(self.root, units=1)
+        spec_sha = hashlib.sha256(SPEC_A.encode()).hexdigest()
+        payload = story.build_authority_payload(
+            authority_id="A001", work_ref="T001", authorized_spec_revision=spec_sha[:16],
+            authorized_spec_sha256=spec_sha,
+            authorized_write_scope={"required_mutation_targets": ["pkg"],
+                                    "conditional_mutation_targets": [],
+                                    "forbidden_paths": ["secrets"]},
+            allowed_effects={"local_write": True, "local_commit": True, "local_merge": True,
+                             "pull_request": False, "push": False, "tag": False, "release": False,
+                             "merge": False},
+            protected_paths=[], global_model_call_budget=8, max_child_batches=2,
+            max_consecutive_failed_batches=2, wall_clock_deadline="2027-01-01T00:00:00Z",
+            hard_stops=["scope_expansion", "model_call_budget_exhausted", "state_integrity"])
+        envelope = story.freeze_authority(
+            payload,
+            authorized_literal=story.authorization_literal("T001", story.root_authority_digest(payload)),
+            authority_source="operator-terminal", authorized_at="2026-09-17T09:00:00Z")
+        story.publish_authority(fx.repo, envelope)
+        git(fx.repo, "add", "-A")
+        git(fx.repo, "commit", "-q", "-m", "freeze story authority A001")
+
+        auth = story.StoryAuthority(envelope, fx.repo / story.RUNTIME_AUTHORITY_DIR / "A001", repo=fx.repo)
+        head = git(fx.repo, "rev-parse", "HEAD")
+        # Craft a proposal with expanded effects ("push": True, denied by root envelope)
+        proposal = {
+            "schema_version": 1,
+            "authority_id": "A001",
+            "child_batch_id": "B001",
+            "parent_child_batch_id": None,
+            "work_ref": "T001",
+            "authorized_spec_revision": spec_sha[:16],
+            "authorized_spec_sha256": spec_sha,
+            "required_mutation_targets": ["pkg"],
+            "conditional_mutation_targets": [],
+            "forbidden_paths": ["secrets"],
+            "protected_paths": [],
+            "allowed_effects": {
+                "local_write": True, "local_commit": True, "local_merge": True,
+                "pull_request": False, "push": True, "tag": False, "release": False,
+                "merge": False,
+            },
+            "model_call_budget": 4,
+            "functional_parent_checkpoint": None,
+            "derived_from_action_items": [],
+            "lineage": {"governance_base_commit": head, "story_baseline_commit": head},
+        }
+        proposal_digest = story.digest_of(proposal)
+        proof = {
+            "schema_version": 1,
+            "authority_id": "A001",
+            "work_ref": "T001",
+            "child_batch_id": "B001",
+            "parent_child_batch_id": None,
+            "root_authority_digest": envelope["root_authority_digest"],
+            "parent_authority_digest": envelope["root_authority_digest"],
+            "parent_batch_digest": "",
+            "child_proposal_digest": proposal_digest,
+            "functional_parent_checkpoint": None,
+            "unresolved_action_items_digest": "",
+            "granted_model_calls": 4,
+            "checks": [{"check": "effects_subset", "result": "pass"}],
+        }
+        proof["derivation_proof_digest"] = story.digest_of(proof)
+
+        # Directly persist the self-digested proposal/proof on disk and in journal
+        (auth.runtime_dir / "proposals").mkdir(parents=True, exist_ok=True)
+        auth.child_proposal_path("B001").write_text(json.dumps(proposal), encoding="utf-8")
+        auth.child_proof_path("B001").write_text(json.dumps(proof), encoding="utf-8")
+        auth.journal.append(
+            "child_derived", authority_id="A001", child_batch_id="B001",
+            parent_child_batch_id=None,
+            root_authority_digest=proof["root_authority_digest"],
+            parent_authority_digest=proof["parent_authority_digest"],
+            parent_batch_digest="",
+            child_proposal_digest=proposal_digest,
+            derivation_proof_digest=proof["derivation_proof_digest"],
+            granted_model_calls=4,
+            functional_parent_checkpoint=None,
+            unresolved_action_items_digest="")
+
+        fx.batch["batch_id"] = "B001"
+        fx.batch["authorization"].update({
+            "story_authority_mode": "AUTO_STORY",
+            "story_authority_id": "A001",
+            "root_authority_digest": envelope["root_authority_digest"],
+            "child_proposal_digest": proposal_digest,
+            "derivation_proof_digest": proof["derivation_proof_digest"],
+            "permitted_effects": {
+                "local_write": True, "local_commit": True, "local_merge": True,
+                "pull_request": False, "push": True, "tag": False, "release": False,
+            },
+        })
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+
+        # Verify that record_child_derived under lease also refuses this proposal
+        with auth:
+            with self.assertRaises(story.HardStop) as rec_ctx:
+                auth.record_child_derived(proposal, proof)
+            self.assertEqual(rec_ctx.exception.reason, "effect_expansion")
+
+        # Runtime must HARD STOP (surfaced as Refusal caused by HardStop) before child_open or worker execution
+        runtime = fx.runtime()
+        with self.assertRaises(tl_runtime.Refusal) as raised:
+            runtime.acquire()
+        self.assertIn("effect_expansion", str(raised.exception))
+        self.assertIsInstance(raised.exception.__cause__, story.HardStop)
+        self.assertEqual(raised.exception.__cause__.reason, "effect_expansion")
+
+        # Verify child_open was NEVER recorded
+        auth.refold()
+        child_state = (auth.state.children.get("B001") or {}).get("state")
+        self.assertNotEqual(child_state, "open")
+        events = [e["kind"] for e in auth.journal.read()[0]]
+        self.assertNotIn("child_open", events)
+
+    def test_auto_story_refuses_persisted_self_digested_proposal_with_expanded_scope(self) -> None:
+        """A persisted proposal with expanded scope (even self-digested) must HARD STOP before child_open."""
+        fx = Fixture(self.root, units=1)
+        spec_sha = hashlib.sha256(SPEC_A.encode()).hexdigest()
+        payload = story.build_authority_payload(
+            authority_id="A001", work_ref="T001", authorized_spec_revision=spec_sha[:16],
+            authorized_spec_sha256=spec_sha,
+            authorized_write_scope={"required_mutation_targets": ["pkg"],
+                                    "conditional_mutation_targets": [],
+                                    "forbidden_paths": ["secrets"]},
+            allowed_effects={"local_write": True, "local_commit": True, "local_merge": True,
+                             "pull_request": False, "push": False, "tag": False, "release": False,
+                             "merge": False},
+            protected_paths=[], global_model_call_budget=8, max_child_batches=2,
+            max_consecutive_failed_batches=2, wall_clock_deadline="2027-01-01T00:00:00Z",
+            hard_stops=["scope_expansion", "model_call_budget_exhausted", "state_integrity"])
+        envelope = story.freeze_authority(
+            payload,
+            authorized_literal=story.authorization_literal("T001", story.root_authority_digest(payload)),
+            authority_source="operator-terminal", authorized_at="2026-09-17T09:00:00Z")
+        story.publish_authority(fx.repo, envelope)
+        git(fx.repo, "add", "-A")
+        git(fx.repo, "commit", "-q", "-m", "freeze story authority A001")
+
+        auth = story.StoryAuthority(envelope, fx.repo / story.RUNTIME_AUTHORITY_DIR / "A001", repo=fx.repo)
+        head = git(fx.repo, "rev-parse", "HEAD")
+        # Craft a proposal with expanded scope (targeting outside root scope)
+        proposal = {
+            "schema_version": 1,
+            "authority_id": "A001",
+            "child_batch_id": "B001",
+            "parent_child_batch_id": None,
+            "work_ref": "T001",
+            "authorized_spec_revision": spec_sha[:16],
+            "authorized_spec_sha256": spec_sha,
+            "required_mutation_targets": ["pkg", "unauthorized_dir/malicious.py"],
+            "conditional_mutation_targets": [],
+            "forbidden_paths": ["secrets"],
+            "protected_paths": [],
+            "allowed_effects": {
+                "local_write": True, "local_commit": True, "local_merge": True,
+                "pull_request": False, "push": False, "tag": False, "release": False,
+                "merge": False,
+            },
+            "model_call_budget": 4,
+            "functional_parent_checkpoint": None,
+            "derived_from_action_items": [],
+            "lineage": {"governance_base_commit": head, "story_baseline_commit": head},
+        }
+        proposal_digest = story.digest_of(proposal)
+        proof = {
+            "schema_version": 1,
+            "authority_id": "A001",
+            "work_ref": "T001",
+            "child_batch_id": "B001",
+            "parent_child_batch_id": None,
+            "root_authority_digest": envelope["root_authority_digest"],
+            "parent_authority_digest": envelope["root_authority_digest"],
+            "parent_batch_digest": "",
+            "child_proposal_digest": proposal_digest,
+            "functional_parent_checkpoint": None,
+            "unresolved_action_items_digest": "",
+            "granted_model_calls": 4,
+            "checks": [{"check": "scope_subset", "result": "pass"}],
+        }
+        proof["derivation_proof_digest"] = story.digest_of(proof)
+
+        # Directly persist the self-digested proposal/proof on disk and in journal
+        (auth.runtime_dir / "proposals").mkdir(parents=True, exist_ok=True)
+        auth.child_proposal_path("B001").write_text(json.dumps(proposal), encoding="utf-8")
+        auth.child_proof_path("B001").write_text(json.dumps(proof), encoding="utf-8")
+        auth.journal.append(
+            "child_derived", authority_id="A001", child_batch_id="B001",
+            parent_child_batch_id=None,
+            root_authority_digest=proof["root_authority_digest"],
+            parent_authority_digest=proof["parent_authority_digest"],
+            parent_batch_digest="",
+            child_proposal_digest=proposal_digest,
+            derivation_proof_digest=proof["derivation_proof_digest"],
+            granted_model_calls=4,
+            functional_parent_checkpoint=None,
+            unresolved_action_items_digest="")
+
+        fx.batch["batch_id"] = "B001"
+        fx.batch["units"] = [{"id": "T001", "scope_paths": ["pkg", "unauthorized_dir/malicious.py"]}]
+        fx.batch["authorization"].update({
+            "story_authority_mode": "AUTO_STORY",
+            "story_authority_id": "A001",
+            "root_authority_digest": envelope["root_authority_digest"],
+            "child_proposal_digest": proposal_digest,
+            "derivation_proof_digest": proof["derivation_proof_digest"],
+        })
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+
+        # Verify that record_child_derived under lease also refuses this proposal
+        with auth:
+            with self.assertRaises(story.HardStop) as rec_ctx:
+                auth.record_child_derived(proposal, proof)
+            self.assertEqual(rec_ctx.exception.reason, "scope_expansion")
+
+        # Runtime must HARD STOP (surfaced as Refusal caused by HardStop) before child_open or worker execution
+        runtime = fx.runtime()
+        with self.assertRaises(tl_runtime.Refusal) as raised:
+            runtime.acquire()
+        self.assertIn("scope_expansion", str(raised.exception))
+        self.assertIsInstance(raised.exception.__cause__, story.HardStop)
+        self.assertEqual(raised.exception.__cause__.reason, "scope_expansion")
+
+        # Verify child_open was NEVER recorded
+        auth.refold()
+        child_state = (auth.state.children.get("B001") or {}).get("state")
+        self.assertNotEqual(child_state, "open")
+        events = [e["kind"] for e in auth.journal.read()[0]]
+        self.assertNotIn("child_open", events)
+
 
 if __name__ == "__main__":
     unittest.main()

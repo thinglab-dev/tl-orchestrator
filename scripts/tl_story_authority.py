@@ -882,12 +882,35 @@ class StoryAuthority:
             raise HardStop("authority_missing_or_ambiguous",
                            f"the derivation proof of {child_batch_id} is anchored in authority "
                            f"{proof.get('root_authority_digest')}, not {self.root_digest}")
+
+        # Revalidate the persisted proposal independently against the root authority envelope.
+        # A persisted proposal must be a strict, valid subset of the root envelope regardless
+        # of whether hashes matched.
+        assert_child_proposal_within_envelope(proposal, self.payload, self.state, self)
+
         return proposal, proof
 
     def record_child_derived(self, proposal: dict, proof: dict) -> dict:
         self._require_lease()
         self._require_open()
         child_id = proposal["child_batch_id"]
+
+        # Validate proposal and proof before persisting or journaling.
+        assert_child_proposal_within_envelope(proposal, self.payload, self.state, self)
+
+        proposal_digest = digest_of(proposal)
+        if proof.get("child_proposal_digest") != proposal_digest:
+            self.hard_stop("state_integrity",
+                           f"the derivation proof of {child_id} was taken over a different child proposal")
+        if proof.get("root_authority_digest") != self.root_digest:
+            self.hard_stop("authority_missing_or_ambiguous",
+                           f"the derivation proof of {child_id} is anchored in authority "
+                           f"{proof.get('root_authority_digest')}, not {self.root_digest}")
+        recomputed = digest_of({k: v for k, v in proof.items() if k != "derivation_proof_digest"})
+        if recomputed != proof.get("derivation_proof_digest"):
+            self.hard_stop("state_integrity",
+                           f"the derivation proof of {child_id} has invalid digest {proof.get('derivation_proof_digest')}, expected {recomputed}")
+
         # The digests below are only verifiable if the objects survive: persist them in canonical
         # form so a later run can re-read and re-hash them instead of trusting a hex string.
         (self.runtime_dir / "proposals").mkdir(parents=True, exist_ok=True)
@@ -1235,6 +1258,155 @@ def derive_child_proposal(
     return proposal
 
 
+def assert_child_proposal_within_envelope(
+    proposal: dict,
+    payload: dict,
+    state: Any = None,
+    authority: Any = None,
+    *,
+    now: str | None = None,
+) -> None:
+    """Prove a child proposal is a strict, verifiable subset of the authorized root envelope.
+
+    Revalidates schema, authority binding, spec immutability, scope containment, forbidden path
+    monotonicity, protected paths monotonicity, allowed effects subset, budget ceiling, deadline,
+    and (when state is provided) authority lifecycle, child limits, streak, predecessor closure,
+    and functional checkpoint inheritance.
+
+    Raises HardStop on any violation.
+    """
+    def _fail(reason: str, detail: str, **evidence: Any) -> None:
+        if authority is not None and hasattr(authority, "hard_stop"):
+            authority.hard_stop(reason, detail, **evidence)
+        raise HardStop(reason, detail, **evidence)
+
+    valid, errors = validate_against_schema_file(proposal, CHILD_PROPOSAL_SCHEMA)
+    if not valid:
+        _fail("state_integrity", f"child proposal schema validation failed: {errors}")
+
+    if (proposal.get("authority_id") != payload.get("authority_id") or
+            proposal.get("work_ref") != payload.get("work_ref")):
+        _fail("authority_missing_or_ambiguous",
+              f"child binds {proposal.get('authority_id')}/{proposal.get('work_ref')}, "
+              f"expected {payload.get('authority_id')}/{payload.get('work_ref')}")
+
+    if (proposal.get("authorized_spec_sha256") != payload.get("authorized_spec_sha256") or
+            proposal.get("authorized_spec_revision") != payload.get("authorized_spec_revision")):
+        _fail("unexpected_revision_drift",
+              f"child declares spec {str(proposal.get('authorized_spec_sha256'))[:16]} "
+              f"rev {proposal.get('authorized_spec_revision')}, but authority froze "
+              f"{str(payload.get('authorized_spec_sha256'))[:16]} rev {payload.get('authorized_spec_revision')}")
+
+    scope = payload.get("authorized_write_scope") or {}
+    authorized_union = _scope_paths(scope)
+    child_union = list(proposal.get("required_mutation_targets") or []) + list(proposal.get("conditional_mutation_targets") or [])
+    outside = sorted({path for path in child_union if not _within(path, authorized_union)})
+    if outside:
+        _fail("scope_expansion", f"paths outside the parent envelope: {outside}", outside=outside)
+
+    parent_forbidden = set(scope.get("forbidden_paths") or [])
+    child_forbidden = set(proposal.get("forbidden_paths") or [])
+    if not parent_forbidden <= child_forbidden:
+        dropped = sorted(parent_forbidden - child_forbidden)
+        _fail("scope_expansion", f"the child dropped forbidden path(s) {dropped}", dropped=dropped)
+
+    collisions = sorted({path for path in child_union if _within(path, child_forbidden)})
+    if collisions:
+        _fail("scope_expansion", f"the child authorizes path(s) it also forbids: {collisions}", collisions=collisions)
+
+    protected_violations = assert_protected_paths_monotonic(
+        payload.get("protected_paths") or [], proposal.get("protected_paths") or [])
+    if protected_violations:
+        _fail("protected_path_violation", canonical_json(protected_violations), violations=protected_violations)
+
+    proposal_effects = proposal.get("allowed_effects") or {}
+    payload_effects = payload.get("allowed_effects") or {}
+    expanded = sorted(key for key in EFFECT_KEYS
+                      if proposal_effects.get(key) and not payload_effects.get(key))
+    if expanded:
+        _fail("effect_expansion", f"the child enables effect(s) the parent denied: {expanded}", effects=expanded)
+
+    granted = int(proposal.get("model_call_budget", 0))
+    global_budget = int(payload.get("global_model_call_budget", 0))
+    if global_budget and granted > global_budget:
+        _fail("model_call_budget_exhausted",
+              f"the child requests {granted} model calls which exceeds global budget {global_budget}",
+              requested=granted, global_budget=global_budget)
+    if authority is not None and hasattr(authority, "remaining_global_budget"):
+        # At derivation time (before child is recorded in journal), the granted budget must fit in remaining budget.
+        child_id = str(proposal.get("child_batch_id", ""))
+        child_already_derived = state is not None and child_id in getattr(state, "children", {})
+        if not child_already_derived:
+            remaining = authority.remaining_global_budget
+            if granted > remaining:
+                _fail("model_call_budget_exhausted",
+                      f"the child requests {granted} model calls but the authority has {remaining} left",
+                      requested=granted, remaining=remaining)
+
+    current_time = now or now_iso()
+    deadline = payload.get("wall_clock_deadline", "")
+    if deadline and current_time > deadline:
+        _fail("wall_clock_deadline_exceeded",
+              f"now {current_time} is past the authorized deadline {deadline}")
+
+    if state is not None:
+        if getattr(state, "closed", False):
+            _fail("authority_missing_or_ambiguous",
+                  f"authority already closed as {getattr(state, 'close_state', 'unknown')}")
+
+        child_id = str(proposal.get("child_batch_id", ""))
+        child_count = len(state.children) + (0 if child_id in state.children else 1)
+        max_children = int(payload.get("max_child_batches", 0))
+        if max_children and child_count > max_children:
+            _fail("max_child_batches_exhausted",
+                  f"{child_count} child batches exceeds max_child_batches {max_children}")
+
+        active = [cid for cid in state.active_children() if cid != child_id]
+        if len(active) >= MAX_ACTIVE_CHILD_BATCHES:
+            _fail("state_integrity",
+                  f"child batch(es) {active} are still active; AUTO_STORY v1 runs one at a time")
+
+        max_failures = int(payload.get("max_consecutive_failed_batches", 0))
+        if max_failures and state.consecutive_failures >= max_failures:
+            _fail("consecutive_batch_failures_exhausted",
+                  f"{state.consecutive_failures} consecutive child batches without progress")
+
+        previous_id = proposal.get("parent_child_batch_id")
+        if previous_id:
+            if previous_id not in state.children:
+                _fail("state_integrity",
+                      f"parent_child_batch_id {previous_id!r} was never derived under this authority",
+                      known=sorted(state.children))
+            previous_closure = state.closure_of(previous_id)
+            if previous_closure is None:
+                _fail("state_integrity",
+                      f"child batch {previous_id!r} has not closed; its reviewed commit does not exist yet")
+            expected_checkpoint = {
+                "commit": previous_closure["checker_reviewed_commit"],
+                "tree": previous_closure["checker_reviewed_tree"],
+                "child_batch_id": previous_closure["child_batch_id"],
+            }
+            if proposal.get("functional_parent_checkpoint") != expected_checkpoint:
+                _fail("state_integrity",
+                      f"the child must start exactly at the unmerged commit the previous Checker reviewed "
+                      f"({expected_checkpoint['commit'][:12]}), got {(proposal.get('functional_parent_checkpoint') or {}).get('commit', 'none')}",
+                      expected=expected_checkpoint, observed=proposal.get("functional_parent_checkpoint"))
+        else:
+            if child_id in state.children:
+                all_ids = list(state.children.keys())
+                if all_ids and all_ids[0] != child_id:
+                    _fail("state_integrity",
+                          f"child {child_id} has no parent_child_batch_id but is not the first child ({all_ids})")
+            else:
+                existing_children = [cid for cid in state.children if cid != child_id]
+                if len(existing_children) > 0:
+                    _fail("state_integrity",
+                          f"story authority {payload.get('authority_id')} already has children {existing_children}; subsequent child must declare parent_child_batch_id")
+            if proposal.get("functional_parent_checkpoint") is not None:
+                _fail("state_integrity",
+                      "the first child under an authority inherits no functional checkpoint")
+
+
 def verify_derivation(
     authority: "StoryAuthority",
     child_proposal: dict,
@@ -1483,7 +1655,9 @@ _UNGOVERNED_EFFECTS = ("ci_rerun",)
 
 
 def assert_batch_matches_child_proposal(*, batch: dict, units: Iterable[Any], proposal: dict, payload: dict) -> None:
-    """Prove that the batch about to run is no wider than its derived child proposal."""
+    """Prove that the batch about to run is no wider than its derived child proposal and root authority envelope."""
+    assert_child_proposal_within_envelope(proposal=proposal, payload=payload)
+
     auth = batch.get("authorization") or {}
     if auth.get("story_authority_id") != proposal["authority_id"]:
         raise HardStop("authority_missing_or_ambiguous",
@@ -1495,6 +1669,9 @@ def assert_batch_matches_child_proposal(*, batch: dict, units: Iterable[Any], pr
     story_ref = payload["work_ref"]
     authorized_union = list(proposal["required_mutation_targets"]) + list(proposal["conditional_mutation_targets"])
     forbidden = list(proposal["forbidden_paths"])
+    root_authorized_union = _scope_paths(payload["authorized_write_scope"])
+    root_forbidden = set(payload["authorized_write_scope"].get("forbidden_paths") or [])
+
     observed = list(units)
     if len(observed) != 1:
         raise HardStop("new_work_outside_frozen_batch",
@@ -1512,10 +1689,19 @@ def assert_batch_matches_child_proposal(*, batch: dict, units: Iterable[Any], pr
     if outside:
         raise HardStop("scope_expansion",
                        f"unit {work_ref} may write {outside}, outside the derived proposal", outside=outside)
+    outside_root = sorted({path for path in scope_paths if not _within(path, root_authorized_union)})
+    if outside_root:
+        raise HardStop("scope_expansion",
+                       f"unit {work_ref} may write {outside_root}, outside the root authority envelope", outside=outside_root)
+
     collides = sorted({path for path in scope_paths if _within(path, forbidden)})
     if collides:
         raise HardStop("scope_expansion",
                        f"unit {work_ref} may write {collides}, which the proposal forbids", collides=collides)
+    collides_root = sorted({path for path in scope_paths if _within(path, root_forbidden)})
+    if collides_root:
+        raise HardStop("scope_expansion",
+                       f"unit {work_ref} may write {collides_root}, which the root authority envelope forbids", collides=collides_root)
 
     effects = auth.get("permitted_effects") or {}
     unmapped = sorted(set(effects) - set(_EFFECT_MAP) - set(_UNGOVERNED_EFFECTS))
@@ -1526,12 +1712,21 @@ def assert_batch_matches_child_proposal(*, batch: dict, units: Iterable[Any], pr
     if expanded:
         raise HardStop("effect_expansion",
                        f"batch enables effect(s) the derived proposal denies: {expanded}", effects=expanded)
+    expanded_root = sorted(key for key, mapped in _EFFECT_MAP.items()
+                           if effects.get(key) and not payload["allowed_effects"].get(mapped))
+    if expanded_root:
+        raise HardStop("effect_expansion",
+                       f"batch enables effect(s) the root authority envelope denies: {expanded_root}", effects=expanded_root)
 
     granted = int(proposal["model_call_budget"])
     declared = int((batch.get("budget") or {}).get("max_model_calls", 0))
     if declared > granted:
         raise HardStop("model_call_budget_exhausted",
                        f"batch declares {declared} model calls but the child proposal grants {granted}")
+    global_budget = int(payload.get("global_model_call_budget", 0))
+    if declared > global_budget:
+        raise HardStop("model_call_budget_exhausted",
+                       f"batch declares {declared} model calls but the root authority envelope grants {global_budget}")
 
 
 def assert_merge_authority(payload: dict, receipt: Any, *, trust_root: Any = None, expected_repo: str | None = None) -> Any:

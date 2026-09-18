@@ -1328,6 +1328,12 @@ class Runtime:
         if auth["derivation_proof_digest"] != proof["derivation_proof_digest"]:
             raise Refusal("authority_missing_or_ambiguous: derivation proof digest does not match the authority journal", 2)
 
+        # Independent revalidation of containment, effects, budget, predecessor/closure,
+        # and checkpoint against the root authority envelope before binding.
+        story_authority.assert_child_proposal_within_envelope(
+            proposal=proposal, payload=self.authority.payload,
+            state=self.authority.state, authority=self.authority)
+
         story_authority.assert_batch_matches_child_proposal(
             batch=self.batch, units=self.units.values(), proposal=proposal, payload=self.authority.payload)
 

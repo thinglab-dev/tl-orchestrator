@@ -114,11 +114,12 @@ class ChildDerivationTest(StoryCase):
             checker_reviewed_commit=self.governance_base, checker_reviewed_tree=self.git.tree(),
             functional_checkpoint_commit=self.governance_base, functional_checkpoint_tree=self.git.tree(),
             checker_verdict="changes_requested", unresolved_action_items=[self.patch_item("R5")])
+        residual = [self.patch_item("R5")]
         child = story.derive_child_proposal(
-            authority=auth, child_batch_id="B014", action_items=[], previous_child_id="B999",
+            authority=auth, child_batch_id="B014", action_items=residual, previous_child_id="B999",
             model_call_budget=2, governance_base_commit=self.governance_base,
             story_baseline_commit=self.governance_base)
-        stop = self.assert_hard_stop(auth, child, "state_integrity")
+        stop = self.assert_hard_stop(auth, child, "state_integrity", action_items=residual)
         self.assertIn("B999", stop.detail)
         self.assertIn("never derived", stop.detail)
 
@@ -166,6 +167,219 @@ class ChildDerivationTest(StoryCase):
         tightened["forbidden_paths"] = sorted(set(tightened["forbidden_paths"]) | {"vendor"})
         proof = story.verify_derivation(auth_three, tightened)
         self.assertEqual({c["check"]: c["result"] for c in proof["checks"]}["forbidden_monotonic"], "pass")
+
+    def test_r8_rework_derivation_requires_valid_patch_findings(self) -> None:
+        """R8 counterproof: Deriving child with predecessor requires canonical, non-empty, patch-only findings.
+
+        Refuses action_items=None, empty list, human/bad_spec findings, or forged digest.
+        Ensures child_derived and child_open are never recorded in any of these failure cases.
+        """
+        auth = self.authority(self.frozen_authority(authority_id="A010"))
+        first = self.base_child(auth)
+        proof = story.verify_derivation(auth, first)
+        auth.record_child_derived(first, proof)
+        auth.record_child_closed(
+            child_batch_id="B013", governance_base_commit=self.governance_base,
+            checker_reviewed_commit=self.governance_base, checker_reviewed_tree=self.git.tree(),
+            functional_checkpoint_commit=self.governance_base, functional_checkpoint_tree=self.git.tree(),
+            checker_verdict="changes_requested", unresolved_action_items=[self.patch_item("R5")])
+
+        events_before = len(auth.journal.read()[0])
+        derived_before = len(auth.state.derived)
+
+        # 1. action_items=None must HARD STOP as state_integrity
+        child_none = story.derive_child_proposal(
+            authority=auth, child_batch_id="B014", action_items=[self.patch_item("R5")],
+            previous_child_id="B013", model_call_budget=2,
+            governance_base_commit=self.governance_base, story_baseline_commit=self.governance_base)
+        with self.assertRaises(story.HardStop) as ctx_none:
+            story.verify_derivation(auth, child_none, action_items=None)
+        self.assertEqual(ctx_none.exception.reason, "state_integrity")
+        self.assertIn("mandatory", ctx_none.exception.detail)
+
+        # 2. action_items=[] (empty list) must HARD STOP as state_integrity
+        child_empty = story.derive_child_proposal(
+            authority=auth, child_batch_id="B014", action_items=[],
+            previous_child_id="B013", model_call_budget=2,
+            governance_base_commit=self.governance_base, story_baseline_commit=self.governance_base)
+        with self.assertRaises(story.HardStop) as ctx_empty:
+            story.verify_derivation(auth, child_empty, action_items=[])
+        self.assertEqual(ctx_empty.exception.reason, "state_integrity")
+        self.assertIn("empty", ctx_empty.detail if hasattr(ctx_empty, "detail") else ctx_empty.exception.detail)
+
+        # 3. action item with target_role='human' must HARD STOP as human
+        item_human = self.patch_item("R5", target_role="human")
+        child_human = story.derive_child_proposal(
+            authority=auth, child_batch_id="B014", action_items=[item_human],
+            previous_child_id="B013", model_call_budget=2,
+            governance_base_commit=self.governance_base, story_baseline_commit=self.governance_base)
+        with self.assertRaises(story.HardStop) as ctx_human:
+            story.verify_derivation(auth, child_human, action_items=[item_human])
+        self.assertEqual(ctx_human.exception.reason, "human")
+
+        # 4. action item with category='bad_spec' must HARD STOP as bad_spec
+        item_bad_spec = self.patch_item("R5", category="bad_spec")
+        child_bad = story.derive_child_proposal(
+            authority=auth, child_batch_id="B014", action_items=[item_bad_spec],
+            previous_child_id="B013", model_call_budget=2,
+            governance_base_commit=self.governance_base, story_baseline_commit=self.governance_base)
+        with self.assertRaises(story.HardStop) as ctx_bad:
+            story.verify_derivation(auth, child_bad, action_items=[item_bad_spec])
+        self.assertEqual(ctx_bad.exception.reason, "bad_spec")
+
+        # 5. proposal claiming different findings than closure must HARD STOP
+        item_divergent = self.patch_item("R6", location="src/connector.py:42")
+        child_divergent = story.derive_child_proposal(
+            authority=auth, child_batch_id="B014", action_items=[item_divergent],
+            previous_child_id="B013", model_call_budget=2,
+            governance_base_commit=self.governance_base, story_baseline_commit=self.governance_base)
+        with self.assertRaises(story.HardStop) as ctx_div:
+            story.verify_derivation(auth, child_divergent, action_items=[item_divergent])
+        self.assertEqual(ctx_div.exception.reason, "state_integrity")
+        self.assertIn("differ from the ones recorded", ctx_div.exception.detail)
+
+        # 6. Verify that across all attempts, B014 was NEVER derived and child_open was NEVER recorded
+        auth.refold()
+        self.assertEqual(len(auth.state.derived), derived_before)
+        self.assertNotIn("B014", auth.state.children)
+        events = [e["kind"] for e in auth.journal.read()[0]]
+        self.assertEqual(len([e for e in events if e == "child_derived"]), 1)
+        self.assertNotIn("child_open", events)
+
+    def test_r8_residual_digest_binds_checker_blockers_and_declarations(self) -> None:
+        """R8 adversarial: blocker/declaration stripping must change identity and cannot derive."""
+        blocked = self.patch_item(
+            "R5",
+            derivation_blockers=["migration"],
+            scope_status="inside_parent_envelope",
+            spec_status="unchanged",
+        )
+        stripped_blocker = {k: v for k, v in blocked.items() if k != "derivation_blockers"}
+        stripped_scope = {k: v for k, v in blocked.items() if k != "scope_status"}
+        stripped_spec = {k: v for k, v in blocked.items() if k != "spec_status"}
+
+        self.assertNotEqual(
+            story.unresolved_action_items_digest([blocked]),
+            story.unresolved_action_items_digest([stripped_blocker]),
+        )
+        self.assertNotEqual(
+            story.unresolved_action_items_digest([blocked]),
+            story.unresolved_action_items_digest([stripped_scope]),
+        )
+        self.assertNotEqual(
+            story.unresolved_action_items_digest([blocked]),
+            story.unresolved_action_items_digest([stripped_spec]),
+        )
+
+        auth = self.authority(self.frozen_authority(authority_id="A012"))
+        first = self.base_child(auth)
+        proof = story.verify_derivation(auth, first)
+        auth.record_child_derived(first, proof)
+        auth.record_child_closed(
+            child_batch_id="B013", governance_base_commit=self.governance_base,
+            checker_reviewed_commit=self.governance_base, checker_reviewed_tree=self.git.tree(),
+            functional_checkpoint_commit=self.governance_base, functional_checkpoint_tree=self.git.tree(),
+            checker_verdict="changes_requested", unresolved_action_items=[blocked])
+
+        forged = story.derive_child_proposal(
+            authority=auth, child_batch_id="B014", action_items=[stripped_blocker],
+            previous_child_id="B013", model_call_budget=2,
+            governance_base_commit=self.governance_base, story_baseline_commit=self.governance_base)
+        with self.assertRaises(story.HardStop) as stripped:
+            story.verify_derivation(auth, forged, action_items=[stripped_blocker], spec_paths=SPEC_PATHS)
+        self.assertEqual(stripped.exception.reason, "state_integrity")
+        self.assertIn("recorded when the parent closed", stripped.exception.detail)
+
+        honest = story.derive_child_proposal(
+            authority=auth, child_batch_id="B014", action_items=[blocked],
+            previous_child_id="B013", model_call_budget=2,
+            governance_base_commit=self.governance_base, story_baseline_commit=self.governance_base)
+        carried = honest["derived_from_action_items"][0]
+        self.assertEqual(carried["derivation_blockers"], ["migration"])
+        self.assertEqual(carried["scope_status"], "inside_parent_envelope")
+        self.assertEqual(carried["spec_status"], "unchanged")
+        self.assertEqual(carried["problem"], blocked["problem"])
+        self.assertEqual(carried["evidence"], blocked["evidence"])
+        with self.assertRaises(story.HardStop) as honest_stop:
+            story.verify_derivation(auth, honest, action_items=[blocked], spec_paths=SPEC_PATHS)
+        self.assertEqual(honest_stop.exception.reason, "migration")
+
+        auth.refold()
+        self.assertNotIn("B014", auth.state.children)
+        self.assertEqual(
+            len([e for e in auth.journal.read()[0] if e["kind"] == "child_derived"]),
+            1,
+        )
+
+    def test_r9_child_cannot_be_rederived_when_active_or_closed(self) -> None:
+        """R9 counterproof: Re-deriving a child ID (whether active or closed) is refused.
+
+        Verifies state machine integrity: disk blobs (proposal/proof), children count, and
+        lineage remain strictly immutable upon any rederivation attempt.
+        """
+        auth = self.authority(self.frozen_authority(authority_id="A011"))
+        first = self.base_child(auth)
+        proof = story.verify_derivation(auth, first)
+        auth.record_child_derived(first, proof)
+
+        # Capture initial state and blobs on disk
+        auth.refold()
+        self.assertEqual(len(auth.state.children), 1)
+        self.assertIn("B013", auth.state.children)
+        initial_prop_bytes = auth.child_proposal_path("B013").read_bytes()
+        initial_proof_bytes = auth.child_proof_path("B013").read_bytes()
+        initial_events_count = len(auth.journal.read()[0])
+
+        # Attempt 1: Re-derive while child B013 is active via verify_derivation
+        with self.assertRaises(story.HardStop) as ctx_active_ver:
+            story.verify_derivation(auth, first)
+        self.assertEqual(ctx_active_ver.exception.reason, "state_integrity")
+        self.assertIn("already been derived", ctx_active_ver.exception.detail)
+
+        # Attempt 2: Re-derive while child B013 is active via record_child_derived
+        tampered_first = copy.deepcopy(first)
+        tampered_first["model_call_budget"] = 1  # try to modify
+        with self.assertRaises(story.HardStop) as ctx_active_rec:
+            auth.record_child_derived(tampered_first, proof)
+        self.assertEqual(ctx_active_rec.exception.reason, "state_integrity")
+
+        # Verify blobs and journal are untouched
+        self.assertEqual(auth.child_proposal_path("B013").read_bytes(), initial_prop_bytes)
+        self.assertEqual(auth.child_proof_path("B013").read_bytes(), initial_proof_bytes)
+        auth.refold()
+        self.assertEqual(len(auth.state.children), 1)
+
+        # Now close B013
+        auth.record_child_closed(
+            child_batch_id="B013", governance_base_commit=self.governance_base,
+            checker_reviewed_commit=self.governance_base, checker_reviewed_tree=self.git.tree(),
+            functional_checkpoint_commit=self.governance_base, functional_checkpoint_tree=self.git.tree(),
+            checker_verdict="changes_requested", unresolved_action_items=[self.patch_item("R5")])
+
+        auth.refold()
+        self.assertEqual(auth.state.children["B013"]["state"], "closed")
+        closed_prop_bytes = auth.child_proposal_path("B013").read_bytes()
+        closed_proof_bytes = auth.child_proof_path("B013").read_bytes()
+
+        # Attempt 3: Re-derive closed child B013 via verify_derivation
+        with self.assertRaises(story.HardStop) as ctx_closed_ver:
+            story.verify_derivation(auth, first)
+        self.assertEqual(ctx_closed_ver.exception.reason, "state_integrity")
+        self.assertIn("already been derived", ctx_closed_ver.exception.detail)
+
+        # Attempt 4: Re-derive closed child B013 via record_child_derived
+        with self.assertRaises(story.HardStop) as ctx_closed_rec:
+            auth.record_child_derived(first, proof)
+        self.assertEqual(ctx_closed_rec.exception.reason, "state_integrity")
+
+        # Verify disk blobs, child count and closure lineage remain 100% immutable
+        self.assertEqual(auth.child_proposal_path("B013").read_bytes(), closed_prop_bytes)
+        self.assertEqual(auth.child_proof_path("B013").read_bytes(), closed_proof_bytes)
+        auth.refold()
+        self.assertEqual(len(auth.state.children), 1)
+        self.assertEqual(auth.state.children["B013"]["state"], "closed")
+        derived_events = [e for e in auth.journal.read()[0] if e["kind"] == "child_derived"]
+        self.assertEqual(len(derived_events), 1)
 
 
 if __name__ == "__main__":

@@ -194,6 +194,31 @@
           },
           "spec_status": {
             "type": "string"
+          },
+          "problem": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          },
+          "derivation_blockers": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "bad_spec",
+                "intent_gap",
+                "human",
+                "security",
+                "scope_expansion",
+                "new_boundary",
+                "migration",
+                "capability_expansion"
+              ]
+            }
           }
         }
       }

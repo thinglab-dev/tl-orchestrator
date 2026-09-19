@@ -1328,11 +1328,35 @@ class Runtime:
         if auth["derivation_proof_digest"] != proof["derivation_proof_digest"]:
             raise Refusal("authority_missing_or_ambiguous: derivation proof digest does not match the authority journal", 2)
 
+        # R9: Validate child state in authority journal: terminal states cannot bind or reopen
+        child_record = self.authority.state.children.get(self.batch_id)
+        if not child_record:
+            raise story_authority.HardStop("state_integrity", f"child batch {self.batch_id} not recorded in authority journal")
+        local_fold = self.journal.fold()
+        child_state = child_record.get("state")
+        if not local_fold.closed and child_state in {"closed", "failed"}:
+            raise story_authority.HardStop(
+                "state_integrity",
+                f"cannot bind child batch {self.batch_id} with terminal state {child_state!r}",
+                batch_id=self.batch_id,
+                child_state=child_state,
+            )
+
+        # R8: Revalidate unresolved_action_items_digest against predecessor closure
+        if proposal.get("parent_child_batch_id"):
+            previous_closure = self.authority.state.closure_of(proposal["parent_child_batch_id"])
+            closure_digest = previous_closure.get("unresolved_action_items_digest") if previous_closure else ""
+            if proof.get("unresolved_action_items_digest") != closure_digest:
+                raise story_authority.HardStop(
+                    "state_integrity",
+                    f"proof unresolved_action_items_digest {proof.get('unresolved_action_items_digest')} does not match parent closure {closure_digest}",
+                )
+
         # Independent revalidation of containment, effects, budget, predecessor/closure,
-        # and checkpoint against the root authority envelope before binding.
+        # residual findings, and checkpoint against the root authority envelope before binding.
         story_authority.assert_child_proposal_within_envelope(
             proposal=proposal, payload=self.authority.payload,
-            state=self.authority.state, authority=self.authority)
+            state=self.authority.state, authority=self.authority, is_new_derivation=False)
 
         story_authority.assert_batch_matches_child_proposal(
             batch=self.batch, units=self.units.values(), proposal=proposal, payload=self.authority.payload)
@@ -1350,8 +1374,7 @@ class Runtime:
         if checkpoint:
             story_authority.verify_functional_checkpoint(self.repo, checkpoint)
 
-        child_state = (self.authority.state.children.get(self.batch_id) or {}).get("state")
-        if child_state not in {"open", "closed", "failed"}:
+        if not local_fold.closed and child_state != "open":
             branch = self.git.current_branch() or self.config.get("base_branch", "")
             self.authority.record_child_open(
                 self.batch_id, branch=branch, head_commit=self.git.head(), tree=self.git.tree())

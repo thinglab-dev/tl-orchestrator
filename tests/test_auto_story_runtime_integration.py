@@ -623,6 +623,126 @@ class AutoStoryRuntimeTest(unittest.TestCase):
         events = [e["kind"] for e in auth.journal.read()[0]]
         self.assertNotIn("child_open", events)
 
+    def test_r8_runtime_bind_refuses_divergent_closure_digest(self) -> None:
+        """R8 counterproof: Runtime bind refuses child proposal/proof whose residual findings digest differs from predecessor closure."""
+        fx = self.auto_story_fixture(budget=6, max_rework=1, max_calls=6)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", [{"verdict": "changes_requested", "action_items": [PATCH_ITEM]}])
+        self.assertEqual(fx.runtime().run(), "blocked")
+
+        auth = self.authority(fx)
+        auth.refold()
+        closure = auth.state.closure_of("B001")
+        self.assertIsNotNone(closure)
+        checkpoint = {
+            "commit": closure["checker_reviewed_commit"],
+            "tree": closure["checker_reviewed_tree"],
+            "child_batch_id": "B001",
+        }
+
+        head = git(fx.repo, "rev-parse", "HEAD")
+        forged_items = [{"id": "R99", "category": "patch", "target_role": "maker",
+                         "location": "pkg/work.py:10", "required_action": "forged", "severity": "low"}]
+        forged_digest = story.unresolved_action_items_digest(forged_items)
+        envelope = self.envelope
+
+        proposal = {
+            "schema_version": 1,
+            "authority_id": "A001",
+            "work_ref": "T001",
+            "child_batch_id": "B002",
+            "parent_child_batch_id": "B001",
+            "authorized_spec_revision": auth.payload["authorized_spec_revision"],
+            "authorized_spec_sha256": auth.payload["authorized_spec_sha256"],
+            "required_mutation_targets": ["pkg/work.py"],
+            "conditional_mutation_targets": [],
+            "forbidden_paths": [".github", "secrets"],
+            "protected_paths": [],
+            "allowed_effects": dict(auth.payload["allowed_effects"]),
+            "model_call_budget": 2,
+            "functional_parent_checkpoint": checkpoint,
+            "derived_from_action_items": forged_items,
+            "lineage": {"governance_base_commit": head, "story_baseline_commit": head},
+        }
+        proposal_digest = story.digest_of(proposal)
+        proof = {
+            "schema_version": 1,
+            "authority_id": "A001",
+            "work_ref": "T001",
+            "child_batch_id": "B002",
+            "parent_child_batch_id": "B001",
+            "root_authority_digest": envelope["root_authority_digest"],
+            "parent_authority_digest": envelope["root_authority_digest"],
+            "parent_batch_digest": "",
+            "child_proposal_digest": proposal_digest,
+            "functional_parent_checkpoint": checkpoint,
+            "unresolved_action_items_digest": forged_digest,
+            "granted_model_calls": 2,
+            "checks": [{"check": "derived_from_findings", "result": "pass"}],
+        }
+        proof["derivation_proof_digest"] = story.digest_of(proof)
+
+        # Directly persist to simulate an attacker bypassing verify_derivation
+        (auth.runtime_dir / "proposals").mkdir(parents=True, exist_ok=True)
+        auth.child_proposal_path("B002").write_text(json.dumps(proposal), encoding="utf-8")
+        auth.child_proof_path("B002").write_text(json.dumps(proof), encoding="utf-8")
+        auth.journal.append(
+            "child_derived", authority_id="A001", child_batch_id="B002",
+            parent_child_batch_id="B001",
+            root_authority_digest=proof["root_authority_digest"],
+            parent_authority_digest=proof["parent_authority_digest"],
+            parent_batch_digest="",
+            child_proposal_digest=proposal_digest,
+            derivation_proof_digest=proof["derivation_proof_digest"],
+            granted_model_calls=2,
+            functional_parent_checkpoint=checkpoint,
+            unresolved_action_items_digest=forged_digest)
+
+        fx.batch["batch_id"] = "B002"
+        fx.batch["authorization"].update({
+            "story_authority_mode": "AUTO_STORY",
+            "story_authority_id": "A001",
+            "root_authority_digest": envelope["root_authority_digest"],
+            "child_proposal_digest": proposal_digest,
+            "derivation_proof_digest": proof["derivation_proof_digest"],
+        })
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+
+        # Clean runtime state dir for fresh batch B002
+        if (fx.state_dir / "journal.jsonl").exists():
+            (fx.state_dir / "journal.jsonl").unlink()
+
+        runtime = fx.runtime()
+        with self.assertRaises(tl_runtime.Refusal) as raised:
+            runtime.acquire()
+        self.assertIn("state_integrity", str(raised.exception))
+        self.assertIsInstance(raised.exception.__cause__, story.HardStop)
+        self.assertEqual(raised.exception.__cause__.reason, "state_integrity")
+
+        auth.refold()
+        self.assertNotIn("child_open", [e["kind"] for e in auth.journal.read()[0] if e.get("child_batch_id") == "B002"])
+
+    def test_r9_runtime_bind_refuses_terminal_state_child(self) -> None:
+        """R9 counterproof: Runtime bind refuses to bind a fresh unclosed batch to a child already in terminal state."""
+        fx = self.auto_story_fixture(budget=6, max_rework=1, max_calls=6)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "done")
+
+        auth = self.authority(fx)
+        auth.refold()
+        self.assertEqual(auth.state.children["B001"]["state"], "closed")
+
+        # Fresh batch B001 in a new execution attempting to bind to closed child
+        (fx.state_dir / "journal.jsonl").unlink()
+        runtime = fx.runtime()
+        with self.assertRaises(tl_runtime.Refusal) as raised:
+            runtime.acquire()
+        self.assertIn("state_integrity", str(raised.exception))
+        self.assertIsInstance(raised.exception.__cause__, story.HardStop)
+        self.assertEqual(raised.exception.__cause__.reason, "state_integrity")
+        self.assertIn("terminal state 'closed'", raised.exception.__cause__.detail)
+
 
 if __name__ == "__main__":
     unittest.main()

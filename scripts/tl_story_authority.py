@@ -47,9 +47,12 @@ from typing import Any, Callable, Iterable
 
 try:  # scripts/ on sys.path (how the runtime loads its siblings)
     from validate_execution_plan import (
+        PROTECTED_PATH_PATTERN_INVALID,
+        ProtectedPathError,
         assert_protected_paths_monotonic,
         canonical_json,
         digest_of,
+        protected_pattern_violations,
         sha256_hex,
         snapshot_set,
         validate_against_schema_file,
@@ -57,9 +60,12 @@ try:  # scripts/ on sys.path (how the runtime loads its siblings)
     )
 except ImportError:  # executed from the repository root
     from scripts.validate_execution_plan import (  # type: ignore[no-redef]
+        PROTECTED_PATH_PATTERN_INVALID,
+        ProtectedPathError,
         assert_protected_paths_monotonic,
         canonical_json,
         digest_of,
+        protected_pattern_violations,
         sha256_hex,
         snapshot_set,
         validate_against_schema_file,
@@ -218,6 +224,11 @@ def _assert_payload_shape(payload: Any) -> None:
     extra = sorted(present - set(AUTHORITY_PAYLOAD_FIELDS))
     if extra:
         raise Refusal(f"authority_payload carries unauthorized field(s) {extra}")
+    protected = payload["protected_paths"]
+    invalid = protected_pattern_violations(
+        [item for item in protected if isinstance(item, dict)]) if isinstance(protected, list) else []
+    if invalid:
+        raise Refusal(f"{PROTECTED_PATH_PATTERN_INVALID}: authority_payload protected_paths {canonical_json(invalid)}")
 
 
 def canonical_authority_payload(payload: dict) -> str:
@@ -2120,7 +2131,11 @@ def _cmd_probe_barrier(args) -> int:
 
 
 def _cmd_snapshot(args) -> int:
-    print(json.dumps(snapshot_set(args.repo, args.pattern), indent=2, ensure_ascii=False))
+    try:
+        snapshot = snapshot_set(args.repo, args.pattern)
+    except (ProtectedPathError, OSError) as exc:
+        raise Refusal(f"protected path snapshot refused: {exc}") from exc
+    print(json.dumps(snapshot, indent=2, ensure_ascii=False))
     return 0
 
 

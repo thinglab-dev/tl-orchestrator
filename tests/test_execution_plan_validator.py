@@ -5,13 +5,14 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from story_authority_support import FIXTURES, REPO_ROOT, SCRIPTS, load_fixture, plan_validator
+from story_authority_support import ESCAPING_PATTERNS, FIXTURES, REPO_ROOT, SCRIPTS, load_fixture, plan_validator
 
 validate = plan_validator.validate_execution_plan
 CLI = SCRIPTS / "validate_execution_plan.py"
@@ -173,6 +174,41 @@ class ExecutionPlanValidatorTest(unittest.TestCase):
         self.assertIn("protected_path_removed", violations(validate(plan, parent_protected_paths=dropped)))
         self.assertTrue(validate(plan, parent_protected_paths=plan["protected_paths"])["approved"])
 
+    def test_escaping_protected_path_patterns_are_refused(self) -> None:
+        """R10. A pattern that is not repository-contained is refused, verified or not."""
+        with tempfile.TemporaryDirectory(prefix="tl-plan-paths-") as tmp, \
+                tempfile.TemporaryDirectory(prefix="tl-plan-outside-") as elsewhere:
+            root = Path(tmp).resolve()
+            (root / "docs").mkdir()
+            (root / "docs" / "ARCH.md").write_bytes((FIXTURES / "docs-arch.md").read_bytes())
+            sentinel = Path(elsewhere).resolve() / "sentinel.txt"
+            sentinel.write_text("outside the repository\n", encoding="utf-8")
+            digest = plan_validator.sha256_hex(sentinel.read_bytes())
+            # Falsifiable: this relative escape really reaches a file whose hash the plan declares.
+            real_escape = os.path.relpath(sentinel, root)
+            self.assertEqual(plan_validator.sha256_hex((root / real_escape).read_bytes()), digest)
+
+            for name, pattern in {**ESCAPING_PATTERNS, "real_sentinel_escape": real_escape}.items():
+                with self.subTest(name):
+                    plan = self.plan()
+                    plan["protected_paths"].append({"pattern": pattern, "policy": "exact_file_hash", "sha256": digest})
+                    for kwargs in ({}, {"repo_root": root, "verify_paths": True}):
+                        result = validate(plan, **kwargs)
+                        self.assertFalse(result["approved"])
+                        invalid = [e for e in result["errors"] if e["violation"] == "protected_path_pattern_invalid"]
+                        self.assertEqual(len(invalid), 1, result["errors"])
+                        self.assertEqual(invalid[0]["pattern"], pattern)
+                        self.assertTrue(invalid[0]["detail"])
+                    # The parent envelope is held to the same rule.
+                    parent = self.plan()["protected_paths"] + [{"pattern": pattern, "policy": "read_only"}]
+                    result = validate(self.plan(), parent_protected_paths=parent)
+                    self.assertIn("protected_path_pattern_invalid", violations(result))
+
+            # Legitimate relative spellings of the same path are still verified against the tree.
+            plan = self.plan()
+            plan["protected_paths"][0]["pattern"] = "./docs/ARCH.md"
+            self.assertTrue(validate(plan, repo_root=root, verify_paths=True)["approved"])
+
 
 class SchemaSubsetValidatorTest(unittest.TestCase):
     """The validator must refuse a schema it cannot fully enforce, never quietly ignore it."""
@@ -267,6 +303,31 @@ class ExecutionPlanCliTest(unittest.TestCase):
             missing = self.run_cli("--plan", str(Path(tmp) / "absent.json"))
             self.assertEqual(missing.returncode, 1)
             self.assertIn("plan_unreadable", missing.stdout)
+
+    def test_cli_refuses_escaping_protected_path_patterns(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="tl-plan-cli-") as tmp:
+            root = Path(tmp) / "repo"
+            (root / "docs").mkdir(parents=True)
+            (root / "docs" / "ARCH.md").write_bytes((FIXTURES / "docs-arch.md").read_bytes())
+            for name, pattern in ESCAPING_PATTERNS.items():
+                with self.subTest(name):
+                    plan = copy.deepcopy(load_fixture("execution-plan.json"))
+                    plan["protected_paths"].append({"pattern": pattern, "policy": "read_only"})
+                    target = Path(tmp) / "plan.json"
+                    target.write_text(json.dumps(plan), encoding="utf-8")
+                    refused = self.run_cli("--plan", str(target), "--repo", str(root), "--verify-protected-paths")
+                    self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+                    errors = json.loads(refused.stdout)["errors"]
+                    self.assertIn({"pattern": pattern, "policy": "read_only"},
+                                  [{k: e.get(k) for k in ("pattern", "policy")} for e in errors
+                                   if e["violation"] == "protected_path_pattern_invalid"])
+
+                    parent = Path(tmp) / "parent.json"
+                    parent.write_text(json.dumps(plan), encoding="utf-8")
+                    refused = self.run_cli("--plan", str(FIXTURES / "execution-plan.json"), "--parent-plan", str(parent))
+                    self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+                    self.assertIn("protected_path_pattern_invalid",
+                                  {e["violation"] for e in json.loads(refused.stdout)["errors"]})
 
     def test_cli_prints_the_closed_registry(self) -> None:
         printed = self.run_cli("--print-registry")

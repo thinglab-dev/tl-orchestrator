@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -356,6 +357,82 @@ PROTECTED_PATH_POLICIES = ("read_only", "exact_file_hash", "exact_set_snapshot")
 _POLICY_STRICTNESS = {"read_only": 0, "exact_file_hash": 1, "exact_set_snapshot": 2}
 
 
+PROTECTED_PATH_PATTERN_INVALID = "protected_path_pattern_invalid"
+PROTECTED_PATH_UNREADABLE = "protected_path_unreadable"
+
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+class ProtectedPathError(ValueError):
+    """A protected path pattern that is not provably relative to, and contained in, the repository."""
+
+    def __init__(self, pattern: Any, detail: str):
+        super().__init__(f"{PROTECTED_PATH_PATTERN_INVALID}: {pattern!r}: {detail}")
+        self.pattern = pattern
+        self.detail = detail
+
+
+def normalize_protected_pattern(pattern: Any) -> str:
+    """The canonical repository-relative POSIX form of `pattern`, or ProtectedPathError.
+
+    Purely lexical: nothing is joined, resolved or touched on disk before the pattern is proven
+    to be relative and free of traversal. Anything that would mean something else on another
+    platform (a drive, a UNC share, a backslash separator) is ambiguous and therefore refused.
+    """
+    if not isinstance(pattern, str):
+        raise ProtectedPathError(pattern, "pattern must be a string")
+    if not pattern:
+        raise ProtectedPathError(pattern, "pattern must not be empty")
+    if "\0" in pattern:
+        raise ProtectedPathError(pattern, "pattern contains a NUL byte")
+    if pattern.startswith(("//", "\\\\", "/\\", "\\/")):
+        raise ProtectedPathError(pattern, "UNC or network paths are outside the repository")
+    if pattern.startswith(("/", "\\")):
+        raise ProtectedPathError(pattern, "absolute paths are outside the repository")
+    if _WINDOWS_DRIVE_RE.match(pattern):
+        raise ProtectedPathError(pattern, "Windows drive paths are outside the repository")
+    parts = re.split(r"[\\/]", pattern)
+    if ".." in parts:
+        raise ProtectedPathError(pattern, "'..' components may escape the repository")
+    if "\\" in pattern:
+        raise ProtectedPathError(pattern, "backslash separators are ambiguous across platforms")
+    normalized = "/".join(part for part in parts if part not in ("", "."))
+    return normalized or "."
+
+
+def _contained_target(root: Path, pattern: Any) -> tuple[str, Path]:
+    """Join a validated pattern onto `root` and prove the result stays inside it.
+
+    `root` must already be resolved. Lexical containment is checked first; then every
+    intermediate component is inspected with lstat, walking down from the root, so a symlinked
+    directory that would redirect the final component outside the repository is refused before
+    anything behind it is read.
+    """
+    normalized = normalize_protected_pattern(pattern)
+    if normalized == ".":
+        return normalized, root
+    components = normalized.split("/")
+    target = root.joinpath(*components)
+    if os.path.commonpath([str(root), str(target)]) != str(root):
+        raise ProtectedPathError(pattern, "pattern does not stay inside the repository root")
+    current = root
+    for name in components[:-1]:
+        current = current / name
+        try:
+            mode = current.lstat().st_mode
+        except (FileNotFoundError, NotADirectoryError):
+            break
+        if stat.S_ISLNK(mode):
+            raise ProtectedPathError(
+                pattern, f"intermediate component {current.relative_to(root).as_posix()!r} is a symlink; "
+                         "containment in the repository cannot be proven")
+    return normalized, target
+
+
+def _raise_walk_error(error: OSError) -> None:
+    raise error
+
+
 def _relative(root: Path, target: Path) -> str:
     return target.relative_to(root).as_posix()
 
@@ -372,13 +449,15 @@ def _entry_for(root: Path, target: Path) -> dict[str, Any]:
 
 def snapshot_set(root: str | Path, pattern: str) -> dict[str, Any]:
     """Reference snapshot of everything under `pattern`, stably ordered and digest-bound."""
+    normalized = normalize_protected_pattern(pattern)
     root = Path(root).resolve()
-    target = root / pattern
+    normalized, target = _contained_target(root, pattern)
     entries: list[dict[str, Any]] = []
     if target.is_symlink() or target.is_file():
         entries.append(_entry_for(root, target))
     elif target.is_dir():
-        for current, directories, files in os.walk(target, followlinks=False):
+        # An unreadable directory is an error, never a silently shorter snapshot.
+        for current, directories, files in os.walk(target, onerror=_raise_walk_error, followlinks=False):
             here = Path(current)
             linked = [name for name in directories if (here / name).is_symlink()]
             for name in files + linked:
@@ -386,7 +465,7 @@ def snapshot_set(root: str | Path, pattern: str) -> dict[str, Any]:
             # A symlinked directory is an entry in its own right, never a tree to descend into.
             directories[:] = sorted(name for name in directories if name not in linked)
     entries.sort(key=lambda item: item["path"])
-    return {"pattern": Path(pattern).as_posix(), "entries": entries, "digest": digest_of(entries)}
+    return {"pattern": normalized, "entries": entries, "digest": digest_of(entries)}
 
 
 def _covers(pattern: str, candidate: str) -> bool:
@@ -424,75 +503,126 @@ def _git_dirty_paths(root: Path) -> list[str] | None:
     return sorted(set(paths))
 
 
-def verify_protected_paths(root: str | Path, protected_paths: list[dict], *, dirty_paths: list[str] | None = None) -> list[dict]:
-    """Verify each protected path against the tree. Returns structured violations (empty = intact)."""
-    root = Path(root).resolve()
+def _invalid_pattern(item: dict, error: ProtectedPathError, **extra: Any) -> dict:
+    return {"pattern": str(item.get("pattern", "")), "policy": item.get("policy"),
+            "violation": PROTECTED_PATH_PATTERN_INVALID, "detail": error.detail, **extra}
+
+
+def protected_pattern_violations(protected_paths: list[dict], **extra: Any) -> list[dict]:
+    """One structured violation per protected path whose pattern is not repository-contained."""
     violations: list[dict] = []
-    read_only = [item for item in protected_paths if item.get("policy") == "read_only"]
+    for item in protected_paths:
+        try:
+            normalize_protected_pattern(item.get("pattern"))
+        except ProtectedPathError as error:
+            violations.append(_invalid_pattern(item, error, **extra))
+    return violations
+
+
+def verify_protected_paths(root: str | Path, protected_paths: list[dict], *, dirty_paths: list[str] | None = None) -> list[dict]:
+    """Verify each protected path against the tree. Returns structured violations (empty = intact).
+
+    A pattern that is not provably inside the repository is refused before anything is joined
+    onto the root, and a filesystem error while verifying is a violation carrying its detail:
+    neither can ever escape as an exception nor pass as an intact path.
+    """
+    violations: list[dict] = []
+    valid: list[tuple[dict, str]] = []
+    for item in protected_paths:
+        try:
+            valid.append((item, normalize_protected_pattern(item.get("pattern"))))
+        except ProtectedPathError as error:
+            violations.append(_invalid_pattern(item, error))
+    root = Path(root).resolve()
+    read_only = [(item, normalized) for item, normalized in valid if item.get("policy") == "read_only"]
     if read_only:
         dirty = dirty_paths if dirty_paths is not None else _git_dirty_paths(root)
-        for item in read_only:
+        for item, normalized in read_only:
             pattern = str(item.get("pattern", ""))
             if dirty is None:
                 violations.append({"pattern": pattern, "policy": "read_only",
                                    "violation": "protected_read_only_unverifiable",
                                    "detail": "no baseline was supplied and git could not report the working tree"})
                 continue
-            for path in [p for p in dirty if _covers(pattern, p)]:
+            for path in [p for p in dirty if _covers(normalized, p)]:
                 violations.append({"pattern": pattern, "policy": "read_only",
                                    "violation": "protected_read_only_mutated", "path": path})
 
-    for item in protected_paths:
+    for item, _normalized in valid:
         policy = item.get("policy")
+        if policy not in ("exact_file_hash", "exact_set_snapshot"):
+            continue
         pattern = str(item.get("pattern", ""))
-        target = root / pattern
-        if policy == "exact_file_hash":
-            expected = str(item.get("sha256", ""))
-            if target.is_symlink():
-                violations.append({"pattern": pattern, "policy": policy, "path": pattern,
-                                   "violation": "protected_file_type_changed",
-                                   "expected": "file", "observed": "symlink"})
-                continue
-            if not target.is_file():
-                violations.append({"pattern": pattern, "policy": policy, "path": pattern,
-                                   "violation": "protected_path_missing"})
-                continue
-            observed = sha256_hex(target.read_bytes())
-            if observed != expected:
-                violations.append({"pattern": pattern, "policy": policy, "path": pattern,
-                                   "violation": "protected_file_hash_mismatch",
-                                   "expected": expected, "observed": observed})
-        elif policy == "exact_set_snapshot":
-            reference = item.get("snapshot") or {}
-            declared_entries = [e for e in reference.get("entries", []) if isinstance(e, dict) and "path" in e]
-            expected_entries = {entry["path"]: entry for entry in declared_entries}
-            observed_entries = {entry["path"]: entry for entry in snapshot_set(root, pattern)["entries"]}
-            for path in sorted(set(observed_entries) - set(expected_entries)):
-                violations.append({"pattern": pattern, "policy": policy, "path": path,
-                                   "violation": "protected_set_entry_added",
-                                   "observed": observed_entries[path]})
-            for path in sorted(set(expected_entries) - set(observed_entries)):
-                violations.append({"pattern": pattern, "policy": policy, "path": path,
-                                   "violation": "protected_set_entry_removed",
-                                   "expected": expected_entries[path]})
-            for path in sorted(set(expected_entries) & set(observed_entries)):
-                expected_entry, observed_entry = expected_entries[path], observed_entries[path]
-                if expected_entry.get("type") != observed_entry.get("type"):
-                    violations.append({"pattern": pattern, "policy": policy, "path": path,
-                                       "violation": "protected_set_entry_type_changed",
-                                       "expected": expected_entry.get("type"), "observed": observed_entry.get("type")})
-                elif (expected_entry.get("sha256") != observed_entry.get("sha256")
-                      or expected_entry.get("size") != observed_entry.get("size")):
-                    violations.append({"pattern": pattern, "policy": policy, "path": path,
-                                       "violation": "protected_set_entry_modified",
-                                       "expected": expected_entry, "observed": observed_entry})
-            declared_digest = reference.get("digest")
-            recomputed = digest_of(declared_entries)
-            if declared_digest and declared_digest != recomputed:
-                violations.append({"pattern": pattern, "policy": policy,
-                                   "violation": "protected_snapshot_digest_mismatch",
-                                   "expected": declared_digest, "observed": recomputed})
+        try:
+            violations.extend(_verify_exact_policy(root, item, pattern, policy))
+        except ProtectedPathError as error:
+            violations.append(_invalid_pattern(item, error))
+        except OSError as error:
+            violations.append({"pattern": pattern, "policy": policy, "violation": PROTECTED_PATH_UNREADABLE,
+                               "path": error.filename if isinstance(error.filename, str) else pattern,
+                               "detail": f"{type(error).__name__}: {error}"})
     return violations
+
+
+def _verify_exact_policy(root: Path, item: dict, pattern: str, policy: str) -> list[dict]:
+    violations: list[dict] = []
+    if policy == "exact_file_hash":
+        _normalized, target = _contained_target(root, pattern)
+        expected = str(item.get("sha256", ""))
+        if target.is_symlink():
+            violations.append({"pattern": pattern, "policy": policy, "path": pattern,
+                               "violation": "protected_file_type_changed",
+                               "expected": "file", "observed": "symlink"})
+            return violations
+        if not target.is_file():
+            violations.append({"pattern": pattern, "policy": policy, "path": pattern,
+                               "violation": "protected_path_missing"})
+            return violations
+        observed = sha256_hex(target.read_bytes())
+        if observed != expected:
+            violations.append({"pattern": pattern, "policy": policy, "path": pattern,
+                               "violation": "protected_file_hash_mismatch",
+                               "expected": expected, "observed": observed})
+        return violations
+
+    reference = item.get("snapshot") or {}
+    declared_entries = [e for e in reference.get("entries", []) if isinstance(e, dict) and "path" in e]
+    expected_entries = {entry["path"]: entry for entry in declared_entries}
+    observed_entries = {entry["path"]: entry for entry in snapshot_set(root, pattern)["entries"]}
+    for path in sorted(set(observed_entries) - set(expected_entries)):
+        violations.append({"pattern": pattern, "policy": policy, "path": path,
+                           "violation": "protected_set_entry_added",
+                           "observed": observed_entries[path]})
+    for path in sorted(set(expected_entries) - set(observed_entries)):
+        violations.append({"pattern": pattern, "policy": policy, "path": path,
+                           "violation": "protected_set_entry_removed",
+                           "expected": expected_entries[path]})
+    for path in sorted(set(expected_entries) & set(observed_entries)):
+        expected_entry, observed_entry = expected_entries[path], observed_entries[path]
+        if expected_entry.get("type") != observed_entry.get("type"):
+            violations.append({"pattern": pattern, "policy": policy, "path": path,
+                               "violation": "protected_set_entry_type_changed",
+                               "expected": expected_entry.get("type"), "observed": observed_entry.get("type")})
+        elif (expected_entry.get("sha256") != observed_entry.get("sha256")
+              or expected_entry.get("size") != observed_entry.get("size")):
+            violations.append({"pattern": pattern, "policy": policy, "path": path,
+                               "violation": "protected_set_entry_modified",
+                               "expected": expected_entry, "observed": observed_entry})
+    declared_digest = reference.get("digest")
+    recomputed = digest_of(declared_entries)
+    if declared_digest and declared_digest != recomputed:
+        violations.append({"pattern": pattern, "policy": policy,
+                           "violation": "protected_snapshot_digest_mismatch",
+                           "expected": declared_digest, "observed": recomputed})
+    return violations
+
+
+def _pattern_is_valid(item: dict) -> bool:
+    try:
+        normalize_protected_pattern(item.get("pattern"))
+    except ProtectedPathError:
+        return False
+    return True
 
 
 def assert_protected_paths_monotonic(parent: list[dict], child: list[dict]) -> list[dict]:
@@ -500,11 +630,16 @@ def assert_protected_paths_monotonic(parent: list[dict], child: list[dict]) -> l
 
     Textual presence of the pattern is not enough. For an inherited entry the child must carry
     the same policy and the same policy parameters, so an expected hash or a reference snapshot
-    can never be swapped for one that happens to match whatever the child produced.
+    can never be swapped for one that happens to match whatever the child produced. A pattern
+    on either side that is not provably inside the repository is itself a violation.
     """
-    violations: list[dict] = []
-    child_by_pattern = {str(item.get("pattern", "")): item for item in child}
+    violations: list[dict] = (protected_pattern_violations(parent, side="parent")
+                              + protected_pattern_violations(child, side="child"))
+    invalid = {id(item) for item in [*parent, *child] if not _pattern_is_valid(item)}
+    child_by_pattern = {str(item.get("pattern", "")): item for item in child if id(item) not in invalid}
     for item in parent:
+        if id(item) in invalid:
+            continue
         pattern = str(item.get("pattern", ""))
         policy = item.get("policy")
         inherited = child_by_pattern.get(pattern)
@@ -635,7 +770,9 @@ def validate_execution_plan(
 
     errors.extend(gate_call_constraints_are_satisfiable_under_budget(plan))
 
-    protected = plan.get("protected_paths") or []
+    declared = plan.get("protected_paths") or []
+    errors.extend(protected_pattern_violations(declared))
+    protected = [item for item in declared if _pattern_is_valid(item)]
     for item in protected:
         if item.get("policy") == "exact_file_hash" and not item.get("sha256"):
             errors.append({"violation": "protected_path_missing_hash", "pattern": item.get("pattern")})

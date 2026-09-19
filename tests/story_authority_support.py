@@ -28,6 +28,21 @@ import tl_story_authority as story  # noqa: E402
 import validate_execution_plan as plan_validator  # noqa: E402
 
 
+# R10 counterproofs: every one of these would join onto the repository root and land outside it.
+ESCAPING_PATTERNS = {
+    "posix_absolute": "/etc",
+    "parent_traversal": "../outside",
+    "nested_traversal": "a/../../outside",
+    "backslash_traversal": "..\\outside",
+    "windows_drive_backslash": "C:\\outside",
+    "windows_drive_slash": "C:/outside",
+    "windows_drive_relative": "C:outside",
+    "unc_share": "\\\\server\\share",
+    "unc_share_slash": "//server/share",
+    "nul_byte": "docs\x00/ARCH.md",
+}
+
+
 def load_fixture(name: str):
     text = (FIXTURES / name).read_text(encoding="utf-8")
     return json.loads(text) if name.endswith(".json") else text

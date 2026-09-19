@@ -12,7 +12,7 @@ coordinator:
 active_batch: none
 batch_status: none
 review_followups: []
-next_task_id: 34
+next_task_id: 35
 next_deliverable_id: 1
 next_decision_id: 1
 next_discussion_id: 1
@@ -55,3 +55,4 @@ open_discussions: []
 | T031 | feat | package | done | [T019, T027] | [] | 2 | evidence/T031-r01.md |
 | T032 | feat | package | in_review | [T027, T028] | [] | 1 | evidence/T032-T033-verification.md |
 | T033 | feat | package | in_review | [T018] | [] | 1 | evidence/T032-T033-verification.md |
+| T034 | feat | package | draft | [T032, T033] | [] | 0 | - |

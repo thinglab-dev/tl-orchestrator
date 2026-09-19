@@ -27,7 +27,7 @@ conforme `docs/WORK_MODEL.md`. `_tl-orc/` aqui não é conteúdo de consumidor.
 ## Perfil de despacho
 
 routing_mode: classifier
-checker_independence: preferred
+checker_independence: required
 
 Na ausência de catálogo persistido aqui, o contrato já permitia aplicar o perfil publicado após
 conferir as capacidades do harness e montar o catálogo permitido para a classificação. Esta seção
@@ -41,17 +41,43 @@ em `Agent runs`) são coisas diferentes; nenhuma delas prova a outra.
 | Papel | Cadeia |
 | :--- | :--- |
 | Classificador | Agy → Codex → Claude (perfil fixo publicado) |
-| Planner | Claude → Codex → Agy |
-| Maker | Agy → Codex → Claude |
-| Checker report-only | Codex → Claude → Agy, subordinada a checker_independence e autoria efetiva |
+| Planner local | Codex → Claude → Agy; no modo remoto preferido, ChatGPT+RDC assume o planejamento |
+| Maker | Codex → Agy → Claude |
+| Checker report-only | Claude → Agy → Codex, sempre filtrada por checker_independence e autoria efetiva |
 
 Autoria efetiva: identifique todas as famílias que produziram o conteúdo revisado, incluindo
-reworks, experimentos comparativos e correções próprias do Orquestrador. Sob `preferred`,
-priorize famílias não autoras; se nenhuma estiver utilizável e a indisponibilidade estiver
-comprovada, admita Checker da mesma família em sessão nova, registrando
-`same_family_fresh_session`. Uma restrição específica `required`, como a deste piloto, impede
-esse fallback. Experimentos comparativos continuam sujeitos às autorizações e à autoria efetiva
-resultante.
+reworks, experimentos comparativos e correções substantivas do Orquestrador. Neste repositório,
+`checker_independence: required` é a preferência do maintainer: Checker da mesma família de qualquer
+autor efetivo é inelegível, sem fallback degradado. Quota esgotada torna apenas aquele candidato
+indisponível; não reduz a exigência de independência nem autoriza rebaixar a qualidade da revisão.
+
+### Preferência do maintainer — ChatGPT + RDC
+
+Quando houver acesso ao ChatGPT com Remote Desktop Commander e o preflight local confirmar
+`command -v codex` e `codex --version` com sucesso, a condução preferida é:
+
+- **Orchestrator + Planner:** ChatGPT + RDC;
+- **Maker/Rework:** Codex;
+- **Checker:** Claude quando elegível e disponível; Agy/Gemini é o fallback independente preferido;
+- **Claude sem quota:** não trocar o Maker para Gemini se isso consumir a única família disponível
+  para Checker; manter Codex como Maker e promover Gemini a Checker;
+- **modo local:** permanece disponível por escolha do maintainer ou quando o preflight remoto falhar.
+
+Operações mecânicas do ChatGPT/RDC — Git, worktrees, leitura, testes, CI, GitHub, processos e
+montagem de contexto — não constituem autoria material. Planejamento, spec, decisão arquitetural ou
+patch substantivo produzido pelo ChatGPT contam como família OpenAI. Como Codex também é OpenAI,
+o fluxo remoto normal mantém um único lado de produção (`openai`) e reserva uma família distinta
+para verificação. Se rework de outra família for incorporado, o Checker deve ser recalculado contra
+o conjunto completo de autores antes da próxima revisão.
+
+### Preferência de integração do maintainer
+
+Para mudanças produzidas pelo próprio maintainer neste repositório fonte, PR não é requisito
+operacional por si só. Após gates aplicáveis, Checker independente quando exigido, CI no SHA exato e
+respeito às proteções do GitHub, a preferência é integração **owner-direct** e release direta em
+`main`. Use PR quando houver contribuição externa, necessidade deliberada de discussão/review,
+branch protection que o exija ou mudança ampla/arriscada em que o PR agregue valor. Esta preferência
+não autoriza contornar branch protection, Checker, CI, escopo congelado ou autoridade do usuário.
 
 ### Catálogo permitido (pares modelo/effort)
 

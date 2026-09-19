@@ -116,6 +116,79 @@ class SupervisorCase(unittest.TestCase):
 
 
 class WorktreePoolTest(SupervisorCase):
+    def init_git_repo(self, name="repo"):
+        repo = self.root / name
+        repo.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+        (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
+        subprocess.run(["git", "add", "seed.txt"], cwd=repo, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=TL-Orc Test",
+                "-c",
+                "user.email=tl-orc-test@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "seed",
+            ],
+            cwd=repo,
+            check=True,
+        )
+        return repo
+
+    def test_default_pool_is_hidden_and_stable_from_linked_worktree(self):
+        repo = self.init_git_repo()
+        linked = self.root / "linked"
+        subprocess.run(
+            ["git", "worktree", "add", "-q", "-b", "linked-test", str(linked), "main"],
+            cwd=repo,
+            check=True,
+        )
+        expected = self.root.resolve() / ".worktrees" / "repo"
+        self.assertEqual(tl_supervisor.default_worktree_pool(repo), expected)
+        self.assertEqual(tl_supervisor.default_worktree_pool(linked), expected)
+        subprocess.run(["git", "worktree", "remove", str(linked)], cwd=repo, check=True)
+
+    def test_default_pool_acquires_hidden_and_preserves_dirty_on_release(self):
+        repo = self.init_git_repo()
+        acquired = tl_supervisor.acquire_worktree_slot(None, "T001", 1, repo_root=repo)
+        self.assertEqual(acquired["state"], "acquired")
+        worktree = self.root.resolve() / ".worktrees" / "repo" / "T001"
+        self.assertEqual(Path(acquired["worktree"]), worktree)
+        self.assertTrue((worktree / "slot.json").exists())
+
+        (worktree / "dirty.txt").write_text("keep me\n", encoding="utf-8")
+        preserved = tl_supervisor.release_worktree_slot(None, "T001", repo_root=repo)
+        self.assertEqual(preserved["state"], "preserved")
+        self.assertEqual(preserved["reason"], "dirty_worktree")
+        self.assertTrue((worktree / "dirty.txt").exists())
+        self.assertTrue((worktree / "slot.json").exists())
+
+        (worktree / "dirty.txt").unlink()
+        released = tl_supervisor.release_worktree_slot(None, "T001", repo_root=repo)
+        self.assertEqual(released["state"], "released")
+        self.assertFalse(worktree.exists())
+
+    def test_dispatch_cli_uses_hidden_pool_by_default(self):
+        arguments = tl_run_story.parser().parse_args(
+            [
+                "dispatch",
+                "--story-id",
+                "T001",
+                "--path",
+                "docs/file.md",
+                "--claims-file",
+                "claims.json",
+                "--max-slots",
+                "1",
+            ]
+        )
+        self.assertIsNone(arguments.pool_dir)
+        self.assertEqual(arguments.repo_root, Path("."))
+
     @mock.patch.object(tl_supervisor, "_run_git", return_value=completed())
     def test_acquire_exhaustion_and_release(self, run_git):
         pool = self.root / "worktrees"
@@ -165,7 +238,7 @@ class WorktreePoolTest(SupervisorCase):
             mock.patch.object(
                 tl_run_story,
                 "acquire_worktree_slot",
-                side_effect=lambda *args: calls.append("acquire") or {"state": "pool_exhausted"},
+                side_effect=lambda *args, **kwargs: calls.append("acquire") or {"state": "pool_exhausted"},
             ),
             mock.patch.object(
                 tl_run_story,
@@ -2230,7 +2303,7 @@ class OrphanSweepTest(SupervisorCase):
         self.assertEqual(result["removed"], ["T001"])
         self.assertFalse((pool / "T001" / "slot.json").exists())
         self.assertTrue((pool / "T002" / "slot.json").exists())
-        self.assertEqual(run_git.call_count, 1)
+        self.assertEqual(run_git.call_count, 2, "status safety check + non-force removal")
 
     def test_malformed_orphan_slot_is_refused_not_removed(self):
         slot = self.root / "worktrees" / "T001" / "slot.json"

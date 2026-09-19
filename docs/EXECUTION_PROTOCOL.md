@@ -534,7 +534,7 @@ Para viabilizar execução autônoma prolongada (overnight) e eliminar o tempo o
    - A fase de entrega (`phase_deliver`) conclui no momento em que os portões locais passam, o commit é realizado e o Pull Request é criado (`gh pr create`).
    - O condutor NÃO deve bloquear turnos ou pausar a sessão esperando de forma síncrona a conclusão do CI remoto (ex: 10 minutos de GitHub Actions).
    - O PR é publicado e entregue à Merge Queue serializada quando o merge for expressamente autorizado; a execução física de merge em `main` exige autorização humana explícita ou autorização prévia por `permitted_effects` do lote.
-   - Imediatamente após a publicação do PR da Story N, a capacidade de desenvolvimento é liberada: se a Story N+1 for independente no grafo de dependências (DAG), ela é despachada imediatamente em um Git worktree isolado (`worktrees/<story-id>`), sobrepondo o tempo de CI de N ao tempo de planejamento/código de N+1.
+   - Imediatamente após a publicação do PR da Story N, a capacidade de desenvolvimento é liberada: se a Story N+1 for independente no grafo de dependências (DAG), ela é despachada imediatamente em um Git worktree isolado. O caminho padrão é **oculto e fora da prateleira de projetos**: `<repo-parent>/.worktrees/<repo-name>/<story-id>`. É proibido criar por padrão irmãos visíveis como `../wt-*`; um `--pool-dir` diferente só é usado quando o consumidor o configurar deliberadamente.
 
 2. **Heartbeat e Fencing de Leases:**
    - Leases de sessão e execução registram obrigatoriamente `{pid, start_time, heartbeat_ts}`.
@@ -553,10 +553,12 @@ O paralelismo real é permitido somente entre stories independentes no DAG e com
 O estado de coordenação fica em disco, fora dos worktrees publicados, e cada transição é protegida
 por lock exclusivo e publicada por substituição atômica. Os quatro mecanismos são:
 
-1. **Worktree Pool:** `acquire_worktree_slot(pool_dir, story_id, max_slots)` concede no máximo
-   `max_slots` worktrees ativos em `worktrees/<story-id>`. A concessão só existe depois da publicação
-   de `slot.json`; pool cheio responde `pool_exhausted`, sem abrir outro worktree. Ao terminar,
-   `release_worktree_slot` remove o worktree e libera a vaga.
+1. **Worktree Pool:** `acquire_worktree_slot(pool_dir, story_id, max_slots, repo_root)` concede no máximo
+   `max_slots` worktrees ativos. Quando `pool_dir` é omitido, o supervisor deriva a raiz Git canônica
+   inclusive a partir de um linked worktree e usa `<repo-parent>/.worktrees/<repo-name>/<story-id>`.
+   A concessão só existe depois da publicação de `slot.json`; pool cheio responde `pool_exhausted`,
+   sem abrir outro worktree. Ao terminar, `release_worktree_slot` tenta remover **sem `--force`**:
+   uma árvore com alterações do usuário é preservada e a vaga não é declarada liberada até reconciliação.
 2. **Scope Arbiter:** antes de abrir o worktree, `claim_scope(story_id, paths, claims_file)` compara
    `content_paths` sob o mesmo lock usado para publicar a reivindicação. Igualdade, ancestralidade
    ou descendência de qualquer path ativo responde `scope_conflict`. Estado ilegível ou gravação
@@ -568,10 +570,12 @@ por lock exclusivo e publicada por substituição atômica. Os quatro mecanismos
    novamente. A persistência terminal tolera por até 30 segundos a contenção transitória do lock.
    Um topo `failed` bloqueia o seguinte até remoção explícita ou nova tentativa registrada, nunca
    equivale implicitamente a sucesso. A Merge Queue ordena merges já autorizados, mas nunca concede autoridade para merge em `main`: merge em `main` exige autorização humana explícita ou prévia por `permitted_effects` do lote.
-4. **Varredura de órfãos:** `sweep_orphan_worktrees(pool_dir, stale_after_seconds)` compara o
+4. **Varredura de órfãos:** `sweep_orphan_worktrees(pool_dir, stale_after_seconds, repo_root)` compara o
    `heartbeat_ts` da lease de cada `slot.json` com um limiar operacional maior que a tolerância
-   normal do heartbeat. Apenas leases que ultrapassam esse limiar são removidas com
-   `git worktree remove --force`; slot atual ou estado ilegível não é removido otimisticamente.
+   normal do heartbeat. Apenas leases que ultrapassam esse limiar são candidatas a cleanup, sempre
+   com inspeção de limpeza e `git worktree remove` **sem `--force`**. Worktree dirty, inspeção
+   inconclusiva ou remoção recusada permanece no pool e entra em `refused`; nunca se perde trabalho
+   para fabricar uma vaga.
 
 Resultados de gates continuam indexados por `tree_sha` do worktree correspondente e nunca são
 compartilhados entre stories com árvores diferentes. Escritas no board usam comparação e troca da

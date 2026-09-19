@@ -374,7 +374,9 @@ permit_local_commit: true
 
 `scope` e `board` identificam a única fila autorizada; o Orquestrador lê as fontes apontadas antes
 de agir e não executa valores como comandos. `execution_tree` deve separar a fila de mudanças
-preexistentes e de outros escritores. `max_rework_rounds` limita quantas vezes achados do Checker
+preexistentes e de outros escritores. Quando essa separação usar worktree, o caminho padrão é
+`<repo-parent>/.worktrees/<repo-name>/<work-ref>`; não use `../wt-*` nem outro irmão visível do
+checkout principal. Um caminho diferente só entra quando o consumidor o declarar deliberadamente. `max_rework_rounds` limita quantas vezes achados do Checker
 podem voltar automaticamente ao Maker depois da primeira revisão; omisso equivale a `2` e valores
 maiores exigem nova autorização explícita. `permit_board_update` e `permit_local_commit` precisam
 ser `true` para que o estado avance após um parecer aprovado. Push, publicação, pull request,

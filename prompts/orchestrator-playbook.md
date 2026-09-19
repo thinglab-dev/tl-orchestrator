@@ -228,8 +228,11 @@ registre o PR no `state.json`, libere a lease/lock
 e avalie as próximas stories independentes da fila para execução em worktrees isolados. Consulte o
 Scope Arbiter antes de cada despacho: **despache concorrentemente somente se `claim_scope` retornar
 sucesso para todas as stories candidatas** e houver vaga retornada por `acquire_worktree_slot`.
+Quando não houver override explícito do consumidor, omita `pool_dir` e deixe o supervisor resolver
+`<repo-parent>/.worktrees/<repo-name>/<story-id>`; não invente `../wt-*` nem outro irmão visível.
 Dependência no DAG, `scope_conflict`, estado ilegível ou pool esgotado mantém a candidata serializada;
-nunca abra primeiro o worktree para arbitrar depois. PRs concluídos com merge expressamente autorizado entram por `enqueue_merge` e
+nunca abra primeiro o worktree para arbitrar depois. No fechamento, worktree dirty ou cleanup recusado
+permanece preservado e bloqueia a liberação do scope até reconciliação. PRs concluídos com merge expressamente autorizado entram por `enqueue_merge` e
 somente o topo da Merge Queue Serializada pode chamar `gh pr merge`; o item seguinte aguarda o
 registro terminal do anterior, e um `failed` exige intervenção explícita na fila. A Merge Queue ordena merges já autorizados, mas nunca concede autoridade para merge em `main`: merge em `main` exige autorização out-of-band confirmada do operador avaliada por `MergeAuthorityGate` (`AuthorityReceipt`, T028). Aprovação por Checker independente, CI verde e `permitted_effects.pull_request_merge: true` representam apenas preparação técnica e capacidade operacional, jamais autorização de execução (`capability != authorization`).
 

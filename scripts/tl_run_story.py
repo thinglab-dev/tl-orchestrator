@@ -55,12 +55,12 @@ except ImportError:
 
 
 
-def dispatch_story(pool_dir, story_id, paths, claims_file, max_slots):
-    """Claim scope before opening a worktree; roll back if no slot is granted."""
+def dispatch_story(pool_dir, story_id, paths, claims_file, max_slots, repo_root=None):
+    """Claim scope before opening a hidden worktree; roll back if no slot is granted."""
     claim = claim_scope(story_id, paths, claims_file)
     if claim.get("state") != "claimed":
         return claim
-    slot = acquire_worktree_slot(pool_dir, story_id, max_slots)
+    slot = acquire_worktree_slot(pool_dir, story_id, max_slots, repo_root=repo_root)
     if slot.get("state") != "acquired":
         release = release_scope(story_id, claims_file)
         if release.get("state") != "released":
@@ -68,9 +68,9 @@ def dispatch_story(pool_dir, story_id, paths, claims_file, max_slots):
     return slot
 
 
-def release_story(pool_dir, story_id, claims_file):
-    """Close the worktree before making its paths eligible for another writer."""
-    slot = release_worktree_slot(pool_dir, story_id)
+def release_story(pool_dir, story_id, claims_file, repo_root=None):
+    """Close a clean worktree before making its paths eligible for another writer."""
+    slot = release_worktree_slot(pool_dir, story_id, repo_root=repo_root)
     if slot.get("state") not in {"released", "not_found"}:
         return slot
     scope = release_scope(story_id, claims_file)
@@ -719,12 +719,24 @@ def parser() -> argparse.ArgumentParser:
     dispatch = commands.add_parser("dispatch")
     dispatch.add_argument("--story-id", required=True)
     dispatch.add_argument("--path", action="append", dest="paths", required=True)
-    dispatch.add_argument("--pool-dir", required=True, type=Path)
+    dispatch.add_argument(
+        "--pool-dir",
+        default=None,
+        type=Path,
+        help="Optional override. Default: <repo-parent>/.worktrees/<repo-name>.",
+    )
+    dispatch.add_argument("--repo-root", default=Path("."), type=Path)
     dispatch.add_argument("--claims-file", required=True, type=Path)
     dispatch.add_argument("--max-slots", required=True, type=int)
     release = commands.add_parser("release")
     release.add_argument("--story-id", required=True)
-    release.add_argument("--pool-dir", required=True, type=Path)
+    release.add_argument(
+        "--pool-dir",
+        default=None,
+        type=Path,
+        help="Optional override. Default: <repo-parent>/.worktrees/<repo-name>.",
+    )
+    release.add_argument("--repo-root", default=Path("."), type=Path)
     release.add_argument("--claims-file", required=True, type=Path)
     enqueue = commands.add_parser("enqueue")
     enqueue.add_argument("--story-id", required=True)
@@ -752,10 +764,16 @@ def main(argv=None) -> int:
             arguments.paths,
             arguments.claims_file,
             arguments.max_slots,
+            repo_root=arguments.repo_root,
         )
         success = result.get("state") == "acquired"
     elif arguments.command == "release":
-        result = release_story(arguments.pool_dir, arguments.story_id, arguments.claims_file)
+        result = release_story(
+            arguments.pool_dir,
+            arguments.story_id,
+            arguments.claims_file,
+            repo_root=arguments.repo_root,
+        )
         success = result.get("state") == "released"
     elif arguments.command == "enqueue":
         result = enqueue_merge(

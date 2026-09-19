@@ -134,13 +134,88 @@ def _run_git(arguments: list[str], cwd: Path | None = None) -> subprocess.Comple
     )
 
 
+def repository_identity_root(repo_root: Path | str | None = None) -> Path:
+    """Resolve the primary checkout root even when called from a linked worktree."""
+    candidate = Path(repo_root) if repo_root is not None else Path.cwd()
+    common = _run_git(
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=candidate,
+    )
+    if common.returncode != 0 or not common.stdout.strip():
+        raise ValueError((common.stderr or common.stdout).strip() or "git common dir unavailable")
+    common_dir = Path(common.stdout.strip()).resolve()
+    if common_dir.name != ".git":
+        raise ValueError(f"unsupported git common dir: {common_dir}")
+    return common_dir.parent
+
+
+def default_worktree_pool(repo_root: Path | str | None = None) -> Path:
+    """Keep TL-Orc worktrees out of the user's project shelf by default."""
+    root = repository_identity_root(repo_root)
+    return root.parent / ".worktrees" / root.name
+
+
+def _resolve_worktree_pool(
+    pool_dir: Path | str | None,
+    repo_root: Path | str | None = None,
+) -> tuple[Path, Path | None]:
+    if pool_dir is not None:
+        root = repository_identity_root(repo_root) if repo_root is not None else None
+        return Path(pool_dir), root
+    root = repository_identity_root(repo_root)
+    return default_worktree_pool(root), root
+
+
 def _slot_files(pool_dir: Path) -> list[Path]:
     return sorted(pool_dir.glob("*/slot.json"))
 
 
-def acquire_worktree_slot(pool_dir, story_id, max_slots):
+def _remove_worktree_safely(
+    worktree: Path,
+    slot_file: Path,
+    record: dict,
+    git_root: Path | None,
+) -> dict:
+    """Remove only a clean worktree; slot.json is supervisor metadata, not user dirt."""
+    status = _run_git(
+        [
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--",
+            ".",
+            ":(exclude)slot.json",
+        ],
+        cwd=worktree,
+    )
+    if status.returncode != 0:
+        return {
+            "state": "preserved",
+            "reason": "status_unavailable",
+            "detail": (status.stderr or status.stdout).strip(),
+        }
+    if status.stdout.strip():
+        return {
+            "state": "preserved",
+            "reason": "dirty_worktree",
+        }
+
+    if slot_file.exists():
+        slot_file.unlink()
+    result = _run_git(["worktree", "remove", str(worktree)], cwd=git_root)
+    if result.returncode != 0:
+        if worktree.exists():
+            _atomic_write_json(slot_file, record)
+        return {
+            "state": "preserved",
+            "reason": "git_refused_remove",
+            "detail": (result.stderr or result.stdout).strip(),
+        }
+    return {"state": "released"}
+
+
+def acquire_worktree_slot(pool_dir, story_id, max_slots, repo_root=None):
     """Atomically reserve one pool slot and create its Git worktree."""
-    pool = Path(pool_dir)
     if (
         not _valid_story_id(story_id)
         or not isinstance(max_slots, int)
@@ -149,6 +224,7 @@ def acquire_worktree_slot(pool_dir, story_id, max_slots):
     ):
         return {"state": "invalid_input"}
     try:
+        pool, git_root = _resolve_worktree_pool(pool_dir, repo_root)
         with _FileLock(pool / ".pool.lock"):
             slots = _slot_files(pool)
             if len(slots) >= max_slots:
@@ -157,7 +233,7 @@ def acquire_worktree_slot(pool_dir, story_id, max_slots):
             slot_file = worktree / "slot.json"
             if worktree.exists() or slot_file.exists():
                 return {"state": "slot_conflict"}
-            result = _run_git(["worktree", "add", str(worktree)])
+            result = _run_git(["worktree", "add", str(worktree)], cwd=git_root)
             if result.returncode != 0:
                 return {
                     "state": "worktree_create_failed",
@@ -167,6 +243,8 @@ def acquire_worktree_slot(pool_dir, story_id, max_slots):
             record = {
                 "story_id": story_id,
                 "worktree": str(worktree),
+                "pool_dir": str(pool),
+                "repository_root": str(git_root) if git_root is not None else None,
                 "lease": {
                     "pid": os.getpid(),
                     "start_time": now,
@@ -176,19 +254,19 @@ def acquire_worktree_slot(pool_dir, story_id, max_slots):
             try:
                 _atomic_write_json(slot_file, record)
             except OSError:
-                _run_git(["worktree", "remove", "--force", str(worktree)])
+                _run_git(["worktree", "remove", str(worktree)], cwd=git_root)
                 raise
             return {"state": "acquired", **record}
-    except (OSError, TimeoutError):
+    except (OSError, ValueError, TimeoutError):
         return {"state": "unavailable"}
 
 
-def release_worktree_slot(pool_dir, story_id):
-    """Remove one story worktree and release its slot."""
-    pool = Path(pool_dir)
+def release_worktree_slot(pool_dir, story_id, repo_root=None):
+    """Remove one clean story worktree and release its slot without destructive force."""
     if not _valid_story_id(story_id):
         return {"state": "invalid_input"}
     try:
+        pool, git_root = _resolve_worktree_pool(pool_dir, repo_root)
         with _FileLock(pool / ".pool.lock"):
             worktree = pool / story_id
             slot_file = worktree / "slot.json"
@@ -197,14 +275,13 @@ def release_worktree_slot(pool_dir, story_id):
             record = _read_json(slot_file, None)
             if not isinstance(record, dict) or record.get("story_id") != story_id:
                 return {"state": "invalid_slot"}
-            result = _run_git(["worktree", "remove", "--force", str(worktree)])
-            if result.returncode != 0 and (worktree / ".git").exists():
+            cleanup = _remove_worktree_safely(worktree, slot_file, record, git_root)
+            if cleanup.get("state") != "released":
                 return {
-                    "state": "remove_failed",
-                    "detail": (result.stderr or result.stdout).strip(),
+                    **cleanup,
+                    "story_id": story_id,
+                    "worktree": str(worktree),
                 }
-            if slot_file.exists():
-                slot_file.unlink()
             with contextlib.suppress(OSError):
                 worktree.rmdir()
             return {"state": "released", "story_id": story_id}
@@ -605,9 +682,8 @@ def _heartbeat(record: dict) -> float:
     return float(value)
 
 
-def sweep_orphan_worktrees(pool_dir, stale_after_seconds):
-    """Remove metadata/worktrees whose heartbeat is strictly older than the threshold."""
-    pool = Path(pool_dir)
+def sweep_orphan_worktrees(pool_dir, stale_after_seconds, repo_root=None):
+    """Remove stale clean worktrees; preserve dirty or uncertain trees."""
     if (
         not isinstance(stale_after_seconds, (int, float))
         or isinstance(stale_after_seconds, bool)
@@ -617,6 +693,7 @@ def sweep_orphan_worktrees(pool_dir, stale_after_seconds):
     removed: list[str] = []
     refused: list[str] = []
     try:
+        pool, default_git_root = _resolve_worktree_pool(pool_dir, repo_root)
         with _FileLock(pool / ".pool.lock"):
             now = time.time()
             for slot_file in _slot_files(pool):
@@ -628,19 +705,23 @@ def sweep_orphan_worktrees(pool_dir, stale_after_seconds):
                         continue
                     story_id = record["story_id"]
                     worktree = slot_file.parent
-                    result = _run_git(["worktree", "remove", "--force", str(worktree)])
-                    if result.returncode != 0 and (worktree / ".git").exists():
+                    raw_root = record.get("repository_root")
+                    git_root = (
+                        Path(raw_root)
+                        if isinstance(raw_root, str) and raw_root
+                        else default_git_root
+                    )
+                    cleanup = _remove_worktree_safely(worktree, slot_file, record, git_root)
+                    if cleanup.get("state") != "released":
                         refused.append(story_id)
                         continue
-                    if slot_file.exists():
-                        slot_file.unlink()
                     with contextlib.suppress(OSError):
                         worktree.rmdir()
                     removed.append(story_id)
                 except (OSError, ValueError, json.JSONDecodeError):
                     refused.append(slot_file.parent.name)
             return {"state": "swept", "removed": removed, "refused": refused}
-    except (OSError, TimeoutError):
+    except (OSError, ValueError, TimeoutError):
         return {"state": "unavailable", "removed": removed, "refused": refused}
 
 

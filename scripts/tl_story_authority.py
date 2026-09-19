@@ -1375,7 +1375,49 @@ class StoryAuthority:
             raise HardStop("state_integrity", f"the {what} of child batch {child_batch_id} is not an object")
         return payload
 
-    def load_child_derivation(self, child_batch_id: str, *, spec_paths: Iterable[str] = ()) -> tuple[dict, dict]:
+    def load_historical_child_derivation(self, child_batch_id: str) -> tuple[dict, dict]:
+        """
+        Loads a canonical persisted child derivation (proposal and proof) for a historical predecessor
+        without re-entering the current lifecycle validation (which would incorrectly apply active
+        child guards against the predecessor). Used to inspect previous baseline references.
+        Still detects tampering and enforces fail-closed storage integrity.
+        """
+        self.refold()
+        derivation = (self.state.children.get(child_batch_id) or {}).get("derivation")
+        if not derivation:
+            raise HardStop(
+                "authority_missing_or_ambiguous",
+                f"story authority {self.authority_id} never derived child batch {child_batch_id}; "
+                "a batch cannot claim an authority that did not authorize it",
+                child_batch_id=child_batch_id, derived=sorted(self.state.children))
+        proposal = self._read_canonical(self.child_proposal_path(child_batch_id), "child proposal", child_batch_id)
+        proof = self._read_canonical(self.child_proof_path(child_batch_id), "derivation proof", child_batch_id)
+
+        proposal_digest = digest_of(proposal)
+        if proposal_digest != derivation.get("child_proposal_digest"):
+            raise HardStop("state_integrity",
+                           f"the persisted child proposal of {child_batch_id} digests to {proposal_digest} but the "
+                           f"journal recorded {derivation.get('child_proposal_digest')}",
+                           recomputed=proposal_digest, journaled=derivation.get("child_proposal_digest"))
+        # The proof digests itself by construction, so it is recomputed over the proof without
+        # the field that only exists because the digest was already taken.
+        recomputed = digest_of({k: v for k, v in proof.items() if k != "derivation_proof_digest"})
+        if recomputed != proof.get("derivation_proof_digest") or recomputed != derivation.get("derivation_proof_digest"):
+            raise HardStop("state_integrity",
+                           f"the derivation proof of {child_batch_id} digests to {recomputed} but the proof declares "
+                           f"{proof.get('derivation_proof_digest')} and the journal recorded "
+                           f"{derivation.get('derivation_proof_digest')}")
+        if proof.get("child_proposal_digest") != proposal_digest:
+            raise HardStop("state_integrity",
+                           f"the derivation proof of {child_batch_id} was taken over a different child proposal")
+        if proof.get("root_authority_digest") != self.root_digest:
+            raise HardStop("authority_missing_or_ambiguous",
+                           f"the derivation proof of {child_batch_id} is anchored in authority "
+                           f"{proof.get('root_authority_digest')}, not {self.root_digest}")
+
+        return proposal, proof
+
+    def load_child_derivation(self, child_batch_id: str, *, spec_paths: typing.Iterable[str] = ()) -> tuple[dict, dict]:
         """Recover the canonical child proposal and its derivation proof, re-digesting both.
 
         A digest a batch declares is worth nothing unless the object it digests can be produced
@@ -2159,6 +2201,12 @@ def assert_child_proposal_within_envelope(
                       f"the child must start exactly at the unmerged commit the previous Checker reviewed "
                       f"({expected_checkpoint['commit'][:12]}), got {(proposal.get('functional_parent_checkpoint') or {}).get('commit', 'none')}",
                       expected=expected_checkpoint, observed=proposal.get("functional_parent_checkpoint"))
+            if authority is not None:
+                prev_proposal, _ = authority.load_historical_child_derivation(previous_id)
+                expected_baseline = (prev_proposal.get("lineage") or {}).get("story_baseline_commit")
+                if (proposal.get("lineage") or {}).get("story_baseline_commit") != expected_baseline:
+                    _fail("state_integrity", "story_baseline_commit must not change between children")
+                
             try:
                 return assert_residual_lineage(proposal, state, payload, spec_paths=spec_paths, proof=proof,
                                                derivation=derivation)
@@ -2330,6 +2378,12 @@ def verify_derivation(
               f"the child must start exactly at the unmerged commit the previous Checker reviewed "
               f"({expected['commit'][:12]}), got {(child_proposal.get('functional_parent_checkpoint') or {}).get('commit', 'none')}",
               expected=expected, observed=child_proposal.get("functional_parent_checkpoint"))
+        
+        prev_proposal, _ = authority.load_child_derivation(previous_id)
+        expected_baseline = (prev_proposal.get("lineage") or {}).get("story_baseline_commit")
+        check("story_baseline_inherited", (child_proposal.get("lineage") or {}).get("story_baseline_commit") == expected_baseline,
+              "state_integrity", "story_baseline_commit must not change between children")
+
         if unresolved_digest:
             check("unresolved_items_match_closure",
                   previous_closure.get("unresolved_action_items_digest") == unresolved_digest,

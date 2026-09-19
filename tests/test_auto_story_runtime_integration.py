@@ -339,7 +339,7 @@ class AutoStoryRuntimeTest(unittest.TestCase):
                 authority=reopened, child_batch_id="B002", action_items=[PATCH_ITEM],
                 previous_child_id="B001", model_call_budget=2,
                 governance_base_commit=closure["governance_base_commit"],
-                story_baseline_commit=closure["governance_base_commit"])
+                story_baseline_commit=reopened.load_child_derivation("B001")[0]["lineage"]["story_baseline_commit"])
             self.assertEqual(child["functional_parent_checkpoint"],
                              {"commit": checkpoint, "tree": closure["checker_reviewed_tree"],
                               "child_batch_id": "B001"})

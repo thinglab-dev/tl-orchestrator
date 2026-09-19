@@ -1382,7 +1382,7 @@ class Runtime:
         elif child_state == "open":
             # Resume (R17): the child's own work is legitimately on top of where it opened. Prove
             # continuity against what was journaled instead of demanding the clean start again.
-            self._verify_open_child_continuity(checkpoint)
+            self._verify_open_child_continuity(checkpoint, proposal)
 
         self.child_proposal = proposal
         # T033: the protected paths hold before the child opens, and again before an open child
@@ -1412,7 +1412,7 @@ class Runtime:
     def _is_ancestor(self, ancestor: str, descendant: str) -> bool:
         return run_argv([self.git.exe, "merge-base", "--is-ancestor", ancestor, descendant], self.repo, 60)["exit_code"] == 0
 
-    def _verify_open_child_continuity(self, checkpoint: dict | None) -> None:
+    def _verify_open_child_continuity(self, checkpoint: dict | None, proposal: dict) -> None:
         """R17: an open child resumes only as the continuation of what its journals recorded.
 
         The child opened at one commit (its functional checkpoint, when it has one); every commit
@@ -1448,8 +1448,15 @@ class Runtime:
         for uid, record in fold.units.items():
             journaled += [(f"{uid}.commit", record.commit), (f"{uid}.base_commit", record.base_commit)]
             journaled += [(f"{uid}.checkpoint", commit) for commit in record.checkpoints]
+        
+        has_progress = any(r.commit or r.checkpoints for r in fold.units.values())
+        base_rev = self.git.rev(self.base_branch)
+        proposal_base = (proposal.get("lineage") or {}).get("governance_base_commit")
+
         for name, commit in journaled:
             if commit and (not _COMMIT_RE.match(str(commit)) or not self._is_ancestor(origin, str(commit))):
+                if name == "HEAD" and has_progress and (str(commit) == base_rev or str(commit) == proposal_base):
+                    continue
                 refuse("unexpected_tree_state", f"{name} {str(commit)[:12]} does not descend from the opening commit "
                        f"{origin[:12]}; resuming would continue a history this child never journaled",
                        ref=name, commit=str(commit), opened_at=origin)
@@ -1494,29 +1501,32 @@ class Runtime:
             handle.close()
             raise Refusal("coordinator_conflict: another runtime holds the lease for this batch", 5)
         self._lease = handle
-        self.git.ensure_exclude()
-        if self.authority is not None:
-            # One holder of the authority lease at a time: the global budget has a single writer.
-            try:
-                self.authority.acquire()
-                self._bind_and_verify_auto_story_child()
-            except (story_authority.HardStop, Refusal) as err:
-                self.release()
-                if isinstance(err, Refusal):
-                    raise
-                raise Refusal(f"{err.reason}: {err.detail}", 2) from err
-        self.fold = self.journal.fold()
-        if self.fold.invalid_lines:
-            raise Refusal(f"unrecoverable_harness_failure_or_ambiguous_dispatch: journal has {self.fold.invalid_lines} invalid line(s); inspect journal.jsonl", 2)
-        if self.fold.events == 0:
-            self.journal.append("batch_open", batch=self.batch_id, runtime_stamp=self.stamp, runtime_version=RUNTIME_VERSION,
-                                proposal_digest=self.batch["authorization"]["proposal_digest"], units=sorted(self.units),
-                                repo_head=self.git.head(), base_branch=self.config["base_branch"] or self._story_branch() or self.git.current_branch(),
-                                capabilities=self.policy.capabilities_report(),
-                                units_meta={uid: {"title": u.title} for uid, u in self.units.items()},
-                                budget={k: self.batch["budget"].get(k) for k in ("max_model_calls", "max_rework_rounds_per_unit")},
-                                roles={role: {k: cfg.get(k) for k in ("adapter", "model", "effort", "family")} for role, cfg in self.config["roles"].items()})
+        try:
+            self.git.ensure_exclude()
+            if self.authority is not None:
+                # One holder of the authority lease at a time: the global budget has a single writer.
+                try:
+                    self.authority.acquire()
+                    self._bind_and_verify_auto_story_child()
+                except (story_authority.HardStop, Refusal) as err:
+                    if isinstance(err, Refusal):
+                        raise
+                    raise Refusal(f"{err.reason}: {err.detail}", 2) from err
             self.fold = self.journal.fold()
+            if self.fold.invalid_lines:
+                raise Refusal(f"unrecoverable_harness_failure_or_ambiguous_dispatch: journal has {self.fold.invalid_lines} invalid line(s); inspect journal.jsonl", 2)
+            if self.fold.events == 0:
+                self.journal.append("batch_open", batch=self.batch_id, runtime_stamp=self.stamp, runtime_version=RUNTIME_VERSION,
+                                    proposal_digest=self.batch["authorization"]["proposal_digest"], units=sorted(self.units),
+                                    repo_head=self.git.head(), base_branch=self.config["base_branch"] or self._story_branch() or self.git.current_branch(),
+                                    capabilities=self.policy.capabilities_report(),
+                                    units_meta={uid: {"title": u.title} for uid, u in self.units.items()},
+                                    budget={k: self.batch["budget"].get(k) for k in ("max_model_calls", "max_rework_rounds_per_unit")},
+                                    roles={role: {k: cfg.get(k) for k in ("adapter", "model", "effort", "family")} for role, cfg in self.config["roles"].items()})
+                self.fold = self.journal.fold()
+        except Exception:
+            self.release()
+            raise
 
     def _story_branch(self) -> str:
         """The branch this AUTO_STORY child integrates into, as its child_open recorded it."""
@@ -2162,6 +2172,10 @@ class Runtime:
         resolved, items = self._resolve_pending_verification(items, gate_results)
         for item in resolved:
             self.note(f"{uid}: Checker item {item.get('id')} resolved by runtime evidence (gate already passed): {str(item.get('summary', ''))[:120]}")
+        
+        record.findings = items
+        self.unit_state(uid, record.state, record.reason, findings=items, tree=tree)
+
         if resolved and not items:
             self.unit_state(uid, "running", "", phase="commit", findings=[], tree=tree)
             return None

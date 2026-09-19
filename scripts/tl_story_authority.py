@@ -131,6 +131,16 @@ JOURNAL_EVENTS = (
     "hard_stop",
     "authority_closed",
 )
+# The only child lifecycle: derived -> open -> closed | failed. Each lifecycle event names the
+# single state it may leave; `None` is "never seen under this authority". Anything else (an
+# unknown child, a reopen, a second terminal event) is refused when written and, if it is found
+# in the journal anyway, makes the whole journal untrustworthy.
+CHILD_TRANSITIONS = {
+    "child_derived": (None, "derived"),
+    "child_open": ("derived", "open"),
+    "child_closed": ("open", "closed"),
+    "child_failed": ("open", "failed"),
+}
 ATTEMPT_STATES = ("reserved", "consumed", "released", "ambiguous")
 # `ambiguous` is charged: a call whose outcome cannot be proven may have reached the provider.
 CHARGED_ATTEMPT_STATES = frozenset({"consumed", "ambiguous"})
@@ -485,28 +495,31 @@ class AuthorityJournal:
                 record["settled_at"] = event.get("at", "")
                 if event.get("receipt"):
                     record["receipt"] = event["receipt"]
-            elif kind == "child_derived":
-                state.derived.append(event)
-                state.children.setdefault(event["child_batch_id"], {})["derivation"] = event
-                state.children[event["child_batch_id"]]["state"] = "derived"
-            elif kind == "child_open":
-                child = state.children.setdefault(event["child_batch_id"], {})
-                child["state"] = "open"
-                child["open"] = event
-            elif kind == "child_closed":
-                child = state.children.setdefault(event["child_batch_id"], {})
-                child["state"] = "closed"
-                child["closure"] = event
-                state.last_closed_child = event["child_batch_id"]
-                if event.get("made_progress"):
-                    state.consecutive_failures = 0
+            elif kind in CHILD_TRANSITIONS:
+                error = child_transition_error(state, kind, event.get("child_batch_id"))
+                if error:
+                    # Not applied: a journal that carries an illegal transition is not folded
+                    # into something that merely looks plausible, it is refused as a whole.
+                    state.lifecycle_violations.append(f"seq {event.get('seq')}: {error}")
+                    continue
+                child_id = event["child_batch_id"]
+                child = state.children.setdefault(child_id, {})
+                child["state"] = CHILD_TRANSITIONS[kind][1]
+                if kind == "child_derived":
+                    state.derived.append(event)
+                    child["derivation"] = event
+                elif kind == "child_open":
+                    child["open"] = event
+                elif kind == "child_closed":
+                    child["closure"] = event
+                    state.last_closed_child = child_id
+                    if event.get("made_progress"):
+                        state.consecutive_failures = 0
+                    else:
+                        state.consecutive_failures += 1
                 else:
+                    child["failure"] = event
                     state.consecutive_failures += 1
-            elif kind == "child_failed":
-                child = state.children.setdefault(event["child_batch_id"], {})
-                child["state"] = "failed"
-                child["failure"] = event
-                state.consecutive_failures += 1
             elif kind == "hard_stop":
                 state.hard_stops.append(event)
             elif kind == "authority_closed":
@@ -515,6 +528,22 @@ class AuthorityJournal:
                 state.close_reason = event.get("reason", "")
         self._seq = seq
         return state
+
+
+def child_transition_error(state: "AuthorityState", kind: str, child_batch_id: Any) -> str:
+    """Why `kind` may not be applied to `child_batch_id` in `state`; empty when it may."""
+    if not isinstance(child_batch_id, str) or not child_batch_id:
+        return f"{kind} names no child batch ({child_batch_id!r})"
+    source, _target = CHILD_TRANSITIONS[kind]
+    current = (state.children.get(child_batch_id) or {}).get("state")
+    if current == source:
+        return ""
+    if current is None:
+        return f"{kind} for child batch {child_batch_id}, which was never derived under this authority"
+    if source is None:
+        return f"{kind} for child batch {child_batch_id}, which is already {current}; a child is derived once"
+    return (f"{kind} for child batch {child_batch_id} in state {current}; it requires state {source} "
+            "(derived -> open -> closed | failed, and a terminal child is never reopened or re-terminated)")
 
 
 @dataclass
@@ -537,6 +566,7 @@ class AuthorityState:
     close_state: str = ""
     close_reason: str = ""
     invalid_lines: int = 0
+    lifecycle_violations: list[str] = field(default_factory=list)
 
     @property
     def consumed_calls(self) -> int:
@@ -601,12 +631,7 @@ class StoryAuthority:
             raise Refusal(
                 f"coordinator_conflict: another runtime holds the lease for story authority {self.authority_id}", 5)
         self._lease = handle
-        self.refold()
-        if self.state.invalid_lines:
-            raise HardStop(
-                "state_integrity",
-                f"authority journal has {self.state.invalid_lines} invalid line(s); the hash chain is broken",
-                authority_id=self.authority_id)
+        self.refold()  # a broken chain or an illegal child transition is a hard stop here
         if not self.state.opened:
             self.journal.append(
                 "authority_open", authority_id=self.authority_id, work_ref=self.payload["work_ref"],
@@ -633,8 +658,36 @@ class StoryAuthority:
         self.release()
 
     def refold(self) -> AuthorityState:
-        self.state = self.journal.fold()
-        return self.state
+        """Rebuild the state from the journal, refusing a journal that cannot be trusted.
+
+        Every caller (acquire, bind, derivation, each lifecycle write) goes through here, so a
+        broken hash chain or an illegal child transition is a hard stop wherever it is met, not
+        only when the lease is first taken. Nothing is appended to a journal found in that state.
+        """
+        state = self.journal.fold()
+        self.state = state
+        if state.invalid_lines:
+            raise HardStop(
+                "state_integrity",
+                f"authority journal has {state.invalid_lines} invalid line(s); the hash chain is broken",
+                authority_id=self.authority_id)
+        if state.lifecycle_violations:
+            raise HardStop(
+                "state_integrity",
+                "authority journal carries illegal child lifecycle transitions: "
+                + "; ".join(state.lifecycle_violations[:5]),
+                authority_id=self.authority_id, violations=list(state.lifecycle_violations))
+        return state
+
+    def _require_child_transition(self, kind: str, child_batch_id: Any) -> None:
+        """Refuse a lifecycle write the journal would not accept. Nothing is journaled, not even
+        a hard_stop: a refused transition leaves the journal exactly as it was."""
+        self.refold()
+        error = child_transition_error(self.state, kind, child_batch_id)
+        if error:
+            raise HardStop("state_integrity", error, child_batch_id=child_batch_id, event=kind,
+                           state=(self.state.children.get(child_batch_id) or {}).get("state", "")
+                           if isinstance(child_batch_id, str) else "")
 
     def _require_lease(self) -> None:
         if self._lease is None:
@@ -977,6 +1030,7 @@ class StoryAuthority:
                           lineage: dict | None = None) -> dict:
         self._require_lease()
         self._require_open()
+        self._require_child_transition("child_open", child_batch_id)
         event = self.journal.append(
             "child_open", authority_id=self.authority_id, child_batch_id=child_batch_id, branch=branch,
             head_commit=head_commit, tree=tree, **({"lineage": lineage} if lineage else {}))
@@ -1000,6 +1054,7 @@ class StoryAuthority:
         """Persist the functional lineage of a closing child, merged or not."""
         self._require_lease()
         self._require_open()
+        self._require_child_transition("child_closed", child_batch_id)
         for name, value in (("governance_base_commit", governance_base_commit),
                             ("checker_reviewed_commit", checker_reviewed_commit),
                             ("functional_checkpoint_commit", functional_checkpoint_commit)):
@@ -1025,6 +1080,7 @@ class StoryAuthority:
 
     def record_child_failed(self, child_batch_id: str, *, reason: str, detail: str = "") -> dict:
         self._require_lease()
+        self._require_child_transition("child_failed", child_batch_id)
         event = self.journal.append(
             "child_failed", authority_id=self.authority_id, child_batch_id=child_batch_id, reason=reason,
             detail=detail[:400])

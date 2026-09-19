@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import io
 import os
 import tempfile
 import unittest
@@ -204,9 +205,24 @@ class ProtectedPathContainmentTest(StoryCase):
         self.assertEqual((self.root / self.escape).read_bytes(), self.sentinel.read_bytes())
 
     @contextlib.contextmanager
-    def filesystem_spy(self):
-        """Record every path the validator stats, reads, walks or dereferences."""
+    def filesystem_spy(self, reads: list[bytes] | None = None):
+        """Record every path the validator stats, opens, lists, reads or dereferences.
+
+        Lookups relative to a directory descriptor are recorded as the path that descriptor was
+        opened on joined with the name, so a descriptor-relative access is judged exactly like
+        a pathname one. A descriptor the spy did not see opened is recorded as unresolvable,
+        which fails the containment assertion rather than passing it.
+        """
         touched: list[str] = []
+        fd_paths: dict[int, str] = {}
+
+        def where(target, dir_fd=None) -> str:
+            if isinstance(target, int):
+                return fd_paths.get(target, f"<unresolved fd {target}>")
+            target = os.fsdecode(target)
+            if dir_fd is not None:
+                return os.path.join(fd_paths.get(dir_fd, f"<unresolved fd {dir_fd}>"), target)
+            return os.path.abspath(target)
 
         def spy(original):
             def wrapper(target, *args, **kwargs):
@@ -214,11 +230,47 @@ class ProtectedPathContainmentTest(StoryCase):
                 return original(target, *args, **kwargs)
             return wrapper
 
+        def spy_at(original):
+            def wrapper(target=".", *args, dir_fd=None, **kwargs):
+                touched.append(where(target, dir_fd))
+                if dir_fd is not None:
+                    kwargs["dir_fd"] = dir_fd
+                return original(target, *args, **kwargs)
+            return wrapper
+
+        def spy_open(original):
+            def wrapper(target, flags, mode=0o777, *, dir_fd=None):
+                full = where(target, dir_fd)
+                touched.append(full)
+                fd = original(target, flags, mode, dir_fd=dir_fd)
+                fd_paths[fd] = full
+                return fd
+            return wrapper
+
+        def spy_dup(original):
+            def wrapper(fd):
+                duplicate = original(fd)
+                fd_paths[duplicate] = where(fd)
+                return duplicate
+            return wrapper
+
+        def spy_read(original):
+            def wrapper(fd, size):
+                touched.append(where(fd))
+                data = original(fd, size)
+                if reads is not None:
+                    reads.append(data)
+                return data
+            return wrapper
+
         with contextlib.ExitStack() as stack:
             for name in ("is_symlink", "is_file", "is_dir", "read_bytes", "lstat", "stat"):
                 stack.enter_context(mock.patch.object(Path, name, spy(getattr(Path, name))))
-            for name in ("walk", "readlink", "lstat", "stat"):
-                stack.enter_context(mock.patch.object(plan_validator.os, name, spy(getattr(os, name))))
+            for name in ("walk", "readlink", "lstat", "stat", "listdir", "scandir"):
+                stack.enter_context(mock.patch.object(plan_validator.os, name, spy_at(getattr(os, name))))
+            stack.enter_context(mock.patch.object(plan_validator.os, "open", spy_open(os.open)))
+            stack.enter_context(mock.patch.object(plan_validator.os, "dup", spy_dup(os.dup)))
+            stack.enter_context(mock.patch.object(plan_validator.os, "read", spy_read(os.read)))
             yield touched
 
     def assert_nothing_outside_touched(self, touched: list[str]) -> None:
@@ -313,7 +365,7 @@ class ProtectedPathContainmentTest(StoryCase):
                       OSError(5, "Input/output error", str(self.root / "docs/ARCH.md"))):
             for item in (reference, single):
                 with self.subTest(type(error).__name__, policy=item["policy"]):
-                    with mock.patch.object(Path, "read_bytes", side_effect=error):
+                    with mock.patch.object(plan_validator.os, "read", side_effect=error):
                         violations = verify(self.root, [item])
                     self.assertEqual([v["violation"] for v in violations], ["protected_path_unreadable"])
                     self.assertEqual(violations[0]["path"], str(self.root / "docs/ARCH.md"))
@@ -321,7 +373,7 @@ class ProtectedPathContainmentTest(StoryCase):
                     self.assertIn(error.strerror, violations[0]["detail"])
 
         # An unreadable directory is not a silently shorter snapshot.
-        with mock.patch.object(plan_validator.os, "walk",
+        with mock.patch.object(plan_validator.os, "listdir",
                                side_effect=PermissionError(13, "Permission denied", str(self.root / "docs"))):
             violations = verify(self.root, [reference])
         self.assertEqual([v["violation"] for v in violations], ["protected_path_unreadable"])
@@ -336,7 +388,7 @@ class ProtectedPathContainmentTest(StoryCase):
 
         # Through the Story Authority the violation is a hard stop that carries the detail.
         payload = {"protected_paths": [single]}
-        with mock.patch.object(Path, "read_bytes", side_effect=PermissionError(13, "Permission denied")):
+        with mock.patch.object(plan_validator.os, "read", side_effect=PermissionError(13, "Permission denied")):
             with self.assertRaises(story.HardStop) as raised:
                 story.assert_protected_paths_intact(self.root, payload)
         self.assertEqual(raised.exception.reason, "protected_path_violation")
@@ -387,6 +439,203 @@ class ProtectedPathContainmentTest(StoryCase):
             story.verify_derivation(auth, proposal)
         self.assertEqual(raised.exception.reason, "protected_path_violation")
         self.assertIn("protected_path_pattern_invalid", raised.exception.detail)
+
+
+    # ---- R10: check-then-use through a swapped intermediate component --------------------
+
+    OUTSIDE_MARK = b"OUTSIDE-SENTINEL"
+
+    def swap_fixture(self) -> tuple[bytes, dict, dict]:
+        """`vault/inner/data.txt` inside, and a decoy `inner/data.txt` outside at the same
+        relative position, so a pathname lookup through a swapped `vault` lands on the decoy."""
+        if not can_symlink(self.root):
+            self.skipTest("this platform does not allow creating symlinks")
+        inside = b"inside bytes the authority froze\n"
+        (self.root / "vault" / "inner").mkdir(parents=True)
+        (self.root / "vault" / "inner" / "data.txt").write_bytes(inside)
+        (self.outside / "inner").mkdir()
+        (self.outside / "inner" / "data.txt").write_bytes(self.OUTSIDE_MARK + b" never read\n")
+        single = {"pattern": "vault/inner/data.txt", "policy": "exact_file_hash",
+                  "sha256": plan_validator.sha256_hex(inside)}
+        whole = {"pattern": "vault", "policy": "exact_set_snapshot", "snapshot": snapshot_set(self.root, "vault")}
+        return inside, single, whole
+
+    def swap_vault(self) -> None:
+        os.rename(self.root / "vault", self.root / "vault.real")
+        os.symlink(self.outside, self.root / "vault")
+
+    def unswap_vault(self) -> None:
+        os.unlink(self.root / "vault")
+        os.rename(self.root / "vault.real", self.root / "vault")
+
+    def assert_no_outside_byte(self, reads: list[bytes], touched: list[str]) -> None:
+        self.assertFalse([chunk for chunk in reads if self.OUTSIDE_MARK in chunk],
+                         "a byte behind the swapped component was read")
+        self.assert_nothing_outside_touched(touched)
+
+    def test_swap_after_a_component_is_opened_cannot_redirect_the_read(self) -> None:
+        """The component is swapped for a symlink right after the policy walk opened it:
+        everything after that goes through the held descriptor, so only the original directory
+        is read. (verify opens `vault` twice: once proving containment, once for the policy.)"""
+        inside, single, whole = self.swap_fixture()
+        real_open = os.open
+        # The final-component pattern `vault` has no intermediate component to prove, so its only
+        # open of `vault` is the policy walk's; the nested pattern's second open is.
+        cases = [(single, 2, lambda: verify(self.root, [single])),
+                 (whole, 1, lambda: verify(self.root, [whole])),
+                 (whole, 1, lambda: snapshot_set(self.root, "vault"))]
+        for item, swap_on, run in cases:
+            opens: list[str] = []
+            swapped: list[bool] = []
+
+            def open_then_swap(target, flags, mode=0o777, *, dir_fd=None):
+                fd = real_open(target, flags, mode, dir_fd=dir_fd)
+                if target == "vault":
+                    opens.append(target)
+                    if len(opens) == swap_on:
+                        swapped.append(True)
+                        self.swap_vault()
+                        # Falsifiable: a pathname lookup now reaches the decoy outside the repository.
+                        self.assertIn(self.OUTSIDE_MARK, (self.root / "vault/inner/data.txt").read_bytes())
+                return fd
+
+            reads: list[bytes] = []
+            with self.subTest(policy=item["policy"], swap_on=swap_on):
+                try:
+                    with mock.patch.object(plan_validator.os, "open", open_then_swap), \
+                            self.filesystem_spy(reads) as touched:
+                        outcome = run()
+                finally:
+                    if swapped:
+                        self.unswap_vault()
+                self.assertTrue(swapped, "the swap never happened; the counterproof is not live")
+                if isinstance(outcome, list):
+                    self.assertEqual(outcome, [], "the held descriptor verifies the original directory")
+                else:
+                    self.assertEqual(outcome["digest"], whole["snapshot"]["digest"])
+                self.assertIn(inside, b"".join(reads))
+                self.assert_no_outside_byte(reads, touched)
+
+    def test_swap_between_lstat_and_open_is_refused(self) -> None:
+        """The component is swapped after its lstat said directory and before it is opened:
+        the no-follow open refuses it, so nothing behind the new symlink is reached."""
+        _inside, single, whole = self.swap_fixture()
+        real_stat = os.stat
+        for item in (single, whole, {"pattern": "vault/inner/data.txt", "policy": "read_only"}):
+            swapped: list[bool] = []
+
+            def stat_then_swap(target, *args, dir_fd=None, follow_symlinks=True):
+                result = real_stat(target, *args, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+                if target == "vault" and dir_fd is not None and not swapped:
+                    swapped.append(True)
+                    self.swap_vault()
+                return result
+
+            reads: list[bytes] = []
+            with self.subTest(policy=item["policy"]):
+                try:
+                    with mock.patch.object(plan_validator.os, "stat", stat_then_swap), \
+                            self.filesystem_spy(reads) as touched:
+                        violations = verify(self.root, [item], dirty_paths=[])
+                finally:
+                    if swapped:
+                        self.unswap_vault()
+                self.assertTrue(swapped)
+                self.assertEqual([v["violation"] for v in violations], ["protected_path_pattern_invalid"])
+                self.assertIn("vault", violations[0]["detail"])
+                self.assert_no_outside_byte(reads, touched)
+
+    def test_concurrent_swapping_of_an_intermediate_component_never_reads_outside(self) -> None:
+        """A second thread keeps flipping `vault` between the real directory and a symlink to
+        the outside while verification runs: no iteration reads a byte from outside, and none
+        passes as intact while the link is what it walked."""
+        import threading
+        inside, single, whole = self.swap_fixture()
+        stop = threading.Event()
+        flips: list[int] = []
+
+        def flipper() -> None:
+            while not stop.is_set():
+                self.swap_vault()
+                self.unswap_vault()
+                flips.append(1)
+
+        reads: list[bytes] = []
+        outcomes: set[str] = set()
+        thread = threading.Thread(target=flipper, daemon=True)
+        with self.filesystem_spy(reads) as touched:
+            thread.start()
+            try:
+                for _ in range(300):
+                    for item in (single, whole):
+                        found = verify(self.root, [item])
+                        outcomes.update(v["violation"] for v in found)
+                        if not found:
+                            outcomes.add("intact")
+            finally:
+                stop.set()
+                thread.join(timeout=10)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(flips, "the concurrent swap never ran")
+        self.assert_no_outside_byte(reads, touched)
+        # Whatever interleaving happened, an outcome is intact (the real directory was walked)
+        # or a fail-closed violation (for the pattern `vault` itself, a symlink met as the final
+        # component is an entry hashed by its target text); never a hash over the decoy's bytes.
+        self.assertLessEqual(outcomes, {"intact", "protected_path_pattern_invalid", "protected_path_missing",
+                                        "protected_path_unreadable", "protected_set_entry_removed",
+                                        "protected_set_entry_added", "protected_set_entry_type_changed"})
+        self.assertEqual((self.root / "vault" / "inner" / "data.txt").read_bytes(), inside)
+
+    def test_platform_without_secure_primitives_fails_closed(self) -> None:
+        """No descriptor-relative no-follow traversal means no verification, never a pathname
+        fallback: every policy, read_only included, is `protected_path_unverifiable`."""
+        payload = (self.root / "docs/ARCH.md").read_bytes()
+        items = [{"pattern": "docs", "policy": "read_only"},
+                 {"pattern": "docs/ARCH.md", "policy": "exact_file_hash", "sha256": plan_validator.sha256_hex(payload)},
+                 {"pattern": "docs", "policy": "exact_set_snapshot", "snapshot": snapshot_set(self.root, "docs")}]
+        with mock.patch.object(plan_validator, "_SECURE_TRAVERSAL_GAPS", ("os.open(dir_fd=)",)):
+            reads: list[bytes] = []
+            with self.filesystem_spy(reads) as touched:
+                violations = verify(self.root, items, dirty_paths=[])
+            self.assertEqual([v["violation"] for v in violations], ["protected_path_unverifiable"] * 3)
+            self.assertEqual([v["policy"] for v in violations], [item["policy"] for item in items])
+            self.assertIn("os.open(dir_fd=)", violations[0]["detail"])
+            self.assertEqual(reads, [])
+            self.assert_nothing_outside_touched(touched)
+            with self.assertRaises(plan_validator.SecureTraversalUnavailable):
+                snapshot_set(self.root, "docs")
+            with self.assertRaises(story.HardStop) as raised:
+                story.assert_protected_paths_intact(self.root, {"protected_paths": items}, dirty_paths=[])
+            self.assertEqual(raised.exception.reason, "protected_path_violation")
+            with contextlib.redirect_stderr(io.StringIO()) as refused:
+                self.assertNotEqual(story.main(["snapshot", "--repo", str(self.root), "--pattern", "docs"]), 0)
+            self.assertIn("protected path snapshot refused", refused.getvalue())
+        # Real platform probe: this host is expected to offer the primitives the suite relies on.
+        self.assertEqual(plan_validator._secure_traversal_gaps(), plan_validator._SECURE_TRAVERSAL_GAPS)
+
+    # ---- R12: read_only proves real containment before its policy is evaluated -----------
+
+    def test_read_only_refuses_a_symlinked_intermediate_component(self) -> None:
+        if not can_symlink(self.root):
+            self.skipTest("this platform does not allow creating symlinks")
+        os.symlink(self.outside, self.root / "linked")
+        item = {"pattern": "linked/sentinel.txt", "policy": "read_only"}
+        for dirty in (["linked"], [], ["linked/sentinel.txt"], None):
+            with self.subTest(dirty_paths=dirty):
+                reads: list[bytes] = []
+                with self.filesystem_spy(reads) as touched:
+                    violations = verify(self.root, [item], dirty_paths=dirty)
+                self.assertEqual([v["violation"] for v in violations], ["protected_path_pattern_invalid"])
+                self.assertEqual(violations[0]["policy"], "read_only")
+                self.assertIn("linked", violations[0]["detail"])
+                self.assertIn("symlink", violations[0]["detail"])
+                self.assertEqual(reads, [])
+                self.assert_nothing_outside_touched(touched)
+        # Through the Story Authority the same pattern is a hard stop, not an intact read_only path.
+        with self.assertRaises(story.HardStop) as raised:
+            story.assert_protected_paths_intact(self.root, {"protected_paths": [item]}, dirty_paths=["linked"])
+        self.assertEqual([v["violation"] for v in raised.exception.evidence["violations"]],
+                         ["protected_path_pattern_invalid"])
 
 
 if __name__ == "__main__":

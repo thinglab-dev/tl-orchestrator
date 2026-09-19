@@ -29,11 +29,36 @@ class OperationalLimitsTest(StoryCase):
         stops the Story."""
         auth = self.authority(self.frozen_authority(authority_id="A010", max_child_batches=6))
         self.assertEqual(auth.payload["max_consecutive_failed_batches"], 2)
-        auth.record_child_failed("B013", reason="unrecoverable_harness_failure", detail="adapter never started")
+        commit, tree = self.git.head(), self.git.tree()
+        residual = [self.patch_item("R5")]
+
+        def open_rework(child_id: str, previous: str | None) -> None:
+            proposal = story.derive_child_proposal(
+                authority=auth, child_batch_id=child_id, action_items=residual if previous else [],
+                previous_child_id=previous, model_call_budget=2, governance_base_commit=commit,
+                story_baseline_commit=commit)
+            proof = story.verify_derivation(auth, proposal, action_items=residual if previous else None)
+            auth.record_child_derived(proposal, proof)
+            self.open_child(auth, child_id)
+
+        def close_on_same_tree(child_id: str) -> None:
+            auth.record_child_closed(
+                child_batch_id=child_id, governance_base_commit=commit, checker_reviewed_commit=commit,
+                checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,
+                checker_verdict="changes_requested", unresolved_action_items=residual)
+
+        # A successor derives only from a closed predecessor (R11: derived -> open -> closed |
+        # failed), so the streak is a closure without progress followed by a failed child.
+        open_rework("B013", None)
+        close_on_same_tree("B013")  # the first child always counts as progress
+        self.assertEqual(auth.state.consecutive_failures, 0)
+        open_rework("B014", "B013")
+        close_on_same_tree("B014")  # reviewed exactly the tree it inherited: no progress
         self.assertEqual(auth.state.consecutive_failures, 1)
         auth.assert_failure_streak()  # one failure is not yet the limit
 
-        auth.record_child_failed("B014", reason="unrecoverable_harness_failure", detail="adapter never started")
+        open_rework("B015", "B014")
+        auth.record_child_failed("B015", reason="unrecoverable_harness_failure", detail="adapter never started")
         self.assertEqual(auth.state.consecutive_failures, 2)
         with self.assertRaises(story.HardStop) as raised:
             auth.assert_failure_streak()
@@ -42,7 +67,7 @@ class OperationalLimitsTest(StoryCase):
 
         # Derivation is refused for the same reason, so no further child opens.
         proposal = story.derive_child_proposal(
-            authority=auth, child_batch_id="B015", action_items=[], previous_child_id=None,
+            authority=auth, child_batch_id="B016", action_items=[], previous_child_id=None,
             model_call_budget=2, governance_base_commit=self.governance_base,
             story_baseline_commit=self.governance_base)
         with self.assertRaises(story.HardStop) as refused:
@@ -58,6 +83,7 @@ class OperationalLimitsTest(StoryCase):
             authority=auth, child_batch_id="B013", action_items=[], previous_child_id=None,
             model_call_budget=4, governance_base_commit=commit, story_baseline_commit=commit)
         auth.record_child_derived(first, story.verify_derivation(auth, first))
+        self.open_child(auth, "B013")
         auth.record_child_closed(
             child_batch_id="B013", governance_base_commit=commit, checker_reviewed_commit=commit,
             checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,
@@ -108,6 +134,7 @@ class OperationalLimitsTest(StoryCase):
         self.assertEqual(active.exception.reason, "state_integrity")
         self.assertEqual(story.MAX_ACTIVE_CHILD_BATCHES, 1)
 
+        self.open_child(auth, "B013")
         auth.record_child_closed(
             child_batch_id="B013", governance_base_commit=commit, checker_reviewed_commit=commit,
             checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,
@@ -115,6 +142,7 @@ class OperationalLimitsTest(StoryCase):
         residual = [self.patch_item("R5")]
         second = proposal("B014", "B013", residual)
         auth.record_child_derived(second, story.verify_derivation(auth, second, action_items=residual))
+        self.open_child(auth, "B014")
         auth.record_child_closed(
             child_batch_id="B014", governance_base_commit=commit, checker_reviewed_commit=commit,
             checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,

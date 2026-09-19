@@ -1280,6 +1280,10 @@ class Runtime:
         self.git = Git(self.repo, self.config["git_executable"])
         self.authority = None
         self.barrier_report = None
+        # T032/T033 R13: the bound child proposal's protected paths, verified at bind, after every
+        # Maker call and before delivery. Empty for legacy/direct_proposal batches.
+        self.protected_paths: list[dict] = []
+        self.story_baseline_commit = ""
         self.authority_mode = str(self.batch["authorization"].get("story_authority_mode", "direct_proposal"))
         barrier_dir = self.state_dir / "cognitive-barrier" if self.authority_mode == "AUTO_STORY" else None
         self.policy = Policy(self.config, self.batch, cognitive_barrier=barrier_dir)
@@ -1368,6 +1372,12 @@ class Runtime:
         if checkpoint:
             story_authority.verify_functional_checkpoint(self.repo, checkpoint)
 
+        # Nothing executes, and the child is neither opened nor resumed, over a tree whose
+        # protected paths already differ from what the authority froze.
+        self.protected_paths = list(proposal.get("protected_paths") or [])
+        self.story_baseline_commit = str((proposal.get("lineage") or {}).get("story_baseline_commit") or "")
+        self._assert_protected_paths("bind", include_committed=True)
+
         self.authority.refold()
         child_state = (self.authority.state.children.get(self.batch_id) or {}).get("state")
         if child_state == "derived":
@@ -1383,6 +1393,32 @@ class Runtime:
                 f"child batch {self.batch_id} is {child_state or 'unknown'} under story authority "
                 f"{self.authority.authority_id}; only a derived child opens and only an open child resumes",
                 child_batch_id=self.batch_id, state=child_state or "")
+
+    def _assert_protected_paths(self, phase: str, uid: str = "", *, include_committed: bool = False) -> None:
+        """Verify the bound child's protected paths against the tree; any violation is a hard stop.
+
+        `read_only` is judged on every path that differs from HEAD (and, at bind, also on what
+        was committed since the Story baseline); `exact_file_hash` and `exact_set_snapshot` on
+        the current bytes. The stop is journaled on the Story Authority before it is raised.
+        """
+        if self.authority is None or not self.protected_paths:
+            return
+        dirty = self.git.dirty_paths()
+        if include_committed and self.story_baseline_commit:
+            committed = self.git.run("diff", "--name-only", "--no-renames", "-z",
+                                     self.story_baseline_commit, "HEAD")
+            dirty = sorted(set(dirty) | {path for path in committed.split(chr(0)) if path})
+        try:
+            story_authority.assert_protected_paths_intact(
+                self.repo, {"protected_paths": self.protected_paths}, dirty_paths=dirty)
+        except story_authority.HardStop as stop:
+            self.authority.hard_stop(stop.reason, f"{phase}: {stop.detail}", phase=phase, unit=uid, **stop.evidence)
+
+    def _protected_paths_or_stop(self, uid: str, phase: str) -> None:
+        try:
+            self._assert_protected_paths(phase, uid)
+        except story_authority.HardStop as stop:
+            raise StopBatch(stop.reason, stop.detail) from stop
 
     def acquire(self) -> None:
         if self._lease is not None:
@@ -1661,6 +1697,8 @@ class Runtime:
         try:
             self.prepare(unit)
             self.rounds(unit)
+            # Covers a resume that lands directly in delivery, past the post-Maker check.
+            self._protected_paths_or_stop(uid, "before_delivery")
             self.deliver(unit)
             self.unit_state(uid, "completed", "", phase="complete", finished_at=now_iso())
             self.notify({"event": "unit_completed", "batch": self.batch_id, "unit": uid, "pr": self.fold.units[uid].pr})
@@ -1848,6 +1886,9 @@ class Runtime:
             record.round = round_no
             self.unit_state(uid, "running", "", phase="implement", round=round_no)
             outcome = self.implement(unit, round_no, feedback)
+            # Whatever the Maker reported, nothing it left in the tree reaches containment, gates,
+            # the Checker, a commit or a checkpoint if it touched a protected path.
+            self._protected_paths_or_stop(uid, "after_maker")
             if outcome == "retry":
                 record.round -= 1
                 continue

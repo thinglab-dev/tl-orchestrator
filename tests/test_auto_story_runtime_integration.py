@@ -23,7 +23,7 @@ for _p in (_TESTS_DIR, _SCRIPTS_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from story_authority_support import story
+from story_authority_support import plan_validator, story
 
 import tl_runtime  # noqa: E402
 from scripts.tests.test_tl_runtime import CHECKER_OK, MAKER_OK, Fixture, SPEC_A, git  # noqa: E402
@@ -53,8 +53,10 @@ class AutoStoryRuntimeTest(unittest.TestCase):
     # ---- scaffolding --------------------------------------------------------------------
 
     def auto_story_fixture(self, *, budget: int = 8, max_rework: int = 2, max_calls: int = 8,
-                           limits: dict | None = None) -> Fixture:
+                           limits: dict | None = None, protected_paths=None) -> Fixture:
         fx = Fixture(self.root, units=1, max_calls=max_calls, max_rework=max_rework, limits=limits)
+        # A callable is evaluated on the fixture repository, so a snapshot is taken of real bytes.
+        protected = protected_paths(fx.repo) if callable(protected_paths) else list(protected_paths or [])
         spec_sha = hashlib.sha256(SPEC_A.encode()).hexdigest()
         payload = story.build_authority_payload(
             authority_id="A001", work_ref="T001", authorized_spec_revision=spec_sha[:16],
@@ -65,7 +67,7 @@ class AutoStoryRuntimeTest(unittest.TestCase):
             allowed_effects={"local_write": True, "local_commit": True, "local_merge": True,
                              "pull_request": False, "push": False, "tag": False, "release": False,
                              "merge": False},
-            protected_paths=[], global_model_call_budget=budget, max_child_batches=2,
+            protected_paths=protected, global_model_call_budget=budget, max_child_batches=2,
             max_consecutive_failed_batches=2, wall_clock_deadline="2027-01-01T00:00:00Z",
             hard_stops=["scope_expansion", "model_call_budget_exhausted", "state_integrity"])
         envelope = story.freeze_authority(
@@ -373,6 +375,125 @@ class AutoStoryRuntimeTest(unittest.TestCase):
         self.assertEqual(authority.state.consecutive_failures, streak)
         terminal = [e for e in authority.journal.read()[0] if e["kind"] in {"child_closed", "child_failed"}]
         self.assertEqual(len(terminal), 1)
+
+    # ---- R13: protected paths inside the AUTO_STORY lifecycle -----------------------------
+
+    PROTECTED_POLICIES = {
+        "read_only": lambda repo: [{"pattern": "pkg/__init__.py", "policy": "read_only"}],
+        "exact_file_hash": lambda repo: [{"pattern": "pkg/__init__.py", "policy": "exact_file_hash",
+                                          "sha256": hashlib.sha256(b"").hexdigest()}],
+        "exact_set_snapshot": lambda repo: [{"pattern": "pkg", "policy": "exact_set_snapshot",
+                                             "snapshot": plan_validator.snapshot_set(repo, "pkg")}],
+    }
+    # Inside the unit's scope (pkg/), so containment alone would let it through to the Checker.
+    MAKER_TOUCHES_PROTECTED = [{"files": {"pkg/__init__.py": "TAMPERED = True\n",
+                                          "pkg/greet.py": "def greet():\n    return 'hi'\n"}}]
+
+    def fresh_root(self, name: str) -> None:
+        self.root = Path(self.tmp.name) / name
+        self.root.mkdir()
+        os.environ["TL_FAKE_GH_STATE"] = str(self.root / "gh.json")
+
+    def test_maker_mutating_a_protected_path_stops_before_checker_and_commit(self) -> None:
+        for policy, protected in self.PROTECTED_POLICIES.items():
+            with self.subTest(policy=policy):
+                self.fresh_root(f"maker-{policy}")
+                fx = self.auto_story_fixture(protected_paths=protected)
+                fx.script("maker", self.MAKER_TOUCHES_PROTECTED)
+                fx.script("checker", CHECKER_OK)
+                commits_before = git(fx.repo, "rev-list", "--all", "--count")
+
+                self.assertEqual(fx.runtime().run(), "stopped")
+
+                fold = fx.fold()
+                self.assertEqual(fold.stop_reason, "protected_path_violation")
+                self.assertEqual(fold.model_calls_done, 1, "only the Maker was dispatched")
+                self.assertFalse([step for step in fold.steps if ":checker" in step], "the Checker ran")
+                self.assertFalse([step for step in fold.steps if step.startswith("gate:")], "gates ran")
+                self.assertFalse([step for step in fold.steps if step.split(":")[-1] in {"commit", "merge"}])
+                self.assertEqual(git(fx.repo, "rev-list", "--all", "--count"), commits_before,
+                                 "nothing was committed or checkpointed")
+                self.assertEqual(fold.units["T001"].state, "retryable")
+
+                authority = self.authority(fx)
+                authority.refold()
+                self.assertEqual(authority.state.children["B001"]["state"], "failed")
+                self.assertIsNone(authority.state.closure_of("B001"))
+                stop = authority.state.hard_stops[-1]
+                self.assertEqual(stop["reason"], "protected_path_violation")
+                self.assertEqual(stop["evidence"]["phase"], "after_maker")
+                self.assertEqual(authority.state.consumed_calls, 1)
+
+    def test_protected_path_already_violated_refuses_bind_before_child_open(self) -> None:
+        for policy, protected in self.PROTECTED_POLICIES.items():
+            with self.subTest(policy=policy):
+                self.fresh_root(f"bind-{policy}")
+                fx = self.auto_story_fixture(protected_paths=protected)
+                fx.script("maker", MAKER_OK)
+                fx.script("checker", CHECKER_OK)
+                (fx.repo / "pkg" / "__init__.py").write_text("TAMPERED = True\n", encoding="utf-8")
+
+                with self.assertRaises(tl_runtime.Refusal) as refused:
+                    fx.runtime().run()
+                self.assertIn("protected_path_violation", str(refused.exception))
+                self.assertIn("bind:", str(refused.exception))
+
+                authority = self.authority(fx)
+                authority.refold()
+                self.assertEqual(authority.state.children["B001"]["state"], "derived", "the child never opened")
+                self.assertNotIn("child_open", [e["kind"] for e in authority.journal.read()[0]])
+                self.assertEqual(authority.state.consumed_calls, 0)
+                journal = fx.state_dir / "journal.jsonl"
+                steps = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()] \
+                    if journal.exists() else []
+                self.assertFalse([e for e in steps if e.get("kind") == "step_intent"], "no step started")
+
+    def test_read_only_change_committed_since_the_story_baseline_refuses_bind(self) -> None:
+        fx = self.auto_story_fixture(protected_paths=self.PROTECTED_POLICIES["read_only"])
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        (fx.repo / "pkg" / "__init__.py").write_text("TAMPERED = True\n", encoding="utf-8")
+        git(fx.repo, "commit", "-q", "-am", "out-of-band change to a read_only path")
+        self.assertEqual(git(fx.repo, "status", "--porcelain", "--untracked-files=no"), "")
+        with self.assertRaises(tl_runtime.Refusal) as refused:
+            fx.runtime().run()
+        self.assertIn("protected_read_only_mutated", str(refused.exception))
+        authority = self.authority(fx)
+        authority.refold()
+        self.assertEqual(authority.state.children["B001"]["state"], "derived")
+
+    def test_untouched_protected_paths_do_not_stop_the_lifecycle(self) -> None:
+        def untouched(repo):
+            spec = "_tl-orc/project/tasks"
+            return [{"pattern": "secrets/keep.txt", "policy": "read_only"},
+                    {"pattern": "pkg/__init__.py", "policy": "exact_file_hash",
+                     "sha256": hashlib.sha256(b"").hexdigest()},
+                    {"pattern": spec, "policy": "exact_set_snapshot",
+                     "snapshot": plan_validator.snapshot_set(repo, spec)}]
+        fx = self.auto_story_fixture(protected_paths=untouched)
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        self.assertEqual(fx.runtime().run(), "done", fx.state_dir)
+        authority = self.authority(fx)
+        authority.refold()
+        self.assertEqual(authority.state.closure_of("B001")["checker_verdict"], "approved")
+        self.assertEqual(authority.state.hard_stops, [])
+
+    def test_forged_reopen_in_the_authority_journal_is_refused_at_bind(self) -> None:
+        """R11 through the runtime: a chain-valid but illegal transition blocks bind, no dispatch."""
+        fx = self.auto_story_fixture()
+        journal = story.AuthorityJournal(fx.repo / story.RUNTIME_AUTHORITY_DIR / "A001" / "journal.jsonl")
+        journal.fold()
+        journal.append("child_failed", authority_id="A001", child_batch_id="B001", reason="forged")
+        before = journal.path.read_bytes()
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        with self.assertRaises(tl_runtime.Refusal) as refused:
+            fx.runtime().run()
+        self.assertIn("state_integrity", str(refused.exception))
+        self.assertIn("illegal child lifecycle", str(refused.exception))
+        self.assertEqual(journal.path.read_bytes(), before, "nothing is appended to an untrusted journal")
+        self.assertFalse((fx.state_dir / "jobs").exists() and any((fx.state_dir / "jobs").iterdir()))
 
     # ---- §5 retrocompatibility ------------------------------------------------------------
 

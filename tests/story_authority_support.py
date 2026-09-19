@@ -143,6 +143,11 @@ class StoryCase(unittest.TestCase):
             self.addCleanup(authority.release)
         return authority
 
+    def open_child(self, authority: story.StoryAuthority, child_batch_id: str) -> dict:
+        """derived -> open, the only way a child reaches a terminal state (R11)."""
+        return authority.record_child_open(child_batch_id, branch="main", head_commit=self.git.head(),
+                                           tree=self.git.tree())
+
     def patch_item(self, item_id: str = "R5", location: str = "src/connector.py:118", **overrides) -> dict:
         item = {
             "id": item_id, "severity": "medium", "category": "patch", "target_role": "maker",

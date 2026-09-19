@@ -508,6 +508,32 @@ class AutoStoryRuntimeTest(unittest.TestCase):
         self.assertEqual(forger.journal.path.read_bytes(), before, "nothing was appended")
         self.assertEqual(self.batch_steps(fx), [], "nothing was dispatched")
 
+    # ---- R14: a rewritten journal tail is refused at bind -----------------------------------
+
+    def test_tampered_authority_tail_refuses_bind_without_any_event_or_dispatch(self) -> None:
+        fx = self.auto_story_fixture()
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        authority = self.authority(fx)
+        lines = authority.journal.path.read_text(encoding="utf-8").splitlines()
+        tail = json.loads(lines[-1])
+        self.assertEqual(tail["kind"], "child_derived")
+        tail["granted_model_calls"] = 80  # its `prev` is kept, so the in-file chain cannot see it
+        lines[-1] = story.canonical_json(tail)
+        authority.journal.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assertEqual(authority.journal.fold().invalid_lines, 0)
+        ref = story.journal_anchor_ref("A001")
+        anchored = git(fx.repo, "rev-parse", ref)
+        before = authority.journal.path.read_bytes()
+
+        with self.assertRaises(tl_runtime.Refusal) as refused:
+            fx.runtime().run()
+        self.assertIn("state_integrity", str(refused.exception))
+        self.assertIn(story.ANCHOR_DIVERGENT, str(refused.exception))
+        self.assertEqual(authority.journal.path.read_bytes(), before, "nothing was appended")
+        self.assertEqual(git(fx.repo, "rev-parse", ref), anchored, "the anchor did not move")
+        self.assertEqual(self.batch_steps(fx), [], "nothing was dispatched")
+
     # ---- §5 retrocompatibility ------------------------------------------------------------
 
     def test_legacy_batch_without_story_authority_mode_is_untouched(self) -> None:

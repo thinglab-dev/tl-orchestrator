@@ -289,6 +289,14 @@ Os dois nunca se misturam.
 | :--- | :--- | :--- |
 | Autoridade | `_tl-orc/project/story-authorities/<authority_id>.json` | Imutável. Nunca reescrita para registrar saldo. |
 | Consumo | `_tl-orc/runtime/story-authorities/<authority_id>/` | `journal.jsonl` (append-only, write-ahead, fsync, hash-chain, escritor único sob `lease.lock`) e `status.json`, que é só projeção. |
+| Âncora da cauda | `refs/tl/story-authorities/<authority_id>/journal-head` (ref store do repositório, fora da árvore) | Blob-recibo com a última linha canônica, `seq` e digest encadeado completo, movido por `git update-ref` com valor antigo (CAS) antes de cada append. |
+
+A cadeia `prev` só protege uma linha através da sucessora; por isso a cauda é ancorada fora
+da árvore de trabalho. Todo refold confere o arquivo inteiro contra a âncora. Journal não vazio
+sem âncora, âncora divergente, de outra authority ou ilegível, ou mecanismo indisponível é
+`state_integrity`, sem bootstrap a partir do próprio journal. Um crash entre a CAS e o append
+deixa a âncora um evento à frente, e esse evento é completado somente a partir do recibo
+ancorado, quando ele prova ser a continuação única da cadeia em disco.
 
 O envelope tem três partes, e a separação existe para quebrar a circularidade:
 

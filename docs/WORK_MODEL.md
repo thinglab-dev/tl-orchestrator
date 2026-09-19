@@ -1032,7 +1032,9 @@ remove esse atrito artificial sem afrouxar nenhuma garantia.
   saldo. O estado operacional mutável vive em
   `_tl-orc/runtime/story-authorities/<authority_id>/` (`journal.jsonl` append-only com
   write-ahead, fsync, hash-chain e escritor único sob `lease.lock`; `status.json` é
-  exclusivamente projeção reconstruível).
+  exclusivamente projeção reconstruível). A cauda do journal é ancorada fora da árvore em
+  `refs/tl/story-authorities/<authority_id>/journal-head`, movida por CAS antes de cada append;
+  cauda sem âncora ou divergente dela falha fechada como `state_integrity`.
 - **Autorização acíclica por digest:** `root_authority_digest = SHA256(canonical_json(authority_payload))`,
   onde `authority_payload` contém exclusivamente os doze campos submetidos à decisão humana. O
   próprio digest, `authorized_at`, `authorized_literal` e qualquer metadado posterior ficam

@@ -16,7 +16,10 @@ itself, the capture timestamp, the literal — can be inside what it digests.
 
 *Consumption* is mutable and lives in `_tl-orc/runtime/story-authorities/<authority_id>/`:
 an append-only, fsynced, hash-chained `journal.jsonl` written by a single holder of
-`lease.lock`, plus `status.json`, which is only ever a projection of that journal.
+`lease.lock`, plus `status.json`, which is only ever a projection of that journal. A chain only
+protects a line that has a successor, so the tail is anchored outside the working tree, in the
+repository's ref store (`refs/tl/story-authorities/<authority_id>/journal-head`), moved by
+compare-and-swap before each append; see `JournalAnchor`.
 
 *Lineage* is functional, not governance. When a child ends `changes_requested` with the
 rework limit exhausted and every residual finding is a patch, the commit the Checker just
@@ -419,63 +422,358 @@ def _child_transition_violation(state: "AuthorityState", event: dict) -> dict | 
             "expected": expected}
 
 
-class AuthorityJournal:
-    """Append-only JSONL, one writer, write-ahead, fsynced, hash-chained."""
+ANCHOR_REF_PREFIX = "refs/tl/story-authorities"
+ANCHOR_FORMAT = 1
+ANCHOR_KIND = "tl_story_authority_journal_head"
+ANCHOR_UNAVAILABLE = "story_authority_anchor_unavailable"
+ANCHOR_DIVERGENT = "story_authority_anchor_divergent"
+ANCHOR_CONFLICT = "story_authority_anchor_conflict"
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_OID_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
+# The anchor must land in exactly the repository the authority belongs to, whatever the caller's
+# environment says: any of these would redirect the ref store or the object database elsewhere.
+_ANCHOR_GIT_ENV_DROP = frozenset({
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+})
 
-    def __init__(self, path: Path):
+
+def journal_anchor_ref(authority_id: str) -> str:
+    return f"{ANCHOR_REF_PREFIX}/{authority_id}/journal-head"
+
+
+def journal_chain_seed(authority_id: str, root_digest: str) -> str:
+    """Chain digest before the first line. Binds every chain digest to one authority and envelope."""
+    return digest_of({"anchor_ref": journal_anchor_ref(authority_id), "authority_id": authority_id,
+                      "root_authority_digest": root_digest})
+
+
+def journal_chain_step(previous: str, line: bytes) -> str:
+    """Full-length running digest over every journal line: any edited, dropped or inserted line changes it."""
+    return sha256_hex(previous.encode("ascii") + b"\n" + line)
+
+
+class JournalAnchor:
+    """The journal tail, anchored where a write to the working tree cannot reach it.
+
+    The hash chain inside `journal.jsonl` protects a line only through its successor, so the last
+    line could be rewritten, keeping its `prev`, without breaking anything the file itself carries.
+    A self-hash, a checksum in `status.json` or any other file next to the journal does not help:
+    whoever can rewrite the journal can rewrite those in the same stroke.
+
+    The tail is therefore anchored in the repository's ref store, outside the working tree:
+    `refs/tl/story-authorities/<authority_id>/journal-head` points at a blob, the receipt, that
+    carries the canonical last line itself, its seq, the running full-length chain digest before
+    and after it, and the authority id and root digest it belongs to. The ref is namespaced by
+    authority and lives in the repository's own ref store; the receipt names its ref, authority
+    and envelope, so an anchor copied from another authority, or pointed at through a symbolic
+    ref, does not verify. It is moved only by `git update-ref --stdin` with the old value
+    (`create` for the first event, `update <new> <old>` afterwards), so a second writer, or a
+    writer holding a stale view, cannot move it, and it is never moved backwards by this module.
+
+    Ordering (write-ahead to the anchor): receipt blob, then CAS on the ref, then the fsynced
+    append. A crash between the CAS and the append leaves the anchor exactly one event ahead; that
+    event is recovered from the anchored receipt, and only when the receipt proves it is the
+    unique continuation of the chain on disk (seq = lines + 1, prev and prev chain digest equal to
+    the on-disk tail, any torn fragment a prefix of the anchored line). The opposite never
+    happens: a journal line the anchor does not cover is never used to create or move an anchor,
+    so there is no window in which a rewritten tail can be blessed. A missing anchor under a
+    non-empty journal, or a mechanism that cannot answer, fails closed.
+    """
+
+    def __init__(self, repo: str | Path, authority_id: str, root_digest: str):
+        self.repo = Path(repo)
+        self.authority_id = authority_id
+        self.root_digest = root_digest
+        self.ref = journal_anchor_ref(authority_id)
+        self.seed = journal_chain_seed(authority_id, root_digest)
+        self._repository_checked = False
+
+    def _unavailable(self, detail: str) -> HardStop:
+        return HardStop("state_integrity", f"{ANCHOR_UNAVAILABLE}: {detail}; AUTO_STORY does not run on an "
+                        "unanchored journal", authority_id=self.authority_id, anchor_ref=self.ref)
+
+    def _git(self, *args: str, stdin: bytes | None = None) -> subprocess.CompletedProcess:
+        env = {key: value for key, value in os.environ.items() if key not in _ANCHOR_GIT_ENV_DROP}
+        command = ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsync=loose-object,reference", *args]
+        try:
+            return subprocess.run(command, cwd=str(self.repo), input=stdin, capture_output=True, check=False,
+                                  timeout=60, env=env)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise self._unavailable(f"git could not be executed: {exc}") from exc
+
+    def _require_repository(self) -> None:
+        """The anchor goes into this repository's ref store or nowhere: never into an enclosing one."""
+        if self._repository_checked:
+            return
+        record = self._git("rev-parse", "--show-toplevel")
+        top = record.stdout.decode("utf-8", "replace").strip()
+        if record.returncode != 0 or not top:
+            raise self._unavailable(f"{self.repo.as_posix()} is not a git work tree: "
+                                    f"{record.stderr.decode('utf-8', 'replace').strip()[:200]}")
+        if os.path.realpath(top) != os.path.realpath(str(self.repo)):
+            raise self._unavailable("the authority repository is not the root of its git work tree, so the "
+                                    "anchor would land in another repository")
+        self._repository_checked = True
+
+    def load(self) -> tuple[str, dict] | None:
+        """(oid, receipt) of the current anchor, None when the ref does not exist. Raises when unusable."""
+        self._require_repository()
+        listed = self._git("for-each-ref", "--format=%(refname) %(objectname) %(objecttype) %(symref)", self.ref)
+        if listed.returncode != 0:
+            raise self._unavailable(f"cannot read {self.ref}: {listed.stderr.decode('utf-8', 'replace').strip()[:200]}")
+        rows = [row.split(" ") for row in listed.stdout.decode("utf-8", "replace").splitlines() if row.strip()]
+        rows = [row for row in rows if row and row[0] == self.ref]
+        if not rows:
+            return None
+        refname, oid, kind, symref = (rows[0] + ["", "", "", ""])[:4]
+        if len(rows) != 1 or symref or kind != "blob" or not _OID_RE.match(oid):
+            raise HardStop("state_integrity",
+                           f"{ANCHOR_DIVERGENT}: {self.ref} is not a direct ref to a receipt blob "
+                           f"(type {kind or 'unknown'}, symref {symref or 'none'})",
+                           authority_id=self.authority_id, anchor_ref=self.ref)
+        blob = self._git("cat-file", "blob", oid)
+        if blob.returncode != 0:
+            raise self._unavailable(f"cannot read anchor object {oid}: "
+                                    f"{blob.stderr.decode('utf-8', 'replace').strip()[:200]}")
+        try:
+            text = blob.stdout.decode("utf-8")
+            receipt = json.loads(text)
+            canonical = isinstance(receipt, dict) and canonical_json(receipt) == text
+        except ValueError:
+            receipt, canonical = None, False
+        if not canonical:
+            raise HardStop("state_integrity", f"{ANCHOR_DIVERGENT}: the object {oid} under {self.ref} is not a "
+                           "canonical journal head receipt", authority_id=self.authority_id, anchor_ref=self.ref)
+        return oid, receipt
+
+    def receipt(self, seq: int, line: str, prev_chain_digest: str) -> dict:
+        return {
+            "anchor_format": ANCHOR_FORMAT,
+            "anchor_kind": ANCHOR_KIND,
+            "anchor_ref": self.ref,
+            "authority_id": self.authority_id,
+            "root_authority_digest": self.root_digest,
+            "seq": seq,
+            "line": line,
+            "line_sha256": sha256_hex(line),
+            "prev_chain_digest": prev_chain_digest,
+            "chain_digest": journal_chain_step(prev_chain_digest, line.encode("utf-8")),
+        }
+
+    def receipt_problem(self, receipt: dict) -> str:
+        """Why this receipt is not a head this authority could have anchored, or "" when it is."""
+        for name, expected in (("anchor_format", ANCHOR_FORMAT), ("anchor_kind", ANCHOR_KIND),
+                               ("anchor_ref", self.ref), ("authority_id", self.authority_id),
+                               ("root_authority_digest", self.root_digest)):
+            if receipt.get(name) != expected:
+                return f"the receipt carries {name}={receipt.get(name)!r}, not {expected!r}"
+        seq, line, prev_chain = receipt.get("seq"), receipt.get("line"), receipt.get("prev_chain_digest")
+        if not isinstance(seq, int) or isinstance(seq, bool) or seq < 1 or not isinstance(line, str):
+            return "the receipt carries no usable seq or line"
+        if not isinstance(prev_chain, str) or not _HEX64_RE.match(prev_chain):
+            return "the receipt carries no usable prev_chain_digest"
+        if receipt.get("line_sha256") != sha256_hex(line):
+            return "the receipt line does not reproduce its line_sha256"
+        if receipt.get("chain_digest") != journal_chain_step(prev_chain, line.encode("utf-8")):
+            return "the receipt line does not reproduce its chain_digest"
+        if seq == 1 and prev_chain != self.seed:
+            return "the first anchored event does not start this authority's chain"
+        try:
+            event = json.loads(line)
+            canonical = isinstance(event, dict) and canonical_json(event) == line
+        except ValueError:
+            event, canonical = None, False
+        if not canonical:
+            return "the anchored line is not a canonical journal event"
+        if (event.get("format_version") != AUTHORITY_FORMAT or event.get("kind") not in JOURNAL_EVENTS
+                or event.get("seq") != seq or event.get("authority_id") != self.authority_id):
+            return "the anchored line is not an event of this authority at this seq"
+        return ""
+
+    def publish(self, receipt: dict, expected_oid: str | None) -> str:
+        """Store the receipt and move the ref from exactly `expected_oid`. Never moves it on conflict."""
+        self._require_repository()
+        stored = self._git("hash-object", "-t", "blob", "-w", "--stdin", stdin=canonical_json(receipt).encode("utf-8"))
+        oid = stored.stdout.decode("utf-8", "replace").strip()
+        if stored.returncode != 0 or not _OID_RE.match(oid):
+            raise self._unavailable(f"cannot store the journal head receipt: "
+                                    f"{stored.stderr.decode('utf-8', 'replace').strip()[:200]}")
+        instruction = (f"create {self.ref} {oid}\n" if expected_oid is None
+                       else f"update {self.ref} {oid} {expected_oid}\n")
+        moved = self._git("update-ref", "--no-deref", "--stdin", stdin=instruction.encode("ascii"))
+        if moved.returncode != 0:
+            raise HardStop(
+                "state_integrity",
+                f"{ANCHOR_CONFLICT}: {self.ref} is no longer at {expected_oid or 'absent'} (compare-and-swap refused: "
+                f"{moved.stderr.decode('utf-8', 'replace').strip()[:200]}); another writer moved the anchor, so "
+                "nothing was appended",
+                authority_id=self.authority_id, anchor_ref=self.ref, expected=expected_oid or "")
+        return oid
+
+
+class AuthorityJournal:
+    """Append-only JSONL, one writer, write-ahead, fsynced, hash-chained, tail anchored in git.
+
+    Every read verifies the whole file against the anchored head (see `JournalAnchor`); a failure
+    is recorded in `anchor_failure`, becomes a hard stop in every refold, and `append` refuses to
+    write anything after it.
+    """
+
+    def __init__(self, path: Path, anchor: JournalAnchor | None = None):
         self.path = Path(path)
+        self.anchor = anchor
         self._seq = 0
         self._prev = ""
+        self._chain = anchor.seed if anchor is not None else ""
+        self._anchor_oid: str | None = None
+        self._pending = b""
+        self._pending_chain = ""
+        self.anchor_failure = ""
 
     def append(self, kind: str, **payload: Any) -> dict:
         if kind not in JOURNAL_EVENTS:
             raise Refusal(f"unknown authority journal event {kind!r}")
-        self._seq += 1
-        event = {"format_version": AUTHORITY_FORMAT, "seq": self._seq, "at": now_iso(), "kind": kind,
+        _events, invalid = self.read()
+        refused = self.integrity_failure(invalid)
+        if refused:
+            raise HardStop("state_integrity", f"{refused}; nothing is appended to it", journal=self.path.name)
+        self.recover()
+        seq = self._seq + 1
+        event = {"format_version": AUTHORITY_FORMAT, "seq": seq, "at": now_iso(), "kind": kind,
                  "prev": self._prev, **payload}
         line = canonical_json(event)
-        self._prev = sha256_hex(line)[:16]
+        receipt = self.anchor.receipt(seq, line, self._chain)
+        # Write-ahead to the anchor: if the append below never lands, the anchored receipt still
+        # holds the exact line, and `recover` completes it. The reverse order would leave a line
+        # no anchor covers, and nothing may ever anchor a line it read from the journal.
+        self._anchor_oid = self.anchor.publish(receipt, self._anchor_oid)
+        self._write(line.encode("utf-8") + b"\n")
+        self._seq, self._prev, self._chain = seq, sha256_hex(line)[:16], receipt["chain_digest"]
+        return event
+
+    def _write(self, data: bytes) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "a", encoding="utf-8", newline="\n") as handle:
-            handle.write(line + "\n")
+        created = not self.path.exists()
+        with open(self.path, "ab") as handle:
+            handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        return event
+        if created:
+            with contextlib.suppress(OSError, AttributeError):
+                directory = os.open(str(self.path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+
+    def recover(self) -> bool:
+        """Complete, from the anchored receipt, the one event a crash left anchored but not appended."""
+        if not self._pending:
+            return False
+        self._write(self._pending)
+        _events, invalid = self.read()
+        refused = self.integrity_failure(invalid)
+        if refused or self._pending:
+            raise HardStop("state_integrity", f"{ANCHOR_DIVERGENT}: recovery of the anchored tail did not "
+                           f"converge: {refused or 'the anchor is still ahead'}", journal=self.path.name)
+        return True
+
+    def integrity_failure(self, invalid: int) -> str:
+        problems: list[str] = []
+        if invalid:
+            problems.append(f"authority journal has {invalid} invalid line(s); the hash chain is broken")
+        if self.anchor_failure:
+            problems.append(self.anchor_failure)
+        return "; ".join(problems)
 
     def read(self) -> tuple[list[dict], int]:
         events: list[dict] = []
         invalid = 0
         prev = ""
-        if not self.path.is_file():
-            return events, invalid
-        with open(self.path, "r", encoding="utf-8", errors="replace") as handle:
-            for raw in handle:
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    event = json.loads(raw)
-                except ValueError:
-                    invalid += 1
-                    continue
-                if (not isinstance(event, dict) or event.get("format_version") != AUTHORITY_FORMAT
-                        or event.get("kind") not in JOURNAL_EVENTS):
-                    invalid += 1
-                    continue
-                # A line edited, removed or inserted after the fact breaks every later link.
-                if event.get("prev") != prev:
-                    invalid += 1
-                prev = sha256_hex(raw)[:16]
-                events.append(event)
-        self._prev = prev
+        chain = self._chain = self.anchor.seed if self.anchor is not None else ""
+        self._pending, self.anchor_failure = b"", ""
+        data = self.path.read_bytes() if self.path.is_file() else b""
+        segments = data.split(b"\n")
+        # Whatever follows the last newline was never completed by an append: it is not a line.
+        torn = segments.pop()
+        lines = [segment.strip() for segment in segments if segment.strip()]
+        for raw_bytes in lines:
+            chain = journal_chain_step(chain, raw_bytes)
+            raw = raw_bytes.decode("utf-8", errors="replace")
+            try:
+                event = json.loads(raw)
+            except ValueError:
+                invalid += 1
+                continue
+            if (not isinstance(event, dict) or event.get("format_version") != AUTHORITY_FORMAT
+                    or event.get("kind") not in JOURNAL_EVENTS):
+                invalid += 1
+                continue
+            # A line edited, removed or inserted after the fact breaks every later link.
+            if event.get("prev") != prev:
+                invalid += 1
+            prev = sha256_hex(raw)[:16]
+            events.append(event)
+        self._prev, self._chain, self._seq = prev, chain, len(lines)
+        pending = self._verify_anchor(lines, torn.strip() and torn, chain, prev)
+        if pending is not None:
+            event, line = pending
+            events.append(event)
+            self._prev, self._chain, self._seq = sha256_hex(line)[:16], self._pending_chain, len(lines) + 1
         return events, invalid
+
+    def _verify_anchor(self, lines: list[bytes], torn: bytes, chain: str, prev: str) -> tuple[dict, str] | None:
+        """Hold the file to the anchored head. Returns the anchored event still to append, if any."""
+        if self.anchor is None:
+            self.anchor_failure = (f"{ANCHOR_UNAVAILABLE}: no repository to anchor the journal tail in; AUTO_STORY "
+                                   "does not run on an unanchored journal")
+            return None
+        try:
+            head = self.anchor.load()
+        except HardStop as stop:
+            self.anchor_failure = stop.detail
+            return None
+        self._anchor_oid = head[0] if head is not None else None
+        if head is None:
+            if lines or torn:
+                # Never bootstrap: an anchor created from what the journal says would bless the
+                # very tail it exists to protect. Only an explicit, authenticated migration could.
+                self.anchor_failure = (
+                    f"{ANCHOR_DIVERGENT}: the journal holds {len(lines)} line(s) but {self.anchor.ref} does not "
+                    "exist; an unanchored tail is never trusted and no anchor is created from it")
+            return None
+        oid, receipt = head
+        problem = self.anchor.receipt_problem(receipt)
+        if problem:
+            self.anchor_failure = f"{ANCHOR_DIVERGENT}: {self.anchor.ref} -> {oid}: {problem}"
+            return None
+        seq, line = receipt["seq"], receipt["line"]
+        if seq == len(lines) and not torn:
+            if receipt["chain_digest"] != chain:
+                self.anchor_failure = (
+                    f"{ANCHOR_DIVERGENT}: the journal tail at seq {seq} does not reproduce the head anchored in "
+                    f"{self.anchor.ref}; a journal line was rewritten after it was anchored")
+            return None
+        line_bytes = line.encode("utf-8") + b"\n"
+        continues = (seq == len(lines) + 1 and receipt["prev_chain_digest"] == chain
+                     and json.loads(line).get("prev") == prev
+                     and len(torn) < len(line_bytes) and line_bytes.startswith(torn))
+        if not continues:
+            self.anchor_failure = (
+                f"{ANCHOR_DIVERGENT}: {self.anchor.ref} anchors seq {seq} but the journal holds {len(lines)} complete "
+                f"line(s){' and a torn fragment' if torn else ''} that the anchored head does not continue; "
+                "the journal is never trusted beyond or instead of its anchor")
+            return None
+        # Crash between the anchor CAS and the append: the anchored receipt is the only source.
+        self._pending = line_bytes[len(torn):]
+        self._pending_chain = receipt["chain_digest"]
+        return json.loads(line), line
 
     def fold(self) -> "AuthorityState":
         events, invalid = self.read()
-        state = AuthorityState(invalid_lines=invalid)
-        seq = 0
+        state = AuthorityState(invalid_lines=invalid, anchor_failure=self.anchor_failure)
         for event in events:
-            seq = max(seq, int(event.get("seq", 0)))
             state.events += 1
             kind = event["kind"]
             if kind in CHILD_TRANSITIONS:
@@ -547,7 +845,6 @@ class AuthorityJournal:
                 state.closed = True
                 state.close_state = event.get("state", "done")
                 state.close_reason = event.get("reason", "")
-        self._seq = seq
         return state
 
 
@@ -571,6 +868,7 @@ class AuthorityState:
     close_state: str = ""
     close_reason: str = ""
     invalid_lines: int = 0
+    anchor_failure: str = ""
     lifecycle_violations: list[dict] = field(default_factory=list)
 
     def child_state(self, child_batch_id: str) -> str:
@@ -581,6 +879,8 @@ class AuthorityState:
         problems: list[str] = []
         if self.invalid_lines:
             problems.append(f"authority journal has {self.invalid_lines} invalid line(s); the hash chain is broken")
+        if self.anchor_failure:
+            problems.append(self.anchor_failure)
         if self.lifecycle_violations:
             problems.append("authority journal records child transition(s) outside new -> derived -> open -> "
                             f"closed|failed: {canonical_json(self.lifecycle_violations)}")
@@ -625,7 +925,9 @@ class StoryAuthority:
         self.root_digest = self.envelope["root_authority_digest"]
         self.runtime_dir = Path(runtime_dir)
         self.repo = Path(repo) if repo is not None else None
-        self.journal = AuthorityJournal(self.runtime_dir / "journal.jsonl")
+        # Without a repository there is nowhere to anchor the tail: the journal then fails closed.
+        anchor = JournalAnchor(self.repo, self.authority_id, self.root_digest) if self.repo is not None else None
+        self.journal = AuthorityJournal(self.runtime_dir / "journal.jsonl", anchor)
         self._lease = None
         self.state = AuthorityState()
 
@@ -650,6 +952,10 @@ class StoryAuthority:
                 f"coordinator_conflict: another runtime holds the lease for story authority {self.authority_id}", 5)
         self._lease = handle
         self.refold()
+        # A crash between the anchor CAS and the append left one anchored event unwritten; only the
+        # lease holder completes it, and only from the anchored receipt.
+        if self.journal.recover():
+            self.refold()
         if not self.state.opened:
             self.journal.append(
                 "authority_open", authority_id=self.authority_id, work_ref=self.payload["work_ref"],
@@ -678,7 +984,8 @@ class StoryAuthority:
     def refold(self) -> AuthorityState:
         """Rebuild the state from the journal, refusing a history this module could not have written.
 
-        A broken hash chain or a child transition outside the lifecycle is a hard stop for every
+        A broken hash chain, a journal that its anchored head does not cover (or an anchor that
+        cannot be read), or a child transition outside the lifecycle is a hard stop for every
         caller — acquire, load, bind, reserve, derive, record — and nothing is appended to it.
         """
         state = self.journal.fold()

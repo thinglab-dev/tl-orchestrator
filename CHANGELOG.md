@@ -4,6 +4,10 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ## [Unreleased]
 
+### Alterado
+
+- Perfil global de despacho: Gemini/Agy permanece preferido para Classifier e Searcher; ChatGPT+RDC passa a ser a condução/Planner preferida quando o handoff remoto estiver habilitado; Planner local segue Codex → Claude → Agy; Maker segue Codex → Agy → Claude; Checker segue Claude → Agy → Codex após filtrar todas as famílias presentes em `effective_authors`. Quota esgotada percorre apenas fallbacks já autorizados e nunca reduz `checker_independence`.
+
 ## [0.19.0] - 2026-09-17
 
 ### Adicionado

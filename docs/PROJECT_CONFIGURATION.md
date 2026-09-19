@@ -202,10 +202,7 @@ deve ser refeita integralmente.
 O [perfil-padrão](../prompts/orchestrator-perfis.md#perfil-padrão) mantém o
 Orquestrador na seleção do usuário e define a cadeia fixa do Classificador separado.
 Esse Classificador escolhe modelo e effort por papel/harness; a consulta do Searcher sob demanda
-segue a classificação da fase (com cadeia por omissão do perfil publicado ou pin como restrição); as cadeias
-de trabalho são Planner Claude → Codex → Agy, Maker Agy → Codex → Claude, Checker
-Codex → Claude → Agy, preferindo outra família que a dos Makers efetivos, e Searcher
-Agy → Claude → Codex.
+segue a classificação da fase (com Gemini/Agy como preferência publicada ou pin como restrição). Quando a capacidade de handoff remoto estiver habilitada, ChatGPT+RDC é o Orchestrator+Planner preferido; no modo local o Planner segue Codex → Claude → Agy. A cadeia do Maker é Codex → Agy → Claude e a do Checker é Claude → Agy → Codex, sempre removendo famílias já presentes na autoria efetiva antes da escolha. Quota esgotada percorre apenas os fallbacks já autorizados e não reduz a independência exigida.
 
 Registre `routing_mode: classifier` quando essa política estiver adotada. Mantenha quatro coisas
 distintas: preferências e escolhas fixadas pelo usuário, catálogo autorizado com capacidade

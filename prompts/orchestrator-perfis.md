@@ -14,8 +14,7 @@ implementa, aprova ou despacha, e devolve apenas o resumo verificável previsto 
 
 ## Perfil-padrão
 
-O **Orquestrador** conserva o harness, modelo e effort selecionados pelo usuário na sessão.
-Não participa do roteamento por tier e não se torna fallback automático dos outros papéis.
+O **Orquestrador** conserva o harness, modelo e effort selecionados pelo usuário na sessão. Quando a capacidade de handoff remoto estiver habilitada e o preflight local confirmar ChatGPT+RDC com Codex disponível, a preferência global é transferir a condução e o planejamento para ChatGPT+RDC; sem essa capacidade ou por escolha do usuário, a condução permanece local. O Orquestrador não participa do roteamento por tier e não se torna fallback automático dos outros papéis.
 
 O **Classificador** usa uma sessão auxiliar curta, somente leitura, com esta cadeia fixa:
 
@@ -36,17 +35,17 @@ a cadeia define a ordem nominal de preferência):
 
 | Papel | Domínio de elegibilidade e cadeia de fallback |
 | :--- | :--- |
-| Planner | Claude → Codex → Agy |
-| Maker | Agy → Codex → Claude |
-| Checker report-only | Codex → Claude → Agy, priorizando família diferente de toda a autoria efetiva |
+| Planner | ChatGPT+RDC quando handoff remoto estiver ativo; localmente Codex → Claude → Agy |
+| Maker | Codex → Agy → Claude |
+| Checker report-only | Claude → Agy → Codex, filtrando toda família presente na autoria efetiva |
 | Searcher | Agy → Claude → Codex |
 | Advisor | Cross-family preferido em relação à proposta desafiada (contra-família) |
 
 Essas cadeias publicadas constituem a política global padrão do pacote quando os três harnesses (Agy, Claude e Codex) estão disponíveis:
 - **Classifier**: Agy `gemini-3.8-flash-medium` (`medium`) → Codex `gpt-5.6-luna` (`medium`) → Claude `sonnet` (`medium`).
-- **Planner**: Claude `sonnet` (`medium` ou `high`) → Codex `gpt-5.6-terra` (`medium` ou `high`) → Agy Gemini (`high`).
-- **Maker**: Agy `gemini-3.8-flash-high` (`high`) → Codex `gpt-5.6-terra` (`high` ou `xhigh` conforme classificação) → Claude `sonnet` (`high`).
-- **Checker report-only**: Codex `gpt-5.6-terra` (`high`) → Claude `sonnet` ou `claude-opus-5` (`high`) → Agy Gemini (`high`, quando elegível).
+- **Planner**: ChatGPT+RDC quando o handoff remoto estiver ativo; localmente Codex `gpt-5.6-terra` (`medium` ou `high`) → Claude `sonnet` (`medium` ou `high`) → Agy Gemini (`high`).
+- **Maker**: Codex `gpt-5.6-terra` (`high` ou `xhigh` conforme classificação) → Agy `gemini-3.8-flash-high` (`high`) → Claude `sonnet` (`high`).
+- **Checker report-only**: Claude `sonnet` ou `claude-opus-5` (`high`) → Agy Gemini (`high`) → Codex `gpt-5.6-terra` (`high`), sempre removendo famílias já presentes em `effective_authors` antes da escolha.
 - **Searcher**: Agy `gemini-3.8-flash-medium` (`medium`) → Claude → Codex.
 - **Advisor**: Cross-family preferido em sessão limpa (`fresh_session: required`), subordinado a `advisor_independence` (preferred vs required) e contra-família da proposta desafiada.
 
@@ -55,24 +54,26 @@ pelo princípio normativo de **Minimum Sufficient Capability (MSC)** e pela **Po
 - O Classificador avalia a adequação funcional de cada par em `evaluations[]` (`sufficient`, `uncertain`, `insufficient`).
 - A seleção primária entre candidatos `sufficient` e `dispatchable` resolve deterministicamente pela política de preferência de eficiência configurada no perfil:
   * **Maker (perfil padrão)**:
-    1. Classe de alta eficiência: `agy / gemini-3.8-flash-high` (`high`).
-    2. Classe padrão / fronteira: `codex / gpt-5.6-terra` (`high`), `claude / sonnet` (`high`).
-    3. Escalada estendida: `codex / gpt-5.6-terra` (`xhigh`).
-  * Quando o candidato de alta eficiência for avaliado como `sufficient` e estiver elegível, ele DEVE ser selecionado como primário (`dispatch_role: "primary"`), registrando `selection_basis: "minimum_sufficient"`.
+    1. Preferência primária de produção: `codex / gpt-5.6-terra` (`high`).
+    2. Fallback de quota/infraestrutura: `agy / gemini-3.8-flash-high` (`high`).
+    3. Fallback adicional: `claude / sonnet` (`high`), somente quando sua participação não eliminar o Checker independente exigido.
+    4. Escalada estendida: `codex / gpt-5.6-terra` (`xhigh`).
+  * Quando Codex `high` for avaliado como `sufficient` e estiver dispatchable, ele é o primário preferido do Maker. Gemini assume quando Codex estiver indisponível, sem reclassificar por quota; se essa troca alterar `effective_authors`, o Checker é recalculado antes da revisão.
   * A escalada para um modelo de menor eficiência ou maior custo é uma exceção factual, exigindo `selection_basis: "escalation"` e registro obrigatório de `escalation_reason` (`efficient_candidate_insufficient`, `efficient_candidate_uncertain`, `checker_family_independence`, `operator_pinned`, `pre_dispatch_unavailable`, `proven_empirical_failure`).
   * Argumentos de over-selection desprovidos de insuficiência factual comprovada são terminantemente proibidos e rejeitados.
   * O princípio de menor esforço suficiente aplica-se igualmente ao reasoning effort: dentro do mesmo modelo, `high` tem precedência sobre `xhigh` a menos que haja necessidade técnica concreta comprovada.
 Sob Schema v2 legado, preserva-se o mapeamento posicional da cadeia física.
 
-A cadeia nominal do Checker (`Codex → Claude → Agy`) permanece **estritamente subordinada a `checker_independence` e à autoria efetiva completa** (incluindo Maker inicial, reworks e correções do Orquestrador): se OpenAI participou da autoria, Codex é inelegível; se Google participou, Agy é inelegível; se Anthropic participou, Claude é inelegível; se Google e OpenAI participaram, Claude é o único elegível.
+A cadeia nominal do Checker (`Claude → Agy → Codex`) permanece **estritamente subordinada a `checker_independence` e à autoria efetiva completa** (incluindo Planner substantivo, Maker inicial, reworks e correções do Orquestrador): se OpenAI participou da autoria, Codex é inelegível; se Google participou, Agy é inelegível; se Anthropic participou, Claude é inelegível. A ordem nunca autoriza revisar com família autora. Exemplo: ChatGPT Planner + Codex Maker = autoria OpenAI e prefere Claude Checker; ChatGPT Planner + Gemini Maker = autoria OpenAI+Google e exige Claude Checker.
 
 Essas escolhas são preferências operacionais e econômicas, não pins rígidos: sob Schema v2 legado, o Classificador dimensionava modelo/effort respeitando a ordem posicional da cadeia; sob Schema v3, o Classificador elege o primário recomendado puramente por adequação técnica e evidência econômica durável (R1/R3), enquanto disponibilidade factual (preflight R21) e pressão de quota são gerenciadas exclusivamente pelo Runtime na escolha de `effective_primary` imediatamente antes do despacho. A hierarquia de autoridade preserva:
 $$\text{instrução explícita do usuário} > \text{configuração local do projeto (_tl-orc/PROJECT.md)} > \text{perfil-padrão publicado}$$
 
 Projetos consumidores herdam este perfil publicado por omissão. O arquivo local `_tl-orc/PROJECT.md` deve conter apenas fontes autoritativas, portões e exceções/overrides locais deliberados, sem duplicar desnecessariamente tabelas de participantes que reproduzam o padrão. Em projetos com os três harnesses disponíveis, o fluxo canônico esperado é:
-- Com planejamento: `Gemini 3.8 Medium Classifier → Claude Planner → Gemini 3.8 High Maker → Codex Terra High Checker`.
-- Sem planejamento: `Gemini 3.8 Medium Classifier → Gemini 3.8 High Maker → Codex Terra High Checker`.
-Quando algum dos harnesses estiver ausente no ambiente, a cadeia é filtrada deterministicamente pelos harnesses disponíveis, conservando a independência estrita do Checker.
+- Com handoff remoto e planejamento: `Gemini 3.8 Medium Classifier → ChatGPT+RDC Orchestrator/Planner → Codex Terra High Maker → Claude High Checker`, desde que Claude seja independente da autoria efetiva.
+- Sem handoff remoto: `Gemini 3.8 Medium Classifier → Codex Planner → Codex Terra High Maker → Claude High Checker`, com o Planner contando como OpenAI apenas quando produzir conteúdo substantivo incorporado.
+- Codex indisponível: `Gemini 3.8 Medium Classifier → ChatGPT+RDC/local Planner → Gemini 3.8 High Maker → Claude High Checker`, preservando Claude como família independente.
+O Searcher prefere Gemini. Quando algum harness estiver ausente ou sem quota, a cadeia é filtrada deterministicamente pelos candidatos já autorizados, sem reclassificar por quota e conservando a independência do Checker.
 
 ## Catálogo permitido
 
@@ -234,7 +235,7 @@ ou debate. As famílias que escreveram a entrega são todas as famílias efetiva
 do artefato, incluindo Maker inicial, reworks, experimentos comparativos e correção feita pelo
 próprio Orquestrador. Por padrão, `checker_independence: preferred`: tente primeiro candidatos de
 família diferente de todas as famílias efetivas que escreveram a entrega, preservando a ordem
-Codex → Claude → Agy dentro desse grupo. Se nenhum for utilizável e a indisponibilidade estiver
+Claude → Agy → Codex dentro desse grupo. Se nenhum for utilizável e a indisponibilidade estiver
 comprovada, tente os de mesma família, também na ordem configurada, em sessão nova; registre
 `same_family_fresh_session` como limitação da revisão e abra uma pendência de revisão por outra
 família no bloco `## RF-<unit_id>-rNN` na evidência da unidade

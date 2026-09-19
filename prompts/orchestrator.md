@@ -65,9 +65,7 @@ antes de despachar, conforme os [perfis](orchestrator-perfis.md#classificar-e-re
   4. `SEMANTIC_FAILURE`: código encerra com exit 0 mas falha em testes ou parecer do Checker. Não aciona fallback
      de infraestrutura; encaminha para retrabalho formal (*rework*) ou reclassificação.
 
-O padrão básico de cadeias é **Planner Claude → Codex → Agy**, **Maker Agy → Codex → Claude** e
-**Checker Codex → Claude → Agy**, preferindo outra família que a dos Makers efetivos. O
-Classificador usa o perfil fixo e a cadeia definidos nos [perfis](orchestrator-perfis.md#perfil-padrão).
+O perfil global prefere **Gemini/Agy no Classificador e Searcher**. Quando a capacidade de handoff remoto estiver habilitada, **ChatGPT+RDC** assume Orchestrator+Planner; localmente o Planner segue **Codex → Claude → Agy**. O Maker segue **Codex → Agy → Claude** e o Checker **Claude → Agy → Codex**, sempre filtrando todas as famílias presentes na autoria efetiva antes da escolha. O Classificador usa o perfil fixo e a cadeia definidos nos [perfis](orchestrator-perfis.md#perfil-padrão).
 As cadeias, a confirmação de capacidade e os limites estão nos perfis; não dispare todos os
 candidatos nem troque parâmetros silenciosamente. Preferências explícitas mais recentes e
 restrições do consumidor prevalecem sobre o padrão. Registre modelo, effort, família, permissões,

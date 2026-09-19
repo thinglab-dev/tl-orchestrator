@@ -87,16 +87,16 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
             "reason": reason,
         }
 
-    def test_r01_and_ac01_codex_as_primary_even_when_not_first_in_legacy_chain(self) -> None:
-        """AC01 & R18: Classifier can elect Codex as primary Maker over Agy/Claude when Agy is insufficient."""
+    def test_r01_and_ac01_codex_is_global_primary_when_sufficient(self) -> None:
+        """AC01: Codex High is the global Maker primary when it is sufficient and dispatchable."""
         data = dict(self.base_v3)
         data["roles"] = {
             "maker": {
                 "tier": "heavy",
                 "selection_status": "conclusive",
-                "selection_basis": "escalation",
-                "escalation_reason": "efficient_candidate_insufficient",
-                "reason": "Codex Terra elected as primary based on benchmark coding evidence and Agy insufficiency",
+                "selection_basis": "minimum_sufficient",
+                "escalation_reason": None,
+                "reason": "Codex Terra elected as the global Maker preference with sufficient technical adequacy",
                 "tie_break_applied": None,
                 "evaluations": [
                     self._make_eval("codex", "gpt-5.6-terra", "high", True, "sufficient", True),
@@ -600,21 +600,9 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
                     "selection_status": "conclusive",
                     "selection_basis": "minimum_sufficient",
                     "escalation_reason": None,
-                    "reason": "Agy elected as primary with high effort",
+                    "reason": "Codex elected as the global Maker primary with high effort",
                     "tie_break_applied": None,
                     "evaluations": [
-                        {
-                            "harness": "agy",
-                            "model": "gemini-3.8-flash-high",
-                            "effort": "high",
-                            "catalog_eligible": True,
-                            "technical_adequacy": "sufficient",
-                            "dispatchable": True,
-                            "cost_basis": "token_price_only",
-                            "evidence_ids": ["price-flash", "transport-flash"],
-                            "uncertainty": None,
-                            "reason": "Adequate for heavy tier",
-                        },
                         {
                             "harness": "codex",
                             "model": "gpt-5.6-terra",
@@ -625,25 +613,37 @@ class DynamicPrimarySelectionContractTest(unittest.TestCase):
                             "cost_basis": "token_price_only",
                             "evidence_ids": ["price-terra", "gpt56-coding"],
                             "uncertainty": None,
-                            "reason": "Adequate fallback",
+                            "reason": "Adequate for heavy tier and preferred for Maker",
+                        },
+                        {
+                            "harness": "agy",
+                            "model": "gemini-3.8-flash-high",
+                            "effort": "high",
+                            "catalog_eligible": True,
+                            "technical_adequacy": "sufficient",
+                            "dispatchable": True,
+                            "cost_basis": "token_price_only",
+                            "evidence_ids": ["price-flash", "transport-flash"],
+                            "uncertainty": None,
+                            "reason": "Adequate Maker fallback",
                         },
                     ],
                     "candidates": [
                         {
-                            "harness": "agy",
-                            "model": "gemini-3.8-flash-high",
+                            "harness": "codex",
+                            "model": "gpt-5.6-terra",
                             "effort": "high",
                             "dispatch_role": "primary",
-                            "evidence_ids": ["price-flash", "transport-flash"],
+                            "evidence_ids": ["price-terra", "gpt56-coding"],
                             "cost_basis": "token_price_only",
                             "reason": "Primary candidate",
                         },
                         {
-                            "harness": "codex",
-                            "model": "gpt-5.6-terra",
+                            "harness": "agy",
+                            "model": "gemini-3.8-flash-high",
                             "effort": "high",
                             "dispatch_role": "fallback",
-                            "evidence_ids": ["price-terra", "gpt56-coding"],
+                            "evidence_ids": ["price-flash", "transport-flash"],
                             "cost_basis": "token_price_only",
                             "reason": "Fallback candidate",
                         },
@@ -1034,8 +1034,8 @@ class MinimumSufficientCapabilityTest(unittest.TestCase):
             "reason": f"Evaluation for {harness}/{model}/{effort}",
         }
 
-    def test_case_1_all_sufficient_prefers_efficient_agy_flash_high(self) -> None:
-        """Caso 1: Agy, Codex high, Codex xhigh e Claude todos sufficient -> Agy Flash High primário, selection_basis: minimum_sufficient."""
+    def test_case_1_all_sufficient_prefers_codex_high(self) -> None:
+        """Caso 1: Agy, Codex high, Codex xhigh e Claude todos sufficient -> Codex High primário pela preferência global."""
         evals = [
             self._make_eval("agy", "gemini-3.8-flash-high", "high"),
             self._make_eval("codex", "gpt-5.6-terra", "high"),
@@ -1043,19 +1043,19 @@ class MinimumSufficientCapabilityTest(unittest.TestCase):
             self._make_eval("claude", "sonnet", "high"),
         ]
         winner, basis, esc_reason = resolve_minimum_sufficient(evals)
-        self.assertEqual(winner, ("agy", "gemini-3.8-flash-high", "high"))
+        self.assertEqual(winner, ("codex", "gpt-5.6-terra", "high"))
         self.assertEqual(basis, "minimum_sufficient")
         self.assertIsNone(esc_reason)
 
-    def test_case_2_efficient_insufficient_escalates_to_codex_high_not_xhigh(self) -> None:
-        """Caso 2: Agy Flash High insufficient, Codex high e xhigh sufficient -> Codex high primário (NÃO xhigh), escalation_reason: efficient_candidate_insufficient."""
+    def test_case_2_codex_insufficient_falls_back_to_gemini(self) -> None:
+        """Caso 2: Codex High insufficient e Gemini sufficient -> Gemini assume sem promover Codex xhigh."""
         evals = [
-            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="insufficient", dispatchable=False),
-            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="sufficient"),
+            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="insufficient", dispatchable=False),
+            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="sufficient"),
             self._make_eval("codex", "gpt-5.6-terra", "xhigh", adequacy="sufficient"),
         ]
         winner, basis, esc_reason = resolve_minimum_sufficient(evals)
-        self.assertEqual(winner, ("codex", "gpt-5.6-terra", "high"))
+        self.assertEqual(winner, ("agy", "gemini-3.8-flash-high", "high"))
         self.assertEqual(basis, "escalation")
         self.assertEqual(esc_reason, "efficient_candidate_insufficient")
 
@@ -1081,40 +1081,41 @@ class MinimumSufficientCapabilityTest(unittest.TestCase):
         self.assertEqual(basis, "escalation")
         self.assertEqual(esc_reason, "concrete_technical_necessity")
 
-    def test_case_5_efficient_uncertain_escalates_with_reason(self) -> None:
-        """Caso 5: Agy Flash High uncertain, Codex high sufficient -> Primário Codex high, escalation_reason: efficient_candidate_uncertain."""
+    def test_case_5_codex_uncertain_falls_back_with_reason(self) -> None:
+        """Caso 5: Codex High uncertain e Gemini sufficient -> Gemini assume com razão explícita."""
         evals = [
-            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="uncertain", dispatchable=False),
-            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="sufficient"),
+            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="uncertain", dispatchable=False),
+            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="sufficient"),
             self._make_eval("claude", "sonnet", "high", adequacy="sufficient"),
         ]
         winner, basis, esc_reason = resolve_minimum_sufficient(evals)
-        self.assertEqual(winner, ("codex", "gpt-5.6-terra", "high"))
+        self.assertEqual(winner, ("agy", "gemini-3.8-flash-high", "high"))
         self.assertEqual(basis, "escalation")
         self.assertEqual(esc_reason, "efficient_candidate_uncertain")
 
-    def test_case_6_pre_dispatch_unavailable_falls_back_deterministically(self) -> None:
-        """Caso 6: Indisponibilidade runtime (pre_dispatch_unavailable) do candidato eficiente -> fallback determinístico com escalation_reason: pre_dispatch_unavailable."""
+    def test_case_6_codex_unavailable_falls_back_to_gemini(self) -> None:
+        """Caso 6: Codex High indisponível no pre-dispatch -> Gemini assume deterministicamente."""
         evals = [
-            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="sufficient"),
             self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="sufficient"),
+            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="sufficient"),
         ]
         winner, basis, esc_reason = resolve_minimum_sufficient(
             evals,
-            pre_dispatch_unavailable={("agy", "gemini-3.8-flash-high", "high")},
+            pre_dispatch_unavailable={("codex", "gpt-5.6-terra", "high")},
         )
-        self.assertEqual(winner, ("codex", "gpt-5.6-terra", "high"))
+        self.assertEqual(winner, ("agy", "gemini-3.8-flash-high", "high"))
         self.assertEqual(basis, "escalation")
         self.assertEqual(esc_reason, "pre_dispatch_unavailable")
 
-    def test_case_7_tier_heavy_with_sufficient_efficient_selects_agy_minimum_sufficient(self) -> None:
-        """Caso 7: Tarefa tier heavy, mas Agy Flash High é sufficient -> Agy Flash High primário, provando que tier != modelo."""
+    def test_case_7_tier_heavy_still_prefers_codex_high_over_xhigh(self) -> None:
+        """Caso 7: tier heavy não força xhigh; Codex High sufficient continua sendo o primário global."""
         evals = [
+            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="sufficient"),
             self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="sufficient"),
             self._make_eval("codex", "gpt-5.6-terra", "xhigh", adequacy="sufficient"),
         ]
         winner, basis, esc_reason = resolve_minimum_sufficient(evals)
-        self.assertEqual(winner, ("agy", "gemini-3.8-flash-high", "high"))
+        self.assertEqual(winner, ("codex", "gpt-5.6-terra", "high"))
         self.assertEqual(basis, "minimum_sufficient")
 
         # Validar payload completo com tier heavy e selection_basis minimum_sufficient
@@ -1139,13 +1140,22 @@ class MinimumSufficientCapabilityTest(unittest.TestCase):
                     "evaluations": evals,
                     "candidates": [
                         {
+                            "harness": "codex",
+                            "model": "gpt-5.6-terra",
+                            "effort": "high",
+                            "dispatch_role": "primary",
+                            "evidence_ids": ["price-terra"],
+                            "cost_basis": "token_price_only",
+                            "reason": "Preferência global do Maker e adequação técnica suficiente.",
+                        },
+                        {
                             "harness": "agy",
                             "model": "gemini-3.8-flash-high",
                             "effort": "high",
-                            "dispatch_role": "primary",
+                            "dispatch_role": "fallback",
                             "evidence_ids": ["price-flash"],
                             "cost_basis": "token_price_only",
-                            "reason": "Adequado tecnicamente ao escopo delimitado da fase.",
+                            "reason": "Fallback de quota ou infraestrutura do Maker.",
                         },
                         {
                             "harness": "codex",
@@ -1154,7 +1164,7 @@ class MinimumSufficientCapabilityTest(unittest.TestCase):
                             "dispatch_role": "fallback",
                             "evidence_ids": ["price-terra"],
                             "cost_basis": "token_price_only",
-                            "reason": "Fallback disponivel.",
+                            "reason": "Escalada de effort somente com necessidade concreta.",
                         },
                     ],
                 }
@@ -1319,10 +1329,10 @@ class MinimumSufficientEnforcementTest(unittest.TestCase):
         """selection_basis: escalation requires a valid enum escalation_reason."""
         payload = self._base_payload()
         evals = [
-            self._make_eval("agy", "gemini-3.8-flash-high", "high", adequacy="insufficient", dispatchable=False),
-            self._make_eval("codex", "gpt-5.6-terra", "high"),
+            self._make_eval("codex", "gpt-5.6-terra", "high", adequacy="insufficient", dispatchable=False),
+            self._make_eval("agy", "gemini-3.8-flash-high", "high"),
         ]
-        cands = [self._make_cand("codex", "gpt-5.6-terra", "high", "primary")]
+        cands = [self._make_cand("agy", "gemini-3.8-flash-high", "high", "primary")]
 
         # Missing escalation_reason
         payload["roles"] = {

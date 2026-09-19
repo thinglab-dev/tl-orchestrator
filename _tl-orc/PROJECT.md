@@ -90,11 +90,11 @@ não autoriza contornar branch protection, Checker, CI, escopo congelado ou auto
 | Planner | Claude | `claude-opus-5` | high | |
 | Planner | Codex | `gpt-5.6-terra` | medium, high | |
 | Planner | Agy | `gemini-3.1-pro-high` | high (no ID) | |
-| Maker | Agy | `gemini-3.8-flash-high` | high (no ID) | preferência global padrão |
-| Maker | Codex | `gpt-5.6-terra` | medium, high, xhigh | |
-| Maker | Claude | `sonnet` | medium, high | |
-| Maker | Claude | `claude-opus-5` | high | |
-| Checker | Codex | `gpt-5.6-terra` | high | referência padrão prioritária |
+| Maker | Agy | `gemini-3.8-flash-high` | high (no ID) | fallback global quando Codex estiver indisponível |
+| Maker | Codex | `gpt-5.6-terra` | medium, high, xhigh | preferência global do Maker |
+| Maker | Claude | `sonnet` | medium, high | fallback adicional condicionado à independência posterior |
+| Maker | Claude | `claude-opus-5` | high | fallback adicional condicionado à independência posterior |
+| Checker | Codex | `gpt-5.6-terra` | high | fallback quando OpenAI não estiver em effective_authors |
 | Checker | Codex | `gpt-5.6-terra` | xhigh | escalonamento sob tier heavy / risco elevado |
 | Checker | Codex | `gpt-6-astra` | high | candidato experimental do piloto sob avaliação |
 | Checker | Codex | `gpt-6-astra` | xhigh | condicional: exige justificativa específica do Classificador |

@@ -16,7 +16,7 @@ rework_round: 0
 affects_context: []
 effective_authors: [openai]
 checker_independence: required
-content_paths: [SKILL.md, prompts/orchestrator.md, prompts/orchestrator-playbook.md, prompts/orchestrator-perfis.md, scripts/tl_handoff.py, docs/PROJECT_CONFIGURATION.md, docs/WORK_MODEL.md, docs/EXECUTION_PROTOCOL.md, tests/test_remote_orchestrator_handoff.py, README.md, distribution-manifest.json, _tl-orc/project/STATUS.md]
+content_paths: [SKILL.md, prompts/orchestrator.md, prompts/orchestrator-playbook.md, prompts/orchestrator-perfis.md, scripts/tl_handoff.py, scripts/validate_classification.py, scripts/tests/test_dynamic_primary_selection.py, docs/PROJECT_CONFIGURATION.md, docs/WORK_MODEL.md, docs/EXECUTION_PROTOCOL.md, tests/test_remote_orchestrator_handoff.py, README.md, CHANGELOG.md, distribution-manifest.json, _tl-orc/PROJECT.md, _tl-orc/project/STATUS.md]
 
 ## Finding
 source: uso real do maintainer durante o fechamento de T032/T033, conduzindo Git, worktrees, processos, testes e GitHub pelo ChatGPT conectado ao computador via Remote Desktop Commander.
@@ -47,6 +47,7 @@ dedup: T022 reduz contexto e melhora handoff entre ciclos; T018/T032 governam ex
 - AC12: para o repositório fonte sob autoridade do maintainer, o fluxo suporta integração `owner-direct` depois de gates, Checker exigido e CI no SHA exato. PR permanece opcional salvo contribuição externa, decisão deliberada ou proteção da plataforma que o exija.
 - AC13: o modo local atual continua compatível por omissão; consumidores que não habilitam handoff remoto não recebem novo requisito operacional.
 - AC14: testes determinísticos cobrem Codex ausente/inválido, HEAD/branch/dirty drift, duplo claim, replay, handoff adulterado, coordenador local ainda ativo, return local, Checker sem família independente e seleção Gemini quando Claude está sem quota.
+- AC15: o perfil global publicado prefere Gemini/Agy para Classifier e Searcher; ChatGPT+RDC para Orchestrator+Planner quando o handoff remoto estiver ativo; Planner local Codex → Claude → Agy; Maker Codex → Agy → Claude; Checker Claude → Agy → Codex após filtrar famílias autoras. O resolver mecânico de Maker usa Codex `gpt-5.6-terra/high` como primeiro candidato, Gemini como fallback e `xhigh` apenas como escalada factual.
 
 ### Verification
 - `python3 -m unittest discover -s tests -p 'test_remote_orchestrator_handoff.py'`

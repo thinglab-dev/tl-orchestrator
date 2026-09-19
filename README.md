@@ -13,10 +13,7 @@ dentro do catálogo permitido. Ele recebe apenas o briefing e um recorte identif
 Os [contratos opcionais de qualidade de workflow](docs/WORKFLOW_QUALITY.md) fornecem provas
 recuperáveis, comparações pareadas e preflight de ferramentas sem instalar nem acoplar runtimes.
 
-As cadeias dos papéis são **Planner Claude → Codex → Agy**, **Maker Agy → Codex → Claude** e
-**Checker Codex → Claude → Agy**, preferindo família diferente da do Maker e sempre em sessão
-nova. Indisponibilidade comprovada permite fallback registrado; ambiguidade não resolvida bloqueia
-somente o despacho ou a decisão que dela depende.
+O perfil global prefere **Gemini/Agy para Classifier e Searcher**. Quando a capacidade de handoff remoto estiver habilitada, **ChatGPT+RDC** assume Orchestrator+Planner; localmente o Planner segue **Codex → Claude → Agy**. O Maker segue **Codex → Agy → Claude** e o Checker **Claude → Agy → Codex**, sempre removendo famílias já presentes na autoria efetiva. Indisponibilidade ou quota esgotada percorrem somente fallbacks autorizados; nunca reduzem a independência exigida.
 Preferências mais recentes do usuário e restrições do consumidor prevalecem sobre o padrão. O
 roteamento satisfaz primeiro o risco e depois busca o menor custo esperado por entrega aceita; não
 há tabela fixa tier → modelo nem promessa de economia ou precisão baseada só em benchmark.
@@ -195,12 +192,12 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    adicionais por conta própria. Diferencie capacidade comprovada de disponibilidade incerta.
 
 6. Registre em `_tl-orc/PROJECT.md` o perfil-padrão publicado (ou apenas as decisões e exceções locais, herdando o padrão por omissão):
-   - Orquestrador: harness, modelo e effort selecionados pelo usuário na sessão;
-   - Classificador: Agy gemini-3.8-flash-medium medium → Codex gpt-5.6-luna medium →
-     Claude sonnet medium, em sessões auxiliares somente leitura;
-   - Planner: Claude → Codex → Agy;
-   - Maker: Agy → Codex → Claude;
-   - Checker report-only: Codex → Claude → Agy, preferindo família diferente de toda a autoria efetiva.
+   - Orquestrador: harness/modelo da sessão; quando a capacidade de handoff remoto estiver habilitada, ChatGPT+RDC é a condução preferida;
+   - Classificador: Agy gemini-3.8-flash-medium medium → Codex gpt-5.6-luna medium → Claude sonnet medium, em sessões auxiliares somente leitura;
+   - Planner: ChatGPT+RDC no modo remoto; localmente Codex → Claude → Agy;
+   - Maker: Codex → Agy → Claude;
+   - Checker report-only: Claude → Agy → Codex, filtrando toda família já presente na autoria efetiva;
+   - Searcher: Agy/Gemini → Claude → Codex.
 
    Registre routing_mode: classifier, o catálogo permitido e checker_independence: preferred
    (ou required quando o consumidor exigir outra família). Para cada fase, o Classificador recebe
@@ -319,13 +316,13 @@ flowchart TD
     U["Usuário"] -->|Define objetivo e autoriza escopo| O["Orquestrador"]
     O -->|Story, fase, revisões, catálogo e evidências| CL["Classificador · perfil econômico fixo"]
     CL -->|Tier, pares, evidências e base de custo| D["Orquestrador valida e resolve a cadeia"]
-    D -->|Quando precisa de auditoria ou spec| P["Planner · Claude → Codex → Agy"]
+    D -->|Quando precisa de auditoria ou spec| P["Planner · ChatGPT+RDC remoto; local Codex → Claude → Agy"]
     P -->|Propõe spec e corte| R["Orquestrador ratifica o corte"]
     D -->|Spec já executável| R
-    R -->|Despacha implementação autorizada| M["Maker · Agy → Codex → Claude"]
+    R -->|Despacha implementação autorizada| M["Maker · Codex → Agy → Claude"]
     M -->|Diff e evidências| V["Orquestrador confere e verifica"]
     V -->|Correção necessária no escopo| M
-    V -->|Nova sessão; prefere outra família| C["Checker · Codex → Claude → Agy"]
+    V -->|Nova sessão; filtra famílias autoras| C["Checker · Claude → Agy → Codex"]
     C -->|Parecer| J["Orquestrador valida o parecer"]
     J -->|Parecer inválido: solicitar nova resposta| C
     J -->|Correção de implementação| M

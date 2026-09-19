@@ -607,8 +607,8 @@ def match_project_priority(
 
 
 DEFAULT_EFFICIENCY_ORDER: list[tuple[str, str, str]] = [
-    ("agy", "gemini-3.8-flash-high", "high"),
     ("codex", "gpt-5.6-terra", "high"),
+    ("agy", "gemini-3.8-flash-high", "high"),
     ("claude", "sonnet", "high"),
     ("claude", "claude-sonnet-4-6", "high"),
     ("codex", "gpt-5.6-terra", "xhigh"),

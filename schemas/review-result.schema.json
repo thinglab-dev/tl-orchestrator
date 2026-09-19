@@ -95,6 +95,41 @@
         "required_action": {
           "type": "string",
           "minLength": 1
+        },
+        "scope_status": {
+          "type": "string",
+          "enum": [
+            "inside_parent_envelope",
+            "outside_parent_envelope",
+            "unprovable"
+          ],
+          "description": "T032 §2.5: optional Checker declaration about where this item's locations fall relative to the Story Authority envelope. The declaration is necessary but never sufficient: the runtime recomputes the status from the item's locations against the envelope and hard-stops when the two disagree."
+        },
+        "spec_status": {
+          "type": "string",
+          "enum": [
+            "unchanged",
+            "changed"
+          ],
+          "description": "T032 §2.5: optional Checker declaration about whether resolving this item requires touching the authorized specification. Recomputed and cross-checked by the runtime exactly like scope_status."
+        },
+        "derivation_blockers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "bad_spec",
+              "intent_gap",
+              "human",
+              "security",
+              "scope_expansion",
+              "new_boundary",
+              "migration",
+              "capability_expansion"
+            ]
+          },
+          "description": "T032 §2.5: reasons this item cannot be resolved by an automatically derived patch-only child batch. Any entry stops AUTO_STORY and returns the Story to the operator."
         }
       }
     },

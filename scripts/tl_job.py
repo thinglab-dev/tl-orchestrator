@@ -2523,11 +2523,19 @@ def budgeted_model_dispatch(
     unit_ref: str | None = None,
     simulate_pre_dispatch_failure: bool = False,
     simulate_ambiguous_outcome: bool = False,
+    authority_context: object | None = None,
 ) -> tuple[bool, str, dict]:
     """
     Mandatory write-ahead budgeted model dispatch for Automatic Mode (T027).
     Guarantees that ANY real call to harness/model passes through:
     reserve -> pending_call persisted -> dispatch -> observed receipt -> consumed += 1 -> reserved -= 1 -> pending_call = null -> persistence.
+
+    Under AUTO_STORY (T032) an `authority_context` is supplied. The Story Authority ledger is then
+    the single source of truth for the budget: its reservation is written before the batch-local
+    one and settled before it, so the batch ledger can only ever be a projection of a charge that
+    already exists globally. One physical provider attempt is charged exactly once, under one
+    `global_attempt_id` that both ledgers reference, and a crash between the two leaves a
+    reservation the authority still owns rather than a call charged twice or charged nowhere.
     """
     if isinstance(batch_input, (str, Path)):
         batch_path = Path(batch_input)
@@ -2569,6 +2577,9 @@ def budgeted_model_dispatch(
     if calculate_reserve_fn is not None and callable(calculate_reserve_fn):
         required_reserve = calculate_reserve_fn(unit_ref or "unknown", phase)
         remaining = b.get("max_model_calls", 0) - b.get("consumed_model_calls", 0)
+        if authority_context is not None:
+            # The child allocation never outlives the Story budget that granted it.
+            remaining = min(remaining, int(authority_context.remaining()))
         if remaining < required_reserve:
             batch["status"] = "stopped"
             if "execution" in batch and isinstance(batch["execution"], dict):
@@ -2577,16 +2588,22 @@ def budgeted_model_dispatch(
                 save_batch_frontmatter(batch_path, batch, body)
             return False, "insufficient_budget_for_unit_verification", batch
 
-    # 1. Reserve slot
-    b["reserved_model_calls"] = b.get("reserved_model_calls", 0) + 1
-
-    # 2. Write-Ahead step: Persist pending_call BEFORE dispatch
     if not payload_digest:
         payload_str = json.dumps(harness_cmd, default=str, sort_keys=True) if isinstance(harness_cmd, (list, dict)) else str(harness_cmd)
         p_digest = "sha256:" + digest(payload_str)
     else:
         p_digest = payload_digest
 
+    # 0. Global reservation first. Under AUTO_STORY nothing may be reserved locally before the
+    #    Story Authority has written the reservation that owns the slot. A refusal here raises.
+    global_attempt_id = ""
+    if authority_context is not None:
+        global_attempt_id = str(authority_context.reserve(role=role, phase=phase, payload_digest=p_digest))
+
+    # 1. Reserve slot
+    b["reserved_model_calls"] = b.get("reserved_model_calls", 0) + 1
+
+    # 2. Write-Ahead step: Persist pending_call BEFORE dispatch
     b["pending_call"] = {
         "call_id": call_id,
         "role": role,
@@ -2594,13 +2611,29 @@ def budgeted_model_dispatch(
         "payload_digest": p_digest,
         "dispatched_at": now(),
     }
+    if global_attempt_id:
+        b["pending_call"]["global_attempt_id"] = global_attempt_id
     if batch_path:
         save_batch_frontmatter(batch_path, batch, body)
 
+    def _settle_released(proof: str) -> None:
+        """Proven pre-dispatch: the global slot is returned unspent before the local projection."""
+        if authority_context is not None:
+            authority_context.release(proof=proof)
+        b["reserved_model_calls"] = max(0, b.get("reserved_model_calls", 1) - 1)
+        b["pending_call"] = None
+
+    def _settle_charged(outcome: str, detail: str = "") -> None:
+        """Charged globally first; the batch counters follow as a projection of that charge."""
+        if authority_context is not None:
+            authority_context.consume(outcome=outcome, receipt={"detail": detail[:300]} if detail else None)
+        b["consumed_model_calls"] = b.get("consumed_model_calls", 0) + 1
+        b["reserved_model_calls"] = max(0, b.get("reserved_model_calls", 1) - 1)
+        b["pending_call"] = None
+
     # 3. Preflight check: Check if dispatch can actually be attempted
     if simulate_pre_dispatch_failure:
-        b["reserved_model_calls"] = max(0, b["reserved_model_calls"] - 1)
-        b["pending_call"] = None
+        _settle_released("simulated pre-dispatch failure: the harness never started")
         if batch_path:
             save_batch_frontmatter(batch_path, batch, body)
         return False, "PRE_DISPATCH_UNAVAILABLE", batch
@@ -2609,17 +2642,14 @@ def budgeted_model_dispatch(
     if runner_fn is None and cmd_list:
         exe = cmd_list[0]
         if not shutil.which(exe) and not os.path.exists(exe):
-            b["reserved_model_calls"] = max(0, b["reserved_model_calls"] - 1)
-            b["pending_call"] = None
+            _settle_released(f"executable {exe!r} is absent; the dispatch never started")
             if batch_path:
                 save_batch_frontmatter(batch_path, batch, body)
             return False, "PRE_DISPATCH_UNAVAILABLE", batch
 
     # 4. Dispatch invocation
     if simulate_ambiguous_outcome:
-        b["consumed_model_calls"] = b.get("consumed_model_calls", 0) + 1
-        b["reserved_model_calls"] = max(0, b.get("reserved_model_calls", 1) - 1)
-        b["pending_call"] = None
+        _settle_charged("ambiguous", "simulated ambiguous dispatch outcome")
         batch["status"] = "stopped"
         if "execution" in batch and isinstance(batch["execution"], dict):
             batch["execution"]["stop_reason"] = "unrecoverable_harness_failure"
@@ -2638,9 +2668,7 @@ def budgeted_model_dispatch(
                 stdout = res_tuple[1] if len(res_tuple) > 1 else ""
                 stderr = res_tuple[2] if len(res_tuple) > 2 else ""
         except Exception as exc:
-            b["consumed_model_calls"] = b.get("consumed_model_calls", 0) + 1
-            b["reserved_model_calls"] = max(0, b.get("reserved_model_calls", 1) - 1)
-            b["pending_call"] = None
+            _settle_charged("ambiguous", f"runner raised: {exc}")
             batch["status"] = "stopped"
             if "execution" in batch and isinstance(batch["execution"], dict):
                 batch["execution"]["stop_reason"] = "unrecoverable_harness_failure"
@@ -2652,9 +2680,7 @@ def budgeted_model_dispatch(
             p = subprocess.run(cmd_list, cwd=cwd, capture_output=True, text=True, check=False)
             exit_code, stdout, stderr = p.returncode, p.stdout, p.stderr
         except Exception as exc:
-            b["consumed_model_calls"] = b.get("consumed_model_calls", 0) + 1
-            b["reserved_model_calls"] = max(0, b.get("reserved_model_calls", 1) - 1)
-            b["pending_call"] = None
+            _settle_charged("ambiguous", f"subprocess raised: {exc}")
             batch["status"] = "stopped"
             if "execution" in batch and isinstance(batch["execution"], dict):
                 batch["execution"]["stop_reason"] = "unrecoverable_harness_failure"
@@ -2663,9 +2689,7 @@ def budgeted_model_dispatch(
             return False, f"unrecoverable_harness_failure: {exc}", batch
 
     # 5. Normal completion accounting (every real completed dispatch counts)
-    b["consumed_model_calls"] = b.get("consumed_model_calls", 0) + 1
-    b["reserved_model_calls"] = max(0, b.get("reserved_model_calls", 1) - 1)
-    b["pending_call"] = None
+    _settle_charged("consumed")
     if batch_path:
         save_batch_frontmatter(batch_path, batch, body)
 

@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tl-orchestrator Story Child Batch Proposal",
+  "description": "T032: a child batch derived by the runtime under an already authorized Story Authority. It carries no human signature of its own: its authority is proven by verify_derivation() against the root envelope. The proposal is the digested object, so it never contains the derivation proof that digests it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "child_batch_id",
+    "authority_id",
+    "parent_child_batch_id",
+    "work_ref",
+    "authorized_spec_revision",
+    "authorized_spec_sha256",
+    "required_mutation_targets",
+    "conditional_mutation_targets",
+    "forbidden_paths",
+    "protected_paths",
+    "allowed_effects",
+    "model_call_budget",
+    "functional_parent_checkpoint",
+    "derived_from_action_items",
+    "lineage"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "child_batch_id": {
+      "type": "string",
+      "pattern": "^B[0-9]{3,}$"
+    },
+    "authority_id": {
+      "type": "string",
+      "pattern": "^A[0-9]{3,}$"
+    },
+    "parent_child_batch_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^B[0-9]{3,}$",
+      "description": "The child batch this one continues, or null for the first child under the authority."
+    },
+    "work_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authorized_spec_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authorized_spec_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "required_mutation_targets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scope_path"
+      }
+    },
+    "conditional_mutation_targets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scope_path"
+      }
+    },
+    "forbidden_paths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scope_path"
+      }
+    },
+    "protected_paths": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "allowed_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "local_write",
+        "local_commit",
+        "local_merge",
+        "pull_request",
+        "push",
+        "tag",
+        "release",
+        "merge"
+      ],
+      "properties": {
+        "local_write": {
+          "type": "boolean"
+        },
+        "local_commit": {
+          "type": "boolean"
+        },
+        "local_merge": {
+          "type": "boolean"
+        },
+        "pull_request": {
+          "type": "boolean"
+        },
+        "push": {
+          "type": "boolean"
+        },
+        "tag": {
+          "type": "boolean"
+        },
+        "release": {
+          "type": "boolean"
+        },
+        "merge": {
+          "type": "boolean"
+        }
+      }
+    },
+    "model_call_budget": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "A sub-allocation of the authority's remaining global budget, never an independent ceiling."
+    },
+    "functional_parent_checkpoint": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "tree",
+        "child_batch_id"
+      ],
+      "properties": {
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Exactly the commit the previous Checker reviewed; never a merge of it into the governance base."
+        },
+        "tree": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "child_batch_id": {
+          "type": "string",
+          "pattern": "^B[0-9]{3,}$"
+        }
+      }
+    },
+    "derived_from_action_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "category",
+          "target_role",
+          "location",
+          "required_action"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^R[1-9][0-9]*$"
+          },
+          "category": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "location": {
+            "type": "string",
+            "minLength": 1
+          },
+          "required_action": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severity": {
+            "type": "string"
+          },
+          "scope_status": {
+            "type": "string"
+          },
+          "spec_status": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "governance_base_commit",
+        "story_baseline_commit"
+      ],
+      "properties": {
+        "governance_base_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Where the Story's governance lineage sits (typically the protected branch tip at authorization)."
+        },
+        "story_baseline_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Start of the cumulative range the final Checker reviews: story_baseline_commit..integration_candidate_commit."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "scope_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!(?:.*/)?\\.{1,2}(?:/|$))(?!.*//)[^/\\\\:\\u0000-\\u001f\\u007f][^\\\\:\\u0000-\\u001f\\u007f]*$",
+      "description": "R23: a canonical repository-relative POSIX path. Absolute, drive and UNC forms, backslash or colon separators, empty components and '.'/'..' components are refused; one trailing '/' is tolerated. tl_story_authority.canonical_scope_path enforces the same rule in code."
+    }
+  }
+}

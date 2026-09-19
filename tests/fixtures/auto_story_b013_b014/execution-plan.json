@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "plan_id": "connector-2-10-auto-story",
+  "work_ref": "connector:2-10",
+  "authority_id": "A001",
+  "budget": {
+    "max_model_calls": 14,
+    "bootstrap_calls": 2,
+    "role_calls_per_round": {
+      "maker": 1,
+      "checker": 1
+    }
+  },
+  "scenarios": [
+    {
+      "name": "straight_line",
+      "rework_rounds": 0,
+      "description": "Maker once, Checker approves: 2 bootstrap + 1 round of 2 = 4 calls."
+    },
+    {
+      "name": "retry",
+      "rework_rounds": 2,
+      "description": "Two rework rounds before the verdict: 2 bootstrap + 3 rounds of 2 = 8 calls."
+    }
+  ],
+  "gates": [
+    {
+      "gate_id": "g-pre-execution",
+      "lifecycle_phase": "pre_execution",
+      "model_calls": 0,
+      "assertions": [
+        {
+          "assertion_id": "working_tree_clean",
+          "parameters": {}
+        },
+        {
+          "assertion_id": "spec_digest_unchanged",
+          "parameters": {
+            "work_ref": "connector:2-10",
+            "sha256": "53ed4082f7965d198ae8784bc4904e16aadf56b8f0dc195160ff11228f69926b"
+          }
+        },
+        {
+          "assertion_id": "protected_paths_intact",
+          "parameters": {
+            "policy_id": "connector-2-10-protected-v1"
+          }
+        },
+        {
+          "assertion_id": "budget_not_exhausted",
+          "parameters": {
+            "minimum_remaining": 2
+          }
+        }
+      ]
+    },
+    {
+      "gate_id": "g-post-maker",
+      "lifecycle_phase": "post_maker_pre_review",
+      "model_calls": 0,
+      "assertions": [
+        {
+          "assertion_id": "protected_paths_intact",
+          "parameters": {
+            "policy_id": "connector-2-10-protected-v1"
+          }
+        },
+        {
+          "assertion_id": "budget_not_exhausted",
+          "parameters": {
+            "minimum_remaining": 1
+          }
+        }
+      ]
+    },
+    {
+      "gate_id": "g-pre-merge",
+      "lifecycle_phase": "post_checker_pre_merge",
+      "model_calls": 0,
+      "assertions": [
+        {
+          "assertion_id": "checker_approved",
+          "parameters": {
+            "unit": "connector:2-10",
+            "reviewed_commit": "1111111111111111111111111111111111111111"
+          }
+        },
+        {
+          "assertion_id": "main_not_merged",
+          "parameters": {
+            "branch": "main"
+          }
+        }
+      ]
+    },
+    {
+      "gate_id": "g-post-merge",
+      "lifecycle_phase": "post_merge_pre_close",
+      "model_calls": 0,
+      "assertions": [
+        {
+          "assertion_id": "merge_commit_exists",
+          "parameters": {
+            "commit": "2222222222222222222222222222222222222222"
+          }
+        },
+        {
+          "assertion_id": "canonical_gate_passed",
+          "parameters": {
+            "gate_id": "unit-tests"
+          }
+        }
+      ]
+    },
+    {
+      "gate_id": "g-terminal",
+      "lifecycle_phase": "post_terminal",
+      "model_calls": 0,
+      "assertions": [
+        {
+          "assertion_id": "origin_synced",
+          "parameters": {
+            "branch": "main",
+            "remote": "origin"
+          }
+        }
+      ]
+    }
+  ],
+  "protected_paths": [
+    {
+      "pattern": "docs/ARCH.md",
+      "policy": "exact_file_hash",
+      "sha256": "e7d728c9c608ebde9b59c2dded09063c9e198e93ec779994ca852b9b2fc81c16"
+    }
+  ]
+}

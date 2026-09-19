@@ -1,0 +1,62 @@
+{
+  "authority_id": "A001",
+  "work_ref": "connector:2-10",
+  "authorized_spec_revision": "2",
+  "authorized_spec_sha256": "53ed4082f7965d198ae8784bc4904e16aadf56b8f0dc195160ff11228f69926b",
+  "authorized_write_scope": {
+    "required_mutation_targets": [
+      "src/connector.py"
+    ],
+    "conditional_mutation_targets": [
+      "tests/test_connector.py",
+      "docs/NOTES.md"
+    ],
+    "forbidden_paths": [
+      ".github/workflows",
+      "secrets"
+    ]
+  },
+  "allowed_effects": {
+    "local_write": true,
+    "local_commit": true,
+    "local_merge": false,
+    "pull_request": true,
+    "push": true,
+    "tag": false,
+    "release": false,
+    "merge": true
+  },
+  "protected_paths": [
+    {
+      "pattern": "docs/ARCH.md",
+      "policy": "exact_file_hash",
+      "sha256": "e7d728c9c608ebde9b59c2dded09063c9e198e93ec779994ca852b9b2fc81c16"
+    }
+  ],
+  "global_model_call_budget": 14,
+  "max_child_batches": 2,
+  "max_consecutive_failed_batches": 2,
+  "wall_clock_deadline": "2027-01-01T00:00:00Z",
+  "hard_stops": [
+    "authority_missing_or_ambiguous",
+    "bad_spec",
+    "capability_expansion",
+    "cognitive_call_barrier_unavailable",
+    "consecutive_batch_failures_exhausted",
+    "effect_expansion",
+    "human",
+    "intent_gap",
+    "max_child_batches_exhausted",
+    "migration",
+    "model_call_budget_exhausted",
+    "new_boundary",
+    "next_story_without_authorization",
+    "protected_path_violation",
+    "scope_expansion",
+    "security",
+    "state_integrity",
+    "unexpected_revision_drift",
+    "unexpected_tree_state",
+    "wall_clock_deadline_exceeded"
+  ]
+}

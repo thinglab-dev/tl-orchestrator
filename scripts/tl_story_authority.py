@@ -56,6 +56,7 @@ try:  # scripts/ on sys.path (how the runtime loads its siblings)
         canonical_json,
         digest_of,
         git_changed_paths,
+        normalize_protected_pattern,
         protected_pattern_violations,
         sha256_hex,
         snapshot_set,
@@ -70,6 +71,7 @@ except ImportError:  # executed from the repository root
         canonical_json,
         digest_of,
         git_changed_paths,
+        normalize_protected_pattern,
         protected_pattern_violations,
         sha256_hex,
         snapshot_set,
@@ -244,6 +246,13 @@ def _assert_payload_shape(payload: Any) -> None:
         [item for item in protected if isinstance(item, dict)]) if isinstance(protected, list) else []
     if invalid:
         raise Refusal(f"{PROTECTED_PATH_PATTERN_INVALID}: authority_payload protected_paths {canonical_json(invalid)}")
+    scope = payload["authorized_write_scope"]
+    if isinstance(scope, dict):
+        paths = [path for key in ("required_mutation_targets", "conditional_mutation_targets", "forbidden_paths")
+                 for path in (scope.get(key) if isinstance(scope.get(key), list) else [])]
+        scope_invalid = scope_path_violations(paths)
+        if scope_invalid:
+            raise Refusal(f"{SCOPE_PATH_INVALID}: authority_payload authorized_write_scope {canonical_json(scope_invalid)}")
 
 
 def canonical_authority_payload(payload: dict) -> str:
@@ -273,6 +282,13 @@ def parse_authorization_literal(literal: str) -> tuple[str, str]:
     return match.group("work_ref"), match.group("digest")
 
 
+def _canonical_or_refuse(path: Any, where: str) -> str:
+    try:
+        return canonical_scope_path(path)
+    except ScopePathError as error:
+        raise Refusal(f"{SCOPE_PATH_INVALID}: {where}: {error.detail}: {path!r}") from error
+
+
 def build_authority_payload(
     *,
     authority_id: str,
@@ -295,9 +311,8 @@ def build_authority_payload(
         "authorized_spec_revision": authorized_spec_revision,
         "authorized_spec_sha256": authorized_spec_sha256,
         "authorized_write_scope": {
-            "required_mutation_targets": sorted(set(authorized_write_scope.get("required_mutation_targets") or [])),
-            "conditional_mutation_targets": sorted(set(authorized_write_scope.get("conditional_mutation_targets") or [])),
-            "forbidden_paths": sorted(set(authorized_write_scope.get("forbidden_paths") or [])),
+            key: sorted({_canonical_or_refuse(path, key) for path in authorized_write_scope.get(key) or []})
+            for key in ("required_mutation_targets", "conditional_mutation_targets", "forbidden_paths")
         },
         "allowed_effects": {key: bool(allowed_effects.get(key, False)) for key in EFFECT_KEYS},
         "protected_paths": list(protected_paths),
@@ -422,12 +437,16 @@ def _child_transition_violation(state: "AuthorityState", event: dict) -> dict | 
             "expected": expected}
 
 
+AUTHORITY_HARD_STOPPED = "authority_hard_stopped"
+
 ANCHOR_REF_PREFIX = "refs/tl/story-authorities"
 ANCHOR_FORMAT = 1
 ANCHOR_KIND = "tl_story_authority_journal_head"
 ANCHOR_UNAVAILABLE = "story_authority_anchor_unavailable"
 ANCHOR_DIVERGENT = "story_authority_anchor_divergent"
 ANCHOR_CONFLICT = "story_authority_anchor_conflict"
+ANCHOR_STORE_EXPOSED = "story_authority_anchor_store_exposed"
+ANCHOR_REDIRECTED = "story_authority_anchor_redirected"
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _OID_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
 # The anchor must land in exactly the repository the authority belongs to, whatever the caller's
@@ -479,6 +498,20 @@ class JournalAnchor:
     happens: a journal line the anchor does not cover is never used to create or move an anchor,
     so there is no window in which a rewritten tail can be blessed. A missing anchor under a
     non-empty journal, or a mechanism that cannot answer, fails closed.
+
+    Where the ref store is matters as much as the ref. Before every operation the storage is
+    discovered again from the work tree, with every redirecting GIT_* variable dropped, and
+    proven outside the working tree's content: the git dir and the common dir (which holds
+    `refs/tl/...` and the object database) must each be either the work tree's own `.git`
+    directory — a real directory, never a symlink — or lie entirely outside the work tree, which
+    is what a linked worktree or a separate git dir elsewhere looks like. A store kept inside the
+    tree (`--separate-git-dir` into a subdirectory, a gitfile pointing below the work tree) is
+    refused: writes to the tree would reach its refs and objects. The first proven store is then
+    bound for the life of this object — every git command runs with GIT_DIR and GIT_COMMON_DIR
+    pinned to it — and a later discovery that resolves elsewhere (a substituted gitfile, a
+    swapped `.git`, a replaced directory) is refused instead of followed. Across processes, every
+    receipt carries `store_identity`, the digest of the common dir it was written to, so a copy
+    of the store reached through a redirect does not verify.
     """
 
     def __init__(self, repo: str | Path, authority_id: str, root_digest: str):
@@ -487,14 +520,13 @@ class JournalAnchor:
         self.root_digest = root_digest
         self.ref = journal_anchor_ref(authority_id)
         self.seed = journal_chain_seed(authority_id, root_digest)
-        self._repository_checked = False
+        self._store: dict | None = None
 
     def _unavailable(self, detail: str) -> HardStop:
         return HardStop("state_integrity", f"{ANCHOR_UNAVAILABLE}: {detail}; AUTO_STORY does not run on an "
                         "unanchored journal", authority_id=self.authority_id, anchor_ref=self.ref)
 
-    def _git(self, *args: str, stdin: bytes | None = None) -> subprocess.CompletedProcess:
-        env = {key: value for key, value in os.environ.items() if key not in _ANCHOR_GIT_ENV_DROP}
+    def _run(self, args: tuple[str, ...], stdin: bytes | None, env: dict) -> subprocess.CompletedProcess:
         command = ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsync=loose-object,reference", *args]
         try:
             return subprocess.run(command, cwd=str(self.repo), input=stdin, capture_output=True, check=False,
@@ -502,19 +534,79 @@ class JournalAnchor:
         except (OSError, subprocess.SubprocessError) as exc:
             raise self._unavailable(f"git could not be executed: {exc}") from exc
 
-    def _require_repository(self) -> None:
-        """The anchor goes into this repository's ref store or nowhere: never into an enclosing one."""
-        if self._repository_checked:
-            return
-        record = self._git("rev-parse", "--show-toplevel")
-        top = record.stdout.decode("utf-8", "replace").strip()
-        if record.returncode != 0 or not top:
+    @staticmethod
+    def _clean_env() -> dict:
+        return {key: value for key, value in os.environ.items() if key not in _ANCHOR_GIT_ENV_DROP}
+
+    def _git(self, *args: str, stdin: bytes | None = None) -> subprocess.CompletedProcess:
+        """Run git against the bound store only: discovery never happens here, so a gitfile swapped
+        between the check and the command cannot redirect it."""
+        if self._store is None:
+            raise self._unavailable("no verified git store is bound to this anchor")
+        env = self._clean_env()
+        env["GIT_DIR"] = self._store["git_dir"]
+        env["GIT_COMMON_DIR"] = self._store["common_dir"]
+        return self._run(args, stdin, env)
+
+    def _discover(self) -> dict:
+        """The store this work tree resolves to right now, proven outside the working tree's content."""
+        record = self._run(("rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir",
+                            "--git-common-dir", "--git-path", "objects"), None, self._clean_env())
+        rows = record.stdout.decode("utf-8", "replace").splitlines()
+        if record.returncode != 0 or len(rows) != 4 or not all(rows):
             raise self._unavailable(f"{self.repo.as_posix()} is not a git work tree: "
                                     f"{record.stderr.decode('utf-8', 'replace').strip()[:200]}")
-        if os.path.realpath(top) != os.path.realpath(str(self.repo)):
+        top, git_dir, common_dir, objects = (os.path.realpath(row) for row in rows)
+        if top != os.path.realpath(str(self.repo)):
             raise self._unavailable("the authority repository is not the root of its git work tree, so the "
                                     "anchor would land in another repository")
-        self._repository_checked = True
+        dot_git = os.path.join(top, ".git")
+        conventional = os.path.isdir(dot_git) and not os.path.islink(dot_git)
+        if not conventional and not (os.path.isfile(dot_git) and not os.path.islink(dot_git)):
+            raise self._exposed(f"{dot_git} is neither a real .git directory nor a gitfile")
+        for name, location in (("git dir", git_dir), ("common dir", common_dir)):
+            if conventional and location == os.path.realpath(dot_git):
+                continue  # the work tree's own .git directory: never content of the tree
+            if location == top or location.startswith(top.rstrip(os.sep) + os.sep):
+                raise self._exposed(f"the {name} of {top} resolves inside its working tree; writes to the tree "
+                                    "would reach the refs and objects the anchor is kept in")
+        if conventional and git_dir != os.path.realpath(dot_git):
+            raise self._exposed("the work tree has its own .git directory but git resolves another store")
+        if objects != os.path.join(common_dir, "objects"):
+            raise self._exposed("the object database is not the one of the common dir")
+        try:
+            info = os.stat(common_dir)
+        except OSError as exc:
+            raise self._unavailable(f"cannot stat the git common dir: {exc}") from exc
+        gitfile = b""
+        if not conventional:
+            with contextlib.suppress(OSError):
+                gitfile = Path(dot_git).read_bytes()
+        return {"toplevel": top, "git_dir": git_dir, "common_dir": common_dir,
+                "common_dir_id": [info.st_dev, info.st_ino], "gitfile_sha256": sha256_hex(gitfile) if gitfile else "",
+                "store_identity": sha256_hex(f"{ANCHOR_KIND}:git-common-dir:{common_dir}")}
+
+    def _exposed(self, detail: str) -> HardStop:
+        return HardStop("state_integrity", f"{ANCHOR_STORE_EXPOSED}: {detail}; AUTO_STORY does not anchor its "
+                        "journal in a store the working tree can reach", authority_id=self.authority_id,
+                        anchor_ref=self.ref)
+
+    def _require_repository(self) -> dict:
+        """Prove the store again and hold it to the one first bound. Never follows a redirect."""
+        store = self._discover()
+        if self._store is None:
+            self._store = store
+        elif store != self._store:
+            changed = sorted(key for key in store if store[key] != self._store.get(key))
+            raise HardStop("state_integrity",
+                           f"{ANCHOR_REDIRECTED}: the git store of {self.repo.as_posix()} changed ({changed}) since "
+                           "this anchor was bound; a redirected store is refused, never followed",
+                           authority_id=self.authority_id, anchor_ref=self.ref, changed=changed)
+        return self._store
+
+    @property
+    def store_identity(self) -> str:
+        return self._require_repository()["store_identity"]
 
     def load(self) -> tuple[str, dict] | None:
         """(oid, receipt) of the current anchor, None when the ref does not exist. Raises when unusable."""
@@ -554,6 +646,7 @@ class JournalAnchor:
             "anchor_ref": self.ref,
             "authority_id": self.authority_id,
             "root_authority_digest": self.root_digest,
+            "store_identity": self.store_identity,
             "seq": seq,
             "line": line,
             "line_sha256": sha256_hex(line),
@@ -565,7 +658,8 @@ class JournalAnchor:
         """Why this receipt is not a head this authority could have anchored, or "" when it is."""
         for name, expected in (("anchor_format", ANCHOR_FORMAT), ("anchor_kind", ANCHOR_KIND),
                                ("anchor_ref", self.ref), ("authority_id", self.authority_id),
-                               ("root_authority_digest", self.root_digest)):
+                               ("root_authority_digest", self.root_digest),
+                               ("store_identity", self.store_identity)):
             if receipt.get(name) != expected:
                 return f"the receipt carries {name}={receipt.get(name)!r}, not {expected!r}"
         seq, line, prev_chain = receipt.get("seq"), receipt.get("line"), receipt.get("prev_chain_digest")
@@ -930,6 +1024,9 @@ class StoryAuthority:
         self.journal = AuthorityJournal(self.runtime_dir / "journal.jsonl", anchor)
         self._lease = None
         self.state = AuthorityState()
+        # The only clock the deadline is judged by. Injectable so a test can move time past the
+        # deadline between opening a child and dispatching from it; never read from the journal.
+        self.clock: Callable[[], str] = now_iso
 
     # ---- construction helpers ----------------------------------------------------------
 
@@ -951,29 +1048,37 @@ class StoryAuthority:
             raise Refusal(
                 f"coordinator_conflict: another runtime holds the lease for story authority {self.authority_id}", 5)
         self._lease = handle
-        self.refold()
-        # A crash between the anchor CAS and the append left one anchored event unwritten; only the
-        # lease holder completes it, and only from the anchored receipt.
-        if self.journal.recover():
+        # A failure anywhere below leaves no lease behind: `with` never reaches __exit__ when
+        # __enter__ raises, so nothing but this block can give the lock and the descriptor back.
+        try:
             self.refold()
-        if not self.state.opened:
-            self.journal.append(
-                "authority_open", authority_id=self.authority_id, work_ref=self.payload["work_ref"],
-                root_authority_digest=self.root_digest,
-                global_model_call_budget=self.payload["global_model_call_budget"],
-                max_child_batches=self.payload["max_child_batches"],
-                max_consecutive_failed_batches=self.payload["max_consecutive_failed_batches"],
-                wall_clock_deadline=self.payload["wall_clock_deadline"],
-                authorized_at=self.envelope["operator_authorization"]["authorized_at"])
-            self.refold()
-        self.write_status()
+            # A crash between the anchor CAS and the append left one anchored event unwritten; only
+            # the lease holder completes it, and only from the anchored receipt.
+            if self.journal.recover():
+                self.refold()
+            if not self.state.opened:
+                self.journal.append(
+                    "authority_open", authority_id=self.authority_id, work_ref=self.payload["work_ref"],
+                    root_authority_digest=self.root_digest,
+                    global_model_call_budget=self.payload["global_model_call_budget"],
+                    max_child_batches=self.payload["max_child_batches"],
+                    max_consecutive_failed_batches=self.payload["max_consecutive_failed_batches"],
+                    wall_clock_deadline=self.payload["wall_clock_deadline"],
+                    authorized_at=self.envelope["operator_authorization"]["authorized_at"])
+                self.refold()
+            self.write_status()
+        except BaseException:
+            self.release()
+            raise
         return self
 
     def release(self) -> None:
-        if self._lease is not None:
-            _unlock_exclusive(self._lease)
-            self._lease.close()
-            self._lease = None
+        lease, self._lease = self._lease, None
+        if lease is not None:
+            try:
+                _unlock_exclusive(lease)
+            finally:
+                lease.close()
 
     def __enter__(self) -> "StoryAuthority":
         return self.acquire()
@@ -1023,6 +1128,48 @@ class StoryAuthority:
             raise HardStop(
                 "authority_missing_or_ambiguous",
                 f"story authority {self.authority_id} is closed ({self.state.close_state}: {self.state.close_reason})")
+        self.assert_not_hard_stopped()
+
+    def assert_not_hard_stopped(self) -> None:
+        """A journaled hard stop is terminal for every executive action under this authority.
+
+        It lives in the anchored journal, so catching the exception, repairing the files that caused
+        it or building another instance changes nothing: every refold sees it again. What remains
+        possible afterwards is reading, settling earlier attempts conservatively, recording a child
+        as failed and closing the authority; reserving, deriving, opening or closing a child as
+        reviewed are not. Only a new human authorization continues the Story.
+        """
+        if not self.state.hard_stops:
+            return
+        first = self.state.hard_stops[0]
+        reason = str(first.get("reason") or "state_integrity")
+        raise HardStop(
+            reason,
+            f"{AUTHORITY_HARD_STOPPED}: story authority {self.authority_id} was hard-stopped at seq "
+            f"{first.get('seq')} ({reason}: {str(first.get('detail', ''))[:200]}); a hard stop is terminal and "
+            "only a new human authorization continues the Story",
+            authority_id=self.authority_id, hard_stop_seq=first.get("seq"), hard_stop_reason=reason)
+
+    def now(self) -> str:
+        return _require_timestamp(self.clock(), "the authority clock")
+
+    def assert_deadline(self, action: str) -> None:
+        """The absolute wall_clock_deadline binds every new reservation and executive effect.
+
+        Checked at the moment of the action, not when the child opened: a child opened before the
+        deadline does not carry permission to dispatch after it, whatever waited or retried between.
+        """
+        now, deadline = self.now(), str(self.payload["wall_clock_deadline"])
+        if now > deadline:
+            self.hard_stop("wall_clock_deadline_exceeded",
+                           f"{action}: now {now} is past the authorized deadline {deadline}",
+                           now=now, deadline=deadline)
+
+    def _require_executable(self, action: str) -> None:
+        """Lease held, authority open, never hard-stopped, and the deadline not yet passed."""
+        self._require_lease()
+        self._require_open()
+        self.assert_deadline(action)
 
     # ---- global budget -----------------------------------------------------------------
 
@@ -1064,8 +1211,7 @@ class StoryAuthority:
         requested_calls: int = 1,
     ) -> dict:
         """Write-ahead reservation under the lease. Idempotent for an identical replayed attempt."""
-        self._require_lease()
-        self._require_open()
+        self._require_executable(f"reserving model call {global_attempt_id}")
         existing = self.state.attempts.get(global_attempt_id)
         if existing is not None:
             same = (existing.get("logical_call_id") == logical_call_id
@@ -1276,18 +1422,17 @@ class StoryAuthority:
         # findings its predecessor closed with.
         assert_child_proposal_within_envelope(
             proposal, self.payload, self.state, self, proof=proof, derivation=derivation,
-            spec_paths=[*(proof.get("spec_paths") or []), *spec_paths])
+            spec_paths=[*(proof.get("spec_paths") or []), *spec_paths], now=self.now())
 
         return proposal, proof
 
     def record_child_derived(self, proposal: dict, proof: dict) -> dict:
-        self._require_lease()
-        self._require_open()
+        self._require_executable(f"deriving child batch {proposal.get('child_batch_id')}")
         child_id = proposal["child_batch_id"]
 
         # Validate proposal and proof before persisting or journaling.
         assert_child_proposal_within_envelope(proposal, self.payload, self.state, self, proof=proof,
-                                              spec_paths=proof.get("spec_paths") or ())
+                                              spec_paths=proof.get("spec_paths") or (), now=self.now())
 
         proposal_digest = digest_of(proposal)
         if proof.get("child_proposal_digest") != proposal_digest:
@@ -1351,8 +1496,7 @@ class StoryAuthority:
 
     def record_child_open(self, child_batch_id: str, *, branch: str, head_commit: str, tree: str,
                           lineage: dict | None = None) -> dict:
-        self._require_lease()
-        self._require_open()
+        self._require_executable(f"opening child batch {child_batch_id}")
         self._require_child_transition("child_open", child_batch_id)
         event = self.journal.append(
             "child_open", authority_id=self.authority_id, child_batch_id=child_batch_id, branch=branch,
@@ -1615,28 +1759,102 @@ def _scope_paths(scope: dict) -> list[str]:
     return list(scope.get("required_mutation_targets") or []) + list(scope.get("conditional_mutation_targets") or [])
 
 
+SCOPE_PATH_INVALID = "scope_path_invalid"
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+class ScopePathError(ValueError):
+    """A scope or location path that is not a canonical repository-relative POSIX path."""
+
+    def __init__(self, path: Any, detail: str):
+        super().__init__(f"{SCOPE_PATH_INVALID}: {path!r}: {detail}")
+        self.path = path
+        self.detail = detail
+
+
+def canonical_scope_path(path: Any) -> str:
+    """The canonical repository-relative POSIX form of a scope or location path, or ScopePathError.
+
+    Purely lexical and strict, because containment is decided by comparing these strings: a path
+    that would mean something else once joined, resolved or read on another platform is refused,
+    never repaired. Refused: empty, control characters, absolute, drive or UNC forms, backslash or
+    colon (ambiguous separators), empty components (`a//b`) and `.`/`..` components. The only
+    normalization is dropping one trailing `/`, which names the same directory.
+    """
+    if not isinstance(path, str):
+        raise ScopePathError(path, "path must be a string")
+    if not path or not path.strip():
+        raise ScopePathError(path, "path must not be empty")
+    if _CONTROL_RE.search(path):
+        raise ScopePathError(path, "path contains a control character")
+    if path.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", path):
+        raise ScopePathError(path, "absolute, drive and UNC paths are outside the repository")
+    if "\\" in path:
+        raise ScopePathError(path, "backslash separators are ambiguous across platforms")
+    if ":" in path:
+        raise ScopePathError(path, "':' is a drive or stream separator on some platforms")
+    candidate = path[:-1] if path.endswith("/") else path
+    parts = candidate.split("/")
+    if any(part == "" for part in parts):
+        raise ScopePathError(path, "empty path components are ambiguous")
+    if any(part in {".", ".."} for part in parts):
+        raise ScopePathError(path, "'.' and '..' components are not canonical and may escape the scope")
+    return candidate
+
+
+def scope_path_violations(paths: Iterable[Any]) -> list[dict]:
+    """Every path in `paths` that is not canonical, with the reason."""
+    violations = []
+    for path in paths:
+        try:
+            canonical_scope_path(path)
+        except ScopePathError as error:
+            violations.append({"path": path if isinstance(path, str) else repr(path), "detail": error.detail})
+    return violations
+
+
 def _within(path: str, scopes: Iterable[str]) -> bool:
-    normalized = Path(str(path)).as_posix().strip("/")
+    """Whether `path` is one of `scopes` or below one. Fail-closed on anything not canonical.
+
+    Both sides are canonicalized first, so `a/../b` can never be read as a descendant of `a`, and a
+    non-canonical path or scope raises ScopePathError instead of answering either way: for an
+    authorized list "not within" is the safe answer, for a forbidden list it is the unsafe one.
+    """
+    normalized = canonical_scope_path(path)
     for scope in scopes:
-        candidate = Path(str(scope)).as_posix().strip("/")
-        if candidate in {"", "."} or normalized == candidate or normalized.startswith(candidate + "/"):
+        candidate = canonical_scope_path(scope)
+        if normalized == candidate or normalized.startswith(candidate + "/"):
             return True
     return False
 
 
 within_scope = _within
 
+# `path:line`, `path:line-line` or `path:line:column` — the suffix a Checker location carries.
+_LOCATION_SUFFIX_RE = re.compile(r"^(?P<path>.+?)(?::[0-9]+(?:[-:][0-9]+)*)?$")
+
 
 def _item_locations(item: dict) -> list[str]:
-    """Paths an action item points at. A location that names no path cannot be proven in scope."""
+    """Paths an action item points at, exactly as written. A location that names no path cannot be
+    proven in scope. Anything path-like is kept, canonical or not, so that classification refuses
+    it rather than silently dropping it."""
     raw = str(item.get("location", ""))
     parts = [chunk.strip() for chunk in re.split(r"[,;\s]+", raw) if chunk.strip()]
     locations = []
     for part in parts:
-        path = part.split(":", 1)[0].strip()
-        if path and ("/" in path or "." in path):
-            locations.append(Path(path).as_posix())
+        match = _LOCATION_SUFFIX_RE.match(part)
+        path = (match.group("path") if match else part).strip()
+        if path and any(marker in path for marker in ("/", ".", "\\", ":")):
+            locations.append(path)
     return locations
+
+
+def _protected_scope(pattern: Any) -> str:
+    """A protected path pattern in the form `_within` compares; `.` protects everything."""
+    try:
+        return normalize_protected_pattern(pattern)
+    except ProtectedPathError as error:
+        raise ScopePathError(pattern, error.detail) from error
 
 
 def classify_action_item(item: dict, payload: dict, spec_paths: Iterable[str] = ()) -> dict:
@@ -1644,20 +1862,34 @@ def classify_action_item(item: dict, payload: dict, spec_paths: Iterable[str] = 
     scope = payload["authorized_write_scope"]
     authorized = _scope_paths(scope)
     forbidden = list(scope.get("forbidden_paths") or [])
-    protected = [str(p.get("pattern", "")) for p in payload.get("protected_paths") or []]
-    locations = _item_locations(item)
-    if not locations:
-        scope_status = "unprovable"
-    elif any(_within(path, forbidden) or _within(path, protected) for path in locations):
-        scope_status = "outside_parent_envelope"
-    elif all(_within(path, authorized) for path in locations):
-        scope_status = "inside_parent_envelope"
+    raw_locations = _item_locations(item)
+    invalid = scope_path_violations(raw_locations)
+    computed: dict[str, Any]
+    if invalid:
+        # A location that is not canonical is not "probably inside": `a/../secrets` would compare
+        # as a descendant of `a`. It is outside until someone writes it canonically.
+        computed = {"scope_status": "outside_parent_envelope", "spec_status": "unchanged",
+                    "locations": raw_locations, "invalid_locations": invalid}
     else:
-        scope_status = "outside_parent_envelope"
-    spec_status = "changed" if locations and any(_within(path, spec_paths) for path in locations) else "unchanged"
+        locations = [canonical_scope_path(path) for path in raw_locations]
+        protected = [_protected_scope(p.get("pattern", "")) for p in payload.get("protected_paths") or []]
+        if not locations:
+            scope_status = "unprovable"
+        elif "." in protected or any(_within(path, forbidden) or _within(path, [p for p in protected if p != "."])
+                                     for path in locations):
+            scope_status = "outside_parent_envelope"
+        elif all(_within(path, authorized) for path in locations):
+            scope_status = "inside_parent_envelope"
+        else:
+            scope_status = "outside_parent_envelope"
+        try:
+            touches_spec = any(_within(path, spec_paths) for path in locations)
+        except ScopePathError:
+            touches_spec = True  # a specification path that cannot be compared is assumed touched
+        spec_status = "changed" if locations and touches_spec else "unchanged"
+        computed = {"scope_status": scope_status, "spec_status": spec_status, "locations": locations}
     if str(item.get("category", "")) == "bad_spec":
-        spec_status = "changed"  # the finding is about the specification itself, by construction
-    computed = {"scope_status": scope_status, "spec_status": spec_status, "locations": locations}
+        computed["spec_status"] = "changed"  # the finding is about the specification itself, by construction
     for name in ("scope_status", "spec_status"):
         declared = item.get(name)
         if declared is not None and str(declared) != computed[name]:
@@ -1694,7 +1926,10 @@ def derivation_eligibility(action_items: list[dict], payload: dict, spec_paths: 
         computed = classify_action_item(item, payload, spec_paths)
         if "conflict" in computed:
             blockers.append({"reason": "state_integrity", "item": item_id, "detail": computed["conflict"]})
-        if computed["scope_status"] != PATCH_ONLY_SCOPE_STATUS:
+        if computed.get("invalid_locations"):
+            blockers.append({"reason": "scope_expansion", "item": item_id,
+                             "detail": f"{SCOPE_PATH_INVALID}: {canonical_json(computed['invalid_locations'])}"})
+        elif computed["scope_status"] != PATCH_ONLY_SCOPE_STATUS:
             blockers.append({"reason": "scope_expansion", "item": item_id,
                              "detail": f"scope_status is {computed['scope_status']!r} for {computed['locations']}"})
         if computed["spec_status"] != PATCH_ONLY_SPEC_STATUS:
@@ -1729,9 +1964,10 @@ def derive_child_proposal(
     if required_mutation_targets is None:
         named: list[str] = []
         for item in action_items:
-            named.extend(_item_locations(item))
+            # A non-canonical location is never promoted to a target; verify_derivation refuses it.
+            named.extend(path for path in _item_locations(item) if not scope_path_violations([path]))
         authorized = _scope_paths(scope)
-        required = sorted({path for path in named if _within(path, authorized)})
+        required = sorted({canonical_scope_path(path) for path in named if _within(path, authorized)})
         required_mutation_targets = required or sorted(scope.get("required_mutation_targets") or [])
     required_list = sorted(set(required_mutation_targets))
     if conditional_mutation_targets is None:
@@ -1820,6 +2056,10 @@ def assert_child_proposal_within_envelope(
     scope = payload.get("authorized_write_scope") or {}
     authorized_union = _scope_paths(scope)
     child_union = list(proposal.get("required_mutation_targets") or []) + list(proposal.get("conditional_mutation_targets") or [])
+    scope_invalid = scope_path_violations(
+        [*authorized_union, *(scope.get("forbidden_paths") or []), *child_union, *(proposal.get("forbidden_paths") or [])])
+    if scope_invalid:
+        _fail("scope_expansion", f"{SCOPE_PATH_INVALID}: {canonical_json(scope_invalid)}", violations=scope_invalid)
     outside = sorted({path for path in child_union if not _within(path, authorized_union)})
     if outside:
         _fail("scope_expansion", f"paths outside the parent envelope: {outside}", outside=outside)
@@ -1863,7 +2103,15 @@ def assert_child_proposal_within_envelope(
                       f"the child requests {granted} model calls but the authority has {remaining} left",
                       requested=granted, remaining=remaining)
 
-    current_time = now or now_iso()
+    if state is not None and getattr(state, "hard_stops", None):
+        # Terminal, and already journaled: refused without journaling it again.
+        first = state.hard_stops[0]
+        raise HardStop(str(first.get("reason") or "state_integrity"),
+                       f"{AUTHORITY_HARD_STOPPED}: the authority was hard-stopped at seq {first.get('seq')} "
+                       f"({first.get('reason')}); no child is derived, bound or opened under it",
+                       hard_stop_seq=first.get("seq"))
+
+    current_time = now or (authority.now() if hasattr(authority, "now") else now_iso())
     deadline = payload.get("wall_clock_deadline", "")
     if deadline and current_time > deadline:
         _fail("wall_clock_deadline_exceeded",
@@ -1949,6 +2197,7 @@ def verify_derivation(
     payload = authority.payload
     state = authority.refold()
     checks: list[dict] = []
+    spec_paths = list(spec_paths)
 
     def check(name: str, ok: bool, reason: str, detail: str = "", **evidence: Any) -> None:
         checks.append({"check": name, "result": "pass" if ok else "fail"})
@@ -1965,6 +2214,8 @@ def verify_derivation(
 
     check("authority_open", not state.closed, "authority_missing_or_ambiguous",
           f"authority already closed as {state.close_state}")
+    checks.append({"check": "authority_not_hard_stopped", "result": "fail" if state.hard_stops else "pass"})
+    authority.assert_not_hard_stopped()
 
     child_id = child_proposal["child_batch_id"]
     persisted = [path.name for path in (authority.child_proposal_path(child_id), authority.child_proof_path(child_id))
@@ -1985,6 +2236,11 @@ def verify_derivation(
     scope = payload["authorized_write_scope"]
     authorized_union = _scope_paths(scope)
     child_union = list(child_proposal["required_mutation_targets"]) + list(child_proposal["conditional_mutation_targets"])
+    scope_invalid = scope_path_violations(
+        [*authorized_union, *(scope.get("forbidden_paths") or []), *child_union, *child_proposal["forbidden_paths"],
+         *spec_paths])
+    check("scope_paths_canonical", not scope_invalid, "scope_expansion",
+          f"{SCOPE_PATH_INVALID}: {canonical_json(scope_invalid)}", violations=scope_invalid)
     outside = sorted({path for path in child_union if not _within(path, authorized_union)})
     # §2.4: the union is what must be contained. A path the parent authorized conditionally may
     # legitimately become required in the child after a factual Checker finding.
@@ -2024,9 +2280,10 @@ def verify_derivation(
     check("max_active_child_batches", len(active) < MAX_ACTIVE_CHILD_BATCHES, "state_integrity",
           f"child batch(es) {active} are still active; AUTO_STORY v1 runs one at a time")
 
-    check("wall_clock_deadline", (now or now_iso()) <= payload["wall_clock_deadline"],
+    current_time = now or authority.now()
+    check("wall_clock_deadline", current_time <= payload["wall_clock_deadline"],
           "wall_clock_deadline_exceeded",
-          f"now {now or now_iso()} is past the authorized deadline {payload['wall_clock_deadline']}")
+          f"now {current_time} is past the authorized deadline {payload['wall_clock_deadline']}")
 
     check("consecutive_failures", state.consecutive_failures < int(payload["max_consecutive_failed_batches"]),
           "consecutive_batch_failures_exhausted",
@@ -2121,6 +2378,27 @@ def _git(repo: str | Path, *args: str, timeout: float = 120) -> tuple[int, str, 
     return record.returncode, record.stdout.strip(), record.stderr.strip()
 
 
+def verify_checkpoint_object(repo: str | Path, checkpoint: dict) -> tuple[str, str]:
+    """The checkpoint commit exists here and carries exactly its recorded tree. Says nothing of HEAD."""
+    commit = str((checkpoint or {}).get("commit", ""))
+    tree = str((checkpoint or {}).get("tree", ""))
+    if not _COMMIT_RE.match(commit) or not _COMMIT_RE.match(tree):
+        raise HardStop("state_integrity",
+                       f"the functional checkpoint is missing or ambiguous: {checkpoint!r}")
+    code, _out, err = _git(repo, "cat-file", "-e", f"{commit}^{{commit}}")
+    if code != 0:
+        raise HardStop("state_integrity",
+                       f"functional checkpoint {commit[:12]} is not present in this repository: {err[:200]}",
+                       commit=commit)
+    code, commit_tree, _err = _git(repo, "rev-parse", f"{commit}^{{tree}}")
+    if code != 0 or commit_tree != tree:
+        raise HardStop("unexpected_tree_state",
+                       f"commit {commit[:12]} carries tree {commit_tree[:12] or 'unknown'}, not the recorded "
+                       f"functional checkpoint tree {tree[:12]}",
+                       observed_tree=commit_tree, expected_tree=tree)
+    return commit, tree
+
+
 def verify_functional_checkpoint(repo: str | Path, checkpoint: dict) -> dict:
     """Prove, before the Maker touches anything, that this worktree is exactly the inherited commit."""
     commit = str((checkpoint or {}).get("commit", ""))
@@ -2138,12 +2416,7 @@ def verify_functional_checkpoint(repo: str | Path, checkpoint: dict) -> dict:
         raise HardStop("unexpected_tree_state",
                        f"HEAD is {head[:12] or 'unknown'} but the derived child must start at {commit[:12]}",
                        head=head, expected=commit)
-    code, head_tree, _err = _git(repo, "rev-parse", f"{commit}^{{tree}}")
-    if code != 0 or head_tree != tree:
-        raise HardStop("unexpected_tree_state",
-                       f"commit {commit[:12]} carries tree {head_tree[:12] or 'unknown'}, not the recorded "
-                       f"functional checkpoint tree {tree[:12]}",
-                       observed_tree=head_tree, expected_tree=tree)
+    verify_checkpoint_object(repo, checkpoint)
     code, dirty, _err = _git(repo, "status", "--porcelain=v1", "--untracked-files=all")
     if code != 0 or dirty:
         raise HardStop("unexpected_tree_state",
@@ -2153,7 +2426,11 @@ def verify_functional_checkpoint(repo: str | Path, checkpoint: dict) -> dict:
 
 
 def cumulative_review_range(story_baseline_commit: str, integration_candidate_commit: str) -> str:
-    """The next Checker reviews the whole Story so far, not only the current child's patch."""
+    """The next Checker reviews the whole Story so far, not only the current child's patch.
+
+    The runtime applies this through `Runtime.review_base`: a child's Checker pack is the diff from
+    the Story baseline, never from the child's own functional checkpoint.
+    """
     return f"{story_baseline_commit}..{integration_candidate_commit}"
 
 
@@ -2264,6 +2541,10 @@ def assert_batch_matches_child_proposal(*, batch: dict, units: Iterable[Any], pr
                        f"unit {work_ref} specification differs from the hash frozen in Story Authority")
 
     scope_paths = list(getattr(unit, "scope_paths", []) or [])
+    scope_invalid = scope_path_violations(scope_paths)
+    if scope_invalid:
+        raise HardStop("scope_expansion", f"unit {work_ref} declares {SCOPE_PATH_INVALID}: {canonical_json(scope_invalid)}",
+                       violations=scope_invalid)
     outside = sorted({path for path in scope_paths if not _within(path, authorized_union)})
     if outside:
         raise HardStop("scope_expansion",

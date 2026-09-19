@@ -114,10 +114,14 @@ class OperationalLimitsTest(StoryCase):
         first = proposal("B013")
         auth.record_child_derived(first, story.verify_derivation(auth, first))
         # A second child while the first is still open is refused: AUTO_STORY v1 runs one at a time.
+        # Probed without the lease, so the refusal is not journaled: a journaled hard stop would be
+        # terminal (R18) and the lineage below must still continue under this authority.
+        auth.release()
         with self.assertRaises(story.HardStop) as active:
             story.verify_derivation(auth, proposal("B014"))
         self.assertEqual(active.exception.reason, "state_integrity")
         self.assertEqual(story.MAX_ACTIVE_CHILD_BATCHES, 1)
+        auth.acquire()
 
         auth.record_child_open("B013", branch="main", head_commit=commit, tree=tree)
         auth.record_child_closed(

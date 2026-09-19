@@ -153,24 +153,21 @@
         "required_mutation_targets": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1
+            "$ref": "#/$defs/scope_path"
           },
           "description": "Paths the Story is expected to change."
         },
         "conditional_mutation_targets": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1
+            "$ref": "#/$defs/scope_path"
           },
           "description": "Paths the Story may change if a factual finding demands it. A child batch may promote one of these to required."
         },
         "forbidden_paths": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1
+            "$ref": "#/$defs/scope_path"
           },
           "description": "Paths no batch under this authority may touch. A child may only add to this set."
         }
@@ -329,6 +326,12 @@
           }
         }
       ]
+    },
+    "scope_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!(?:.*/)?\\.{1,2}(?:/|$))(?!.*//)[^/\\\\:\\u0000-\\u001f\\u007f][^\\\\:\\u0000-\\u001f\\u007f]*$",
+      "description": "R23: a canonical repository-relative POSIX path. Absolute, drive and UNC forms, backslash or colon separators, empty components and '.'/'..' components are refused; one trailing '/' is tolerated. tl_story_authority.canonical_scope_path enforces the same rule in code."
     }
   }
 }

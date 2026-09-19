@@ -54,15 +54,23 @@ class ChildDerivationTest(StoryCase):
         auth = self.authority()
         self.assert_hard_stop(auth, self.base_child(auth, model_call_budget=15), "model_call_budget_exhausted")
 
-        # Spend eleven of fourteen, then try to hand the child the original ceiling again.
-        for index in range(11):
-            story.budgeted_authority_dispatch(
-                auth, child_batch_id="B013", logical_call_id=f"B013-call-{index}", role="maker",
-                phase="implementation", dispatch=lambda _a: {"state": "completed"})
-        self.assertEqual(auth.remaining_global_budget, 3)
-        self.assert_hard_stop(auth, self.base_child(auth, model_call_budget=14), "model_call_budget_exhausted")
-        self.assert_hard_stop(auth, self.base_child(auth, model_call_budget=4), "model_call_budget_exhausted")
-        proof = story.verify_derivation(auth, self.base_child(auth, model_call_budget=3))
+        def spent(authority_id: str) -> story.StoryAuthority:
+            # Spend eleven of fourteen, then try to hand the child the original ceiling again. Each
+            # attempt gets its own authority: a journaled hard stop is terminal (R18).
+            spender = self.authority(self.frozen_authority(authority_id=authority_id))
+            for index in range(11):
+                story.budgeted_authority_dispatch(
+                    spender, child_batch_id="B013", logical_call_id=f"B013-call-{index}", role="maker",
+                    phase="implementation", dispatch=lambda _a: {"state": "completed"})
+            self.assertEqual(spender.remaining_global_budget, 3)
+            return spender
+
+        for authority_id, requested in (("A002", 14), ("A003", 4)):
+            spender = spent(authority_id)
+            self.assert_hard_stop(spender, self.base_child(spender, model_call_budget=requested),
+                                  "model_call_budget_exhausted")
+        spender = spent("A004")
+        proof = story.verify_derivation(spender, self.base_child(spender, model_call_budget=3))
         self.assertEqual(proof["granted_model_calls"], 3)
 
     def test_child_rejects_effect_expansion(self) -> None:
@@ -79,6 +87,11 @@ class ChildDerivationTest(StoryCase):
 
         narrowed = dict(effects)
         narrowed["pull_request"] = False
+        # The stopped authority stays stopped even for a narrowed child (R18); a fresh one derives it.
+        with self.assertRaises(story.HardStop) as terminal:
+            story.verify_derivation(auth, self.base_child(auth, allowed_effects=narrowed))
+        self.assertIn(story.AUTHORITY_HARD_STOPPED, terminal.exception.detail)
+        auth = self.authority(self.frozen_authority(authority_id="A002", allowed_effects=effects))
         proof = story.verify_derivation(auth, self.base_child(auth, allowed_effects=narrowed))
         self.assertEqual({check["check"]: check["result"] for check in proof["checks"]}["effects_subset"], "pass")
 
@@ -240,9 +253,24 @@ class ChildDerivationTest(StoryCase):
             "checks": [],
         }
         dummy_proof["derivation_proof_digest"] = self._proof_digest(dummy_proof)
-        with self.assertRaises(story.HardStop) as raised_rec:
+        # On the authority that just hard-stopped, nothing is recorded at all (R18) ...
+        with self.assertRaises(story.HardStop) as terminal:
             auth.record_child_derived(proposal, dummy_proof)
+        self.assertIn(story.AUTHORITY_HARD_STOPPED, terminal.exception.detail)
+        # ... and on one that did not, the empty residual lineage itself is what refuses it.
+        other = self.authority(self.frozen_authority(authority_id="A002"))
+        self._setup_closed_predecessor(other)
+        other_proposal = story.derive_child_proposal(
+            authority=other, child_batch_id="B014", action_items=[], previous_child_id="B013",
+            model_call_budget=2, governance_base_commit=self.governance_base,
+            story_baseline_commit=self.governance_base)
+        other_proof = dict(dummy_proof, child_proposal_digest=story.digest_of(other_proposal))
+        other_proof.pop("derivation_proof_digest")
+        other_proof["derivation_proof_digest"] = self._proof_digest(other_proof)
+        with self.assertRaises(story.HardStop) as raised_rec:
+            other.record_child_derived(other_proposal, other_proof)
         self.assertEqual(raised_rec.exception.reason, "state_integrity")
+        self.assertNotIn("B014", other.refold().children)
 
         # Journal / events verification: no child_derived event for B014 was recorded
         auth.refold()
@@ -412,9 +440,11 @@ class ChildDerivationTest(StoryCase):
         state_closure = auth.state.children["B013"]["closure"]
         orig_closure_digest = state_closure["unresolved_action_items_digest"]
         state_closure["unresolved_action_items_digest"] = "d" * 64
+        # Checked without journaling (authority=None): a journaled stop would be terminal (R18) and
+        # this vector is only about the divergence being detected.
         with self.assertRaises(story.HardStop) as raised_closure:
             story.assert_child_proposal_within_envelope(
-                proposal, auth.payload, auth.state, auth, proof=proof,
+                proposal, auth.payload, auth.state, None, proof=proof,
                 derivation=valid_derivation_record, spec_paths=SPEC_PATHS)
         self.assertEqual(raised_closure.exception.reason, "state_integrity")
         state_closure["unresolved_action_items_digest"] = orig_closure_digest

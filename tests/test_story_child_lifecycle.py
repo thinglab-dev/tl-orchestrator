@@ -178,7 +178,6 @@ class TamperedLifecycleHistoryTest(ChildLifecycleCase):
                 envelope = self.frozen_authority(authority_id=f"A03{index}")
                 writer = self.authority(envelope)
                 self.forge(writer, name)
-                writer.release()
 
                 folded = writer.journal.fold()
                 self.assertEqual(folded.invalid_lines, 0, "the hash chain itself is intact")
@@ -196,23 +195,27 @@ class TamperedLifecycleHistoryTest(ChildLifecycleCase):
                     reader.load_child_derivation("B013")
                 self.assertEqual(loaded.exception.reason, "state_integrity")
 
-                with self.assertRaises(story.HardStop) as acquired:
-                    reader.acquire()
-                self.addCleanup(reader.release)
-                self.assertEqual(acquired.exception.reason, "state_integrity")
-
+                # The lease holder is refused exactly like everyone else: holding the lease never
+                # makes an impossible history usable.
                 dispatched: list[str] = []
                 with self.assertRaises(story.HardStop):
                     story.budgeted_authority_dispatch(
-                        reader, child_batch_id="B013", logical_call_id="B013-maker-r01", role="maker",
+                        writer, child_batch_id="B013", logical_call_id="B013-maker-r01", role="maker",
                         phase="implementation", dispatch=lambda attempt: dispatched.append(attempt) or {})
                 with self.assertRaises(story.HardStop):
-                    reader.record_child_failed("B013", reason="stopped")
+                    writer.record_child_failed("B013", reason="stopped")
                 with self.assertRaises(story.HardStop):
-                    reader.hard_stop("protected_path_violation", "must not be appended to a forged history")
+                    writer.hard_stop("protected_path_violation", "must not be appended to a forged history")
+                writer.release()
+
+                # R22: a refused acquire keeps no lease, so a second one meets the history, not the lock.
+                for _attempt in range(2):
+                    with self.assertRaises(story.HardStop) as acquired:
+                        reader.acquire()
+                    self.assertEqual(acquired.exception.reason, "state_integrity")
+                    self.assertIsNone(reader._lease)
                 self.assertEqual(dispatched, [], "nothing may be dispatched under an untrustworthy history")
                 self.assertEqual(writer.journal.path.read_bytes(), before, "nothing may be appended to it")
-                reader.release()
 
     def test_a_broken_hash_chain_is_refused_by_refold_too(self) -> None:
         auth = self.authority()

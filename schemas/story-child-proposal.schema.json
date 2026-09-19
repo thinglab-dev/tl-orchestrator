@@ -57,22 +57,19 @@
     "required_mutation_targets": {
       "type": "array",
       "items": {
-        "type": "string",
-        "minLength": 1
+        "$ref": "#/$defs/scope_path"
       }
     },
     "conditional_mutation_targets": {
       "type": "array",
       "items": {
-        "type": "string",
-        "minLength": 1
+        "$ref": "#/$defs/scope_path"
       }
     },
     "forbidden_paths": {
       "type": "array",
       "items": {
-        "type": "string",
-        "minLength": 1
+        "$ref": "#/$defs/scope_path"
       }
     },
     "protected_paths": {
@@ -217,6 +214,14 @@
           "description": "Start of the cumulative range the final Checker reviews: story_baseline_commit..integration_candidate_commit."
         }
       }
+    }
+  },
+  "$defs": {
+    "scope_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!(?:.*/)?\\.{1,2}(?:/|$))(?!.*//)[^/\\\\:\\u0000-\\u001f\\u007f][^\\\\:\\u0000-\\u001f\\u007f]*$",
+      "description": "R23: a canonical repository-relative POSIX path. Absolute, drive and UNC forms, backslash or colon separators, empty components and '.'/'..' components are refused; one trailing '/' is tolerated. tl_story_authority.canonical_scope_path enforces the same rule in code."
     }
   }
 }

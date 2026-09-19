@@ -94,6 +94,11 @@ EFFECT_CLASSES = (
     "none", "model_call", "local_write", "local_commit", "local_merge", "push",
     "pull_request", "pull_request_merge", "ci_query", "ci_rerun",
 )
+# Effects the absolute AUTO_STORY deadline forbids once it has passed. Queries, gates and
+# bookkeeping stay possible so a child can still be closed and reported after it.
+STORY_EXECUTIVE_EFFECTS = frozenset({
+    "model_call", "local_write", "local_commit", "local_merge", "push", "pull_request", "pull_request_merge", "ci_rerun",
+})
 NO_DISPATCH_STATES = {"start_failed", "invalid_input", "conflict"}  # transport proved nothing ran: not charged
 PHASES = ("prepare", "implement", "contain", "gates", "review", "commit", "push", "pull_request", "ci", "merge", "complete")
 ROLE_RESULT_KINDS = {"maker": "unit_result", "checker": "review_result"}
@@ -1322,6 +1327,11 @@ class Runtime:
         # proposal file beside the batch is not authority. Recover the objects that were actually
         # derived, re-hash them, and then bind the executable batch to that exact proposal.
         self.authority.refold()
+        if self.authority.state.hard_stops:
+            # R18: a hard stop is terminal. Reservations this child left open are settled
+            # conservatively (charged), which is the only thing still done under it; nothing binds.
+            self.authority.reconcile_orphan_reservations(self.batch_id)
+            self.authority.assert_not_hard_stopped()
         child_state = (self.authority.state.children.get(self.batch_id) or {}).get("state")
         if child_state in {"closed", "failed"}:
             # A terminal child is historical evidence. Rebinding it would let the runtime spend the
@@ -1333,10 +1343,7 @@ class Runtime:
                 child_batch_id=self.batch_id, state=child_state)
         # The unit specifications are what the runtime itself knows the Story's spec to be, so a
         # residual finding pointing at one of them is recomputed as a spec change here too.
-        spec_paths = []
-        for unit in self.units.values():
-            with contextlib.suppress(ValueError):
-                spec_paths.append(unit.spec_path.resolve().relative_to(self.repo.resolve()).as_posix())
+        spec_paths = unit_spec_paths(self.repo, self.units)
         proposal, proof = self.authority.load_child_derivation(self.batch_id, spec_paths=spec_paths)
         derivation = self.authority.state.children[self.batch_id]["derivation"]
         auth = self.batch["authorization"]
@@ -1365,18 +1372,28 @@ class Runtime:
         for unit in self.units.values():
             unit.do_not_touch = sorted(set(unit.do_not_touch) | forbidden)
 
-        checkpoint = proposal.get("functional_parent_checkpoint")
-        if checkpoint:
-            story_authority.verify_functional_checkpoint(self.repo, checkpoint)
-
-        self.child_proposal = proposal
         self.authority.refold()
         child_state = (self.authority.state.children.get(self.batch_id) or {}).get("state")
+        checkpoint = proposal.get("functional_parent_checkpoint")
+        if child_state == "derived":
+            # First open: the worktree must be exactly the inherited commit, clean.
+            if checkpoint:
+                story_authority.verify_functional_checkpoint(self.repo, checkpoint)
+        elif child_state == "open":
+            # Resume (R17): the child's own work is legitimately on top of where it opened. Prove
+            # continuity against what was journaled instead of demanding the clean start again.
+            self._verify_open_child_continuity(checkpoint)
+
+        self.child_proposal = proposal
         # T033: the protected paths hold before the child opens, and again before an open child
         # resumes; a violation here is journaled as a hard stop and the child never opens.
         self._assert_protected_paths("before child_open" if child_state == "derived" else "before resuming the child")
         if child_state == "derived":
-            branch = self.git.current_branch() or self.config.get("base_branch", "")
+            # A derived child integrates into the branch the Story started from, not wherever HEAD
+            # was detached to reach its functional checkpoint.
+            parent = (self.authority.state.children.get(proposal.get("parent_child_batch_id") or "") or {}).get("open") or {}
+            current = self.git.current_branch()
+            branch = parent.get("branch") or (current if current != "HEAD" else "") or self.config.get("base_branch", "")
             # The confirmed relation to the predecessor's closure is journaled with the open, so the
             # lineage this child was bound under survives as evidence next to it.
             self.authority.record_child_open(
@@ -1388,6 +1405,54 @@ class Runtime:
                 f"child batch {self.batch_id} is {child_state or 'unknown'} under story authority "
                 f"{self.authority.authority_id}; only a derived child opens and only an open child resumes",
                 child_batch_id=self.batch_id, state=child_state or "")
+
+    def _spec_paths(self) -> list[str]:
+        return unit_spec_paths(self.repo, self.units)
+
+    def _is_ancestor(self, ancestor: str, descendant: str) -> bool:
+        return run_argv([self.git.exe, "merge-base", "--is-ancestor", ancestor, descendant], self.repo, 60)["exit_code"] == 0
+
+    def _verify_open_child_continuity(self, checkpoint: dict | None) -> None:
+        """R17: an open child resumes only as the continuation of what its journals recorded.
+
+        The child opened at one commit (its functional checkpoint, when it has one); every commit
+        the batch journal recorded for it since — the prepared base, commits, crash checkpoints —
+        and HEAD itself must descend from that commit. A dirty tree or a HEAD that advanced is the
+        child's own work and is left to reconciliation; a history that does not continue the
+        opening point is a hard stop.
+        """
+        opened = (self.authority.state.children.get(self.batch_id) or {}).get("open") or {}
+        origin = str(opened.get("head_commit", ""))
+
+        def refuse(reason: str, detail: str, **evidence) -> None:
+            self.authority.hard_stop(reason, f"child_continuity: {detail}", child_batch_id=self.batch_id, **evidence)
+
+        if not _COMMIT_RE.match(origin):
+            refuse("state_integrity", f"the child_open of {self.batch_id} records no opening commit")
+        if checkpoint:
+            if origin != checkpoint.get("commit"):
+                refuse("state_integrity", f"{self.batch_id} opened at {origin[:12]}, not at its functional checkpoint "
+                       f"{str(checkpoint.get('commit'))[:12]}", opened_at=origin, checkpoint=checkpoint)
+            try:
+                story_authority.verify_checkpoint_object(self.repo, checkpoint)
+            except story_authority.HardStop as stop:
+                refuse(stop.reason, stop.detail, **stop.evidence)
+        fold = self.journal.fold()
+        journaled: list[tuple[str, str]] = [("HEAD", self.git.head())]
+        for step_id, step in fold.steps.items():
+            if step_id.endswith(":prepare") and step.get("status") == "ok":
+                base = str((step.get("result") or {}).get("base_commit") or "")
+                if base and base != origin:
+                    refuse("state_integrity", f"{step_id} journaled base {base[:12]}, not the opening commit {origin[:12]}",
+                           journaled=base, opened_at=origin)
+        for uid, record in fold.units.items():
+            journaled += [(f"{uid}.commit", record.commit), (f"{uid}.base_commit", record.base_commit)]
+            journaled += [(f"{uid}.checkpoint", commit) for commit in record.checkpoints]
+        for name, commit in journaled:
+            if commit and (not _COMMIT_RE.match(str(commit)) or not self._is_ancestor(origin, str(commit))):
+                refuse("unexpected_tree_state", f"{name} {str(commit)[:12]} does not descend from the opening commit "
+                       f"{origin[:12]}; resuming would continue a history this child never journaled",
+                       ref=name, commit=str(commit), opened_at=origin)
 
     def _assert_protected_paths(self, moment: str) -> None:
         """T033 inside the AUTO_STORY lifecycle: root and child protected paths hold against the tree.
@@ -1446,12 +1511,20 @@ class Runtime:
         if self.fold.events == 0:
             self.journal.append("batch_open", batch=self.batch_id, runtime_stamp=self.stamp, runtime_version=RUNTIME_VERSION,
                                 proposal_digest=self.batch["authorization"]["proposal_digest"], units=sorted(self.units),
-                                repo_head=self.git.head(), base_branch=self.config["base_branch"] or self.git.current_branch(),
+                                repo_head=self.git.head(), base_branch=self.config["base_branch"] or self._story_branch() or self.git.current_branch(),
                                 capabilities=self.policy.capabilities_report(),
                                 units_meta={uid: {"title": u.title} for uid, u in self.units.items()},
                                 budget={k: self.batch["budget"].get(k) for k in ("max_model_calls", "max_rework_rounds_per_unit")},
                                 roles={role: {k: cfg.get(k) for k in ("adapter", "model", "effort", "family")} for role, cfg in self.config["roles"].items()})
             self.fold = self.journal.fold()
+
+    def _story_branch(self) -> str:
+        """The branch this AUTO_STORY child integrates into, as its child_open recorded it."""
+        if self.authority is None:
+            return ""
+        opened = (self.authority.state.children.get(self.batch_id) or {}).get("open") or {}
+        branch = str(opened.get("branch") or "")
+        return "" if branch == "HEAD" else branch
 
     def release(self) -> None:
         if self.authority is not None:
@@ -1515,6 +1588,9 @@ class Runtime:
             # resume (related tests, diff), but the call already happened and was paid for.
             self.note(f"{step_id}: reused the journaled model result; the recompiled pack digest differs", step_id=step_id)
             return prior["result"]
+        if effect_class in STORY_EXECUTIVE_EFFECTS:
+            # R19: the Story's absolute deadline binds each new effect, not only the child's opening.
+            self._require_story_deadline(f"{step_id} ({effect_class})")
         tree_before = self.git.worktree_tree() if effect_class in {"model_call", "local_write", "local_commit", "local_merge"} else ""
         head_before = (self.git.head(), self.git.current_branch()) if effect_class == "model_call" else None
         self.journal.append("step_intent", step_id=step_id, batch=self.batch_id, unit=unit, phase=phase, type=intent.get("type", phase),
@@ -1583,11 +1659,15 @@ class Runtime:
             raise StopBatch(reason, f"{self.model_calls_consumed()} consumed + {needed_calls} needed > {max_calls}")
         if self.authority is not None:
             # The child allocation is a projection: the Story ceiling binds before the local one.
+            # R20: only a call that is actually needed is refused. A balance of exactly zero still
+            # lets the child close, deliver and report; the next reservation is what it stops.
             remaining = self.authority.remaining_global_budget
-            if remaining < needed_calls or remaining <= 0:
+            if remaining < needed_calls:
                 reason = "insufficient_budget_for_unit_verification" if needed_calls > 1 else "model_call_budget_exhausted"
                 raise StopBatch(reason, f"story authority {self.authority.authority_id} has {remaining} model "
                                         f"call(s) left and {needed_calls} are needed")
+            if needed_calls > 0:
+                self._require_story_deadline(f"{needed_calls} model call(s) for batch {self.batch_id}")
         max_wall = self.limits.get("max_wall_clock_seconds")
         if max_wall and self.fold.started_at:
             started = calendar.timegm(time.strptime(self.fold.started_at, "%Y-%m-%dT%H:%M:%SZ"))
@@ -1599,6 +1679,15 @@ class Runtime:
             if known and sum(known) >= float(cap):
                 raise StopBatch("cost_budget_exhausted", f"observed {sum(known):.2f} USD >= cap {cap}")
 
+    def _require_story_deadline(self, action: str) -> None:
+        """Journal a hard stop and stop the batch if the Story's absolute deadline has passed."""
+        if self.authority is None:
+            return
+        try:
+            self.authority.assert_deadline(action)
+        except story_authority.HardStop as stop:
+            raise StopBatch(stop.reason, stop.detail) from stop
+
     # ---- main loop ------------------------------------------------------------------------
 
     def run(self, max_units: int | None = None) -> str:
@@ -1606,6 +1695,9 @@ class Runtime:
         self.acquire()
         try:
             if self.fold.closed:
+                # A crash between closing the batch and journaling the child's terminal state
+                # leaves the child open; closing it here is idempotent.
+                self._close_child_batch(self.fold.batch_state)
                 return self.fold.batch_state
             self.reconcile()
             done = 0
@@ -1744,7 +1836,7 @@ class Runtime:
         closure = self.authority.record_child_closed(
             child_batch_id=self.batch_id, governance_base_commit=base, checker_reviewed_commit=commit,
             checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,
-            checker_verdict="changes_requested", unresolved_action_items=list(record.findings or []))
+            checker_verdict="changes_requested", unresolved_action_items=story_residual_items(record.findings or []))
         self.note(f"{uid}: functional checkpoint {commit[:12]} preserved at {ref}; a derived child batch starts there",
                   unit=uid, ref=ref, commit=commit, tree=tree)
         return closure
@@ -2030,7 +2122,7 @@ class Runtime:
         if attempt:
             step_id = f"{uid}:r{round_no}:checker:a{attempt}"
         result_rel = f"{RESULT_DIR_NAME}/{uid}/r{round_no}-checker.json"
-        base_commit = record.base_commit or self.git.head()
+        base_commit = self.review_base(record)
         tree = self.git.worktree_tree()
         gate_results = []
         for gate in gates_for(self.config, unit):
@@ -2084,6 +2176,23 @@ class Runtime:
             return {}
         self.unit_state(uid, "running", "", phase="implement", findings=items)
         return {"findings": [i for i in items if i.get("target") == "maker" or i.get("category") == "patch"] or items}
+
+    def review_base(self, record: UnitRecord) -> str:
+        """The commit the Checker's diff starts from.
+
+        Under AUTO_STORY a child's Checker reviews the Story cumulatively, from the immutable
+        story_baseline_commit, so work a predecessor left unapproved (and this child never touched)
+        is reviewed again before anything is delivered (R16). Elsewhere it is the unit's own base.
+        """
+        base_commit = record.base_commit or self.git.head()
+        if self.authority is None or self.child_proposal is None:
+            return base_commit
+        baseline = str((self.child_proposal.get("lineage") or {}).get("story_baseline_commit") or "")
+        if not _COMMIT_RE.match(baseline) or not self._is_ancestor(baseline, base_commit):
+            raise StopBatch("unexpected_tree_state",
+                            f"story_baseline_commit {baseline[:12] or 'missing'} is not an ancestor of the child base "
+                            f"{base_commit[:12]}; the cumulative review range would not cover the Story")
+        return baseline
 
     @staticmethod
     def _resolve_pending_verification(items: list, gate_results: list) -> tuple[list, list]:
@@ -2563,6 +2672,140 @@ class Runtime:
                 return "ok"
             raise UnitPark("parked", f"ci_{slice_['classification']}: {slice_['signature']}")
 
+    # ---- AUTO_STORY conductor (T032) --------------------------------------------------------
+
+    def run_story(self, max_units: int | None = None) -> str:
+        """Run this child batch and every child the Story Authority derives after it.
+
+        One human authorization covers the Story, so reaching the end of one child is not the end
+        of the run: a child closed `changes_requested` with strictly patch-only residual findings
+        is followed by the next child, derived from those findings, started exactly at the commit
+        the Checker reviewed; an approved child ends the Story and closes the authority. Anything
+        else — a stop, a hard stop, a failed or blocked child, a finding that is not patch-only —
+        returns control to the operator. Resuming with any batch of the lineage continues from the
+        child the authority says is current. `self.story_runtime` is the last child that ran.
+        """
+        runtime = self
+        self.story_runtime = self
+        while True:
+            if runtime.authority is None:
+                return runtime.run(max_units=max_units)
+            try:
+                child_state = runtime.authority.refold().child_state(runtime.batch_id)
+            except story_authority.HardStop as stop:
+                raise Refusal(f"{stop.reason}: {stop.detail}", 2) from stop
+            batch_state = ""
+            if child_state not in story_authority.CHILD_TERMINAL_STATES:
+                batch_state = runtime.run(max_units=max_units)
+                if batch_state == "in_progress":
+                    return batch_state
+            successor, outcome = runtime.advance_story(batch_state)
+            if successor is None:
+                return outcome
+            runtime = self.story_runtime = successor
+
+    def advance_story(self, batch_state: str = "") -> tuple["Runtime | None", str]:
+        """After this child: the next child to run, or None and the Story's outcome."""
+        authority = self.authority
+        try:
+            authority.acquire()
+        except story_authority.HardStop as stop:
+            raise Refusal(f"{stop.reason}: {stop.detail}", 2) from stop
+        try:
+            state = authority.refold()
+            if state.closed:
+                return None, "done" if state.close_state == "done" else "stopped"
+            if state.hard_stops:
+                return None, "stopped"
+            child = state.children.get(self.batch_id) or {}
+            if child.get("state") not in story_authority.CHILD_TERMINAL_STATES:
+                return None, batch_state or "in_progress"
+            successors = sorted(cid for cid, record in state.children.items()
+                                if (record.get("derivation") or {}).get("parent_child_batch_id") == self.batch_id)
+            if successors:
+                # Already derived (a crash after the derivation, or a resume with an older batch).
+                return self._successor_runtime(successors[0]), ""
+            closure = child.get("closure")
+            if closure is None:
+                return None, batch_state if batch_state in {"blocked", "stopped"} else "stopped"
+            if closure.get("checker_verdict") == "approved":
+                authority.close_authority(
+                    state="done", reason=f"child batch {self.batch_id} approved at {closure['checker_reviewed_commit']}")
+                return None, "done"
+            # changes_requested: the Story goes on only through a strictly patch-only derivation, and
+            # every refusal on the way is a journaled hard stop that hands the Story back.
+            this_proposal, _proof = authority.load_child_derivation(self.batch_id, spec_paths=self._spec_paths())
+            residual = list(closure.get("unresolved_action_items") or [])
+            successor_id = self._next_child_id(state)
+            proposal = story_authority.derive_child_proposal(
+                authority=authority, child_batch_id=successor_id, action_items=residual,
+                previous_child_id=self.batch_id, model_call_budget=None,
+                governance_base_commit=closure["governance_base_commit"],
+                story_baseline_commit=this_proposal["lineage"]["story_baseline_commit"])
+            proof = story_authority.verify_derivation(authority, proposal, action_items=residual,
+                                                      spec_paths=self._spec_paths())
+            authority.record_child_derived(proposal, proof)
+            return self._successor_runtime(successor_id), ""
+        except story_authority.HardStop:
+            return None, "stopped"  # journaled on the authority; its status.json carries the reason
+        finally:
+            authority.release()
+
+    def _next_child_id(self, state) -> str:
+        """The next free batch id after this one: never an id the authority or the disk already has."""
+        number = int(self.batch_id[1:])
+        while True:
+            number += 1
+            candidate = f"B{number:03d}"
+            if candidate not in state.children and not self._story_batch_path(candidate).exists():
+                return candidate
+
+    def _story_batch_path(self, child_batch_id: str) -> Path:
+        # Runtime state, excluded from the tree: a derived batch never dirties the checkpoint it starts at.
+        return self.authority.runtime_dir / "batches" / f"{child_batch_id}.json"
+
+    def _successor_batch(self, child_batch_id: str, proposal: dict, proof: dict) -> dict:
+        """The executable batch for a derived child: this batch, rebound to the child's derivation."""
+        batch = json.loads(json.dumps(self.batch))
+        batch["id"] = child_batch_id
+        batch["status"] = "in_progress"
+        batch["authorization"].update({
+            "child_proposal_digest": story_authority.digest_of(proposal),
+            "derivation_proof_digest": proof["derivation_proof_digest"],
+        })
+        batch["budget"].update({"max_model_calls": int(proposal["model_call_budget"]), "consumed_model_calls": 0,
+                                "reserved_model_calls": 0, "pending_call": None})
+        checkpoint = proposal.get("functional_parent_checkpoint") or {}
+        batch["execution"] = {"current_unit": None, "current_phase": None, "current_round": 0,
+                              "expected_tree_checkpoint": checkpoint.get("commit") or (self.batch.get("execution") or {}).get("expected_tree_checkpoint"),
+                              "completed_units": [], "stop_reason": None, "runtime_refs": {}}
+        return batch
+
+    def _successor_runtime(self, child_batch_id: str) -> "Runtime":
+        authority = self.authority
+        proposal, proof = authority.load_child_derivation(child_batch_id, spec_paths=self._spec_paths())
+        batch = self._successor_batch(child_batch_id, proposal, proof)
+        path = self._story_batch_path(child_batch_id)
+        if path.exists():
+            existing = read_json_file(path)
+            frozen = ("id", "authorization", "frozen_scope")
+            if any(existing.get(key) != batch.get(key) for key in frozen) or any(
+                    (existing.get("budget") or {}).get(key) != batch["budget"].get(key)
+                    for key in ("max_model_calls", "max_rework_rounds_per_unit")):
+                raise Refusal(f"state_integrity: {path.as_posix()} exists but is not the batch derived for "
+                              f"{child_batch_id}; it is never overwritten", 2)
+        else:
+            write_json_atomic(path, batch)
+        checkpoint = proposal.get("functional_parent_checkpoint")
+        if authority.state.child_state(child_batch_id) == "derived" and checkpoint:
+            # The child opens exactly at the unmerged commit the previous Checker reviewed.
+            if self.git.dirty_paths():
+                raise Refusal(f"unexpected_tree_state: the working tree is dirty; {child_batch_id} cannot start at "
+                              f"its functional checkpoint {checkpoint['commit'][:12]}", 2)
+            if self.git.head() != checkpoint["commit"]:
+                self.git.run("checkout", "--quiet", "--detach", checkpoint["commit"])
+        return Runtime(path, self.config_path, self.repo, self.state_dir.parent / child_batch_id, sleep=self.sleep)
+
     # ---- recovery -------------------------------------------------------------------------
 
     def reconcile(self) -> None:
@@ -2750,6 +2993,37 @@ class Runtime:
         return "released", {"detail": "no external effect; step will rerun"}
 
 
+def unit_spec_paths(repo: Path, units: dict) -> list[str]:
+    """The repository-relative specification paths of `units`, as the Story Authority compares them."""
+    spec_paths = []
+    for unit in units.values():
+        with contextlib.suppress(ValueError):
+            spec_paths.append(unit.spec_path.resolve().relative_to(Path(repo).resolve()).as_posix())
+    return spec_paths
+
+
+def story_residual_items(items: list) -> list[dict]:
+    """A Checker's action items in the form the Story Authority derives children from.
+
+    The runtime's review contract names `target`, `paths` and `summary`; the Story's patch-only
+    decision reads `target_role`, `location` and `required_action`. Nothing is inferred beyond
+    that renaming: an item without a path stays unprovable and returns the Story to the operator.
+    """
+    residual = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        if not entry.get("target_role") and item.get("target"):
+            entry["target_role"] = item["target"]
+        if not entry.get("location") and item.get("paths"):
+            entry["location"] = ", ".join(str(path) for path in item["paths"])
+        if not entry.get("required_action") and item.get("summary"):
+            entry["required_action"] = str(item["summary"])
+        residual.append(entry)
+    return residual
+
+
 class UnitPark(Exception):
     def __init__(self, state: str, reason: str, decision: dict | None = None):
         super().__init__(reason)
@@ -2795,6 +3069,19 @@ def status_projection(runtime: "Runtime") -> dict:
         "waiting": [u["unit"] for u in units if u["state"] in {"awaiting_operator", "parked"}],
         "next": next_unit, "units": units, "updated_at": now_iso(),
     }
+
+
+def story_projection(runtime: "Runtime", state: str) -> dict:
+    """The Story as the authority journal records it after a conducted run."""
+    authority = runtime.authority
+    with contextlib.suppress(story_authority.HardStop):
+        authority.refold()
+    folded = authority.state
+    return {"authority_id": authority.authority_id, "state": state, "closed": folded.closed,
+            "close_state": folded.close_state, "current_child": runtime.batch_id,
+            "children": {cid: child.get("state", "") for cid, child in sorted(folded.children.items())},
+            "hard_stops": [{"reason": e.get("reason"), "detail": e.get("detail")} for e in folded.hard_stops],
+            "remaining_global_budget": authority.remaining_global_budget}
 
 
 def project_batch(runtime: "Runtime") -> None:
@@ -2971,8 +3258,15 @@ def main(argv: list[str] | None = None) -> int:
                 runtime.acquire()
                 runtime.journal.append("decision", option="accept_stale_version", stamp=runtime.stamp)
                 runtime.refold()
-            state = runtime.run(max_units=args.max_units)
-            print(canonical(status_projection(runtime)))
+            if runtime.authority is not None:
+                # AUTO_STORY: the one authorization covers the Story, so the run continues through
+                # every derived child until the Story ends or needs the operator.
+                state = runtime.run_story(max_units=args.max_units)
+                final = runtime.story_runtime
+                print(canonical({**status_projection(final), "story": story_projection(final, state)}))
+            else:
+                state = runtime.run(max_units=args.max_units)
+                print(canonical(status_projection(runtime)))
             return {"done": 0, "in_progress": 0, "stopped": 2, "blocked": 3}.get(state, 2)
         runtime.fold = runtime.journal.fold()
         if args.command == "status":

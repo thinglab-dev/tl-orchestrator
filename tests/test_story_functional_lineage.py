@@ -51,7 +51,10 @@ class FunctionalLineageTest(StoryCase):
         governance_tree = self.git.tree(self.governance_base)
         self.assertNotEqual(self.reviewed_tree, governance_tree)
 
-        # A child that wants to restart from the governance base is refused.
+        # A child that wants to restart from the governance base is refused. Checked without the
+        # lease, so each refusal is raised but not journaled: a journaled hard stop is terminal
+        # (R18) and the correct child below must still be derivable under this authority.
+        self.auth.release()
         for wrong in (
             None,
             {"commit": self.governance_base, "tree": governance_tree, "child_batch_id": "B013"},
@@ -64,6 +67,8 @@ class FunctionalLineageTest(StoryCase):
                                         spec_paths=SPEC_PATHS)
             self.assertEqual(raised.exception.reason, "state_integrity", raised.exception.detail)
 
+        self.assertEqual(self.auth.refold().hard_stops, [], "refusals without the lease journal nothing")
+        self.auth.acquire()
         correct = {"commit": self.reviewed_commit, "tree": self.reviewed_tree, "child_batch_id": "B013"}
         proof = story.verify_derivation(self.auth, self.child(correct), action_items=self.residual,
                                         spec_paths=SPEC_PATHS)

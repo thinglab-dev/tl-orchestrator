@@ -127,6 +127,9 @@ class TailTamperTest(AnchorCase):
                 build(self, writer)
                 writer.release()
                 self.assertEqual(json.loads(self.lines(writer)[-1])["kind"], kind)
+                # A live lease holder, as the runtime is while its worker runs, sees the tail rewritten
+                # under it. Holding the lease never makes a rewritten tail usable.
+                holder = self.authority(envelope)
                 self.rewrite_line(writer, -1, mutate)
                 # The in-file chain alone is blind to this: the edited line has no successor.
                 self.assertEqual(writer.journal.fold().invalid_lines, 0)
@@ -135,24 +138,27 @@ class TailTamperTest(AnchorCase):
                 reader = self.authority(envelope, acquire=False)
                 self.assert_anchor_refusal(reader.refold)
 
-                fresh = self.authority(envelope, acquire=False)
-                self.assert_anchor_refusal(fresh.acquire)
-                self.addCleanup(fresh.release)
-                self.assert_anchor_refusal(lambda: fresh.load_child_derivation("B013"))
-                self.assert_anchor_refusal(lambda: fresh.reserve_call(
-                    logical_call_id="c9", global_attempt_id=f"{fresh.authority_id}-attempt-900",
+                self.assert_anchor_refusal(lambda: holder.load_child_derivation("B013"))
+                self.assert_anchor_refusal(lambda: holder.reserve_call(
+                    logical_call_id="c9", global_attempt_id=f"{holder.authority_id}-attempt-900",
                     child_batch_id="B013"))
                 dispatched: list[str] = []
                 self.assert_anchor_refusal(lambda: story.budgeted_authority_dispatch(
-                    fresh, child_batch_id="B013", logical_call_id="c9", role="maker", phase="implementation",
+                    holder, child_batch_id="B013", logical_call_id="c9", role="maker", phase="implementation",
                     dispatch=lambda attempt: dispatched.append(attempt) or {}))
-                self.assert_anchor_refusal(lambda: fresh.record_child_failed("B013", reason="stopped"))
-                self.assert_anchor_refusal(lambda: fresh.hard_stop("protected_path_violation", "not on a forged tail"))
-                self.assert_anchor_refusal(lambda: fresh.journal.append(
-                    "hard_stop", authority_id=fresh.authority_id, reason="direct", detail="", evidence={}))
+                self.assert_anchor_refusal(lambda: holder.record_child_failed("B013", reason="stopped"))
+                self.assert_anchor_refusal(lambda: holder.hard_stop("protected_path_violation", "not on a forged tail"))
+                self.assert_anchor_refusal(lambda: holder.journal.append(
+                    "hard_stop", authority_id=holder.authority_id, reason="direct", detail="", evidence={}))
+                holder.release()
+
+                # R22: a refused acquire keeps no lease, so the next one meets the anchor, not the lock.
+                for _attempt in range(2):
+                    fresh = self.authority(envelope, acquire=False)
+                    self.assert_anchor_refusal(fresh.acquire)
+                    self.assertIsNone(fresh._lease)
                 self.assertEqual(dispatched, [], "nothing may be dispatched on a tampered tail")
                 self.assertEqual(self.snapshot(writer), before, "neither the journal nor the anchor moved")
-                fresh.release()
 
     def test_intermediate_tamper_still_breaks_the_chain_and_the_anchor(self) -> None:
         """(4)"""

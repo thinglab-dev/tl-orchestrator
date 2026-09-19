@@ -90,21 +90,119 @@ class SchemaError(ValueError):
     """The schema itself is unusable; validating against it would prove nothing."""
 
 
+# Keywords whose value is one subschema, a list of subschemas, or a map of name -> subschema.
+_SUBSCHEMA_KEYWORDS = ("additionalProperties", "propertyNames", "items", "contains", "not", "if", "then", "else")
+_SUBSCHEMA_LIST_KEYWORDS = ("prefixItems", "allOf", "anyOf", "oneOf")
+_SUBSCHEMA_MAP_KEYWORDS = ("properties", "patternProperties", "$defs")
+_NON_NEGATIVE_KEYWORDS = ("minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties",
+                          "minContains", "maxContains")
+_NUMERIC_KEYWORDS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf")
+
+
+def _ref_target(ref: Any, root: Any) -> Any:
+    if not isinstance(ref, str) or not ref.startswith("#/"):
+        raise SchemaError(f"unsupported $ref {ref!r}: only local JSON pointers are implemented")
+    target: Any = root
+    for token in ref[2:].split("/"):
+        token = token.replace("~1", "/").replace("~0", "~")
+        if not isinstance(target, dict) or token not in target:
+            raise SchemaError(f"unresolvable $ref {ref!r}")
+        target = target[token]
+    return target
+
+
+def check_schema(schema: Any) -> None:
+    """Refuse, before any value is validated, a schema this validator could not apply in full.
+
+    Every subschema is visited, including anyOf/oneOf branches, if/then/else, $defs and anything
+    an instance may never reach, so an unsupported keyword cannot hide in a branch that happens
+    not to be evaluated. Keyword values are checked for the shape their semantics need, every
+    $ref must resolve locally, and a $ref chain that returns to itself without consuming any part
+    of the instance is refused as a cycle. A $ref with sibling keywords is supported: both apply.
+    """
+    root = schema
+
+    def visit(node: Any, where: str) -> None:
+        if isinstance(node, bool):
+            return
+        if not isinstance(node, dict):
+            raise SchemaError(f"{where}: schema node must be an object or boolean, got {type(node).__name__}")
+        unsupported = sorted(set(node) - SUPPORTED_KEYWORDS)
+        if unsupported:
+            raise SchemaError(f"{where}: unsupported schema keyword(s) {unsupported}")
+        if "$ref" in node:
+            seen = [node["$ref"]]
+            target = _ref_target(node["$ref"], root)
+            while isinstance(target, dict) and "$ref" in target:
+                if target["$ref"] in seen:
+                    raise SchemaError(f"{where}: cyclic $ref chain through {target['$ref']!r}")
+                seen.append(target["$ref"])
+                target = _ref_target(target["$ref"], root)
+            if not isinstance(target, (dict, bool)):
+                raise SchemaError(f"{where}: $ref {node['$ref']!r} does not resolve to a schema")
+        if "type" in node:
+            names = node["type"] if isinstance(node["type"], list) else [node["type"]]
+            for name in names:
+                if name not in {"object", "array", "string", "integer", "number", "boolean", "null"}:
+                    raise SchemaError(f"{where}: unknown type name {name!r}")
+        if "enum" in node and not isinstance(node["enum"], list):
+            raise SchemaError(f"{where}: enum must be an array")
+        if "required" in node and (not isinstance(node["required"], list)
+                                   or not all(isinstance(name, str) for name in node["required"])):
+            raise SchemaError(f"{where}: required must be an array of strings")
+        if "dependentRequired" in node:
+            value = node["dependentRequired"]
+            if not isinstance(value, dict) or not all(
+                    isinstance(names, list) and all(isinstance(n, str) for n in names) for names in value.values()):
+                raise SchemaError(f"{where}: dependentRequired must map names to arrays of strings")
+        if "uniqueItems" in node and not isinstance(node["uniqueItems"], bool):
+            raise SchemaError(f"{where}: uniqueItems must be a boolean")
+        for keyword in _NON_NEGATIVE_KEYWORDS:
+            value = node.get(keyword)
+            if keyword in node and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+                raise SchemaError(f"{where}: {keyword} must be a non-negative integer")
+        for keyword in _NUMERIC_KEYWORDS:
+            value = node.get(keyword)
+            if keyword in node and (not isinstance(value, (int, float)) or isinstance(value, bool)):
+                raise SchemaError(f"{where}: {keyword} must be a number")
+        if "multipleOf" in node and node["multipleOf"] <= 0:
+            raise SchemaError(f"{where}: multipleOf must be greater than zero")
+        for keyword in ("pattern",):
+            if keyword in node:
+                try:
+                    re.compile(node[keyword])
+                except (re.error, TypeError) as exc:
+                    raise SchemaError(f"{where}: {keyword} is not a valid regular expression: {exc}") from exc
+        for keyword in _SUBSCHEMA_KEYWORDS:
+            if keyword in node:
+                visit(node[keyword], f"{where}/{keyword}")
+        for keyword in _SUBSCHEMA_LIST_KEYWORDS:
+            if keyword in node:
+                if not isinstance(node[keyword], list) or (keyword != "prefixItems" and not node[keyword]):
+                    raise SchemaError(f"{where}: {keyword} must be a non-empty array of schemas")
+                for index, subschema in enumerate(node[keyword]):
+                    visit(subschema, f"{where}/{keyword}/{index}")
+        for keyword in _SUBSCHEMA_MAP_KEYWORDS:
+            if keyword in node:
+                if not isinstance(node[keyword], dict):
+                    raise SchemaError(f"{where}: {keyword} must be an object of schemas")
+                for name, subschema in node[keyword].items():
+                    if keyword == "patternProperties":
+                        try:
+                            re.compile(name)
+                        except re.error as exc:
+                            raise SchemaError(f"{where}/{keyword}: {name!r} is not a valid regular expression") from exc
+                    visit(subschema, f"{where}/{keyword}/{name}")
+
+    visit(schema, "#")
+
+
 def _resolve_ref(node: Any, root: dict, seen: tuple = ()) -> dict:
-    while isinstance(node, dict) and "$ref" in node:
-        ref = node["$ref"]
-        if not isinstance(ref, str) or not ref.startswith("#/"):
-            raise SchemaError(f"unsupported $ref {ref!r}: only local JSON pointers are implemented")
-        if ref in seen:
-            raise SchemaError(f"cyclic $ref chain through {ref!r}")
-        seen = seen + (ref,)
-        target: Any = root
-        for token in ref[2:].split("/"):
-            token = token.replace("~1", "/").replace("~0", "~")
-            if not isinstance(target, dict) or token not in target:
-                raise SchemaError(f"unresolvable $ref {ref!r}")
-            target = target[token]
-        node = target
+    """The node itself as an object; a boolean schema becomes its object equivalent.
+
+    A `$ref` is no longer replaced by its target here: validate_json_schema applies the target
+    and the sibling keywords of the same node, as Draft 2020-12 requires.
+    """
     if isinstance(node, bool):
         return {} if node else {"not": {}}
     if not isinstance(node, dict):
@@ -141,14 +239,32 @@ def _equal(left: Any, right: Any) -> bool:
     return left == right
 
 
-def validate_json_schema(value: Any, schema: Any, root: dict | None = None, path: str = "$") -> list[str]:
-    """Validate `value` against a Draft 2020-12 subset. Returns every error found."""
-    root = root if root is not None else (schema if isinstance(schema, dict) else {})
+def validate_json_schema(value: Any, schema: Any, root: dict | None = None, path: str = "$",
+                         _active: tuple = ()) -> list[str]:
+    """Validate `value` against a Draft 2020-12 subset. Returns every error found.
+
+    Called without `root`, the whole schema is checked first (see check_schema), so nothing it
+    contains can be skipped silently by the branches this particular value happens to visit.
+    """
+    if root is None:
+        check_schema(schema)
+        root = schema if isinstance(schema, dict) else {}
     node = _resolve_ref(schema, root)
     unsupported = sorted(set(node) - SUPPORTED_KEYWORDS)
     if unsupported:
         raise SchemaError(f"{path}: unsupported schema keyword(s) {unsupported}")
-    errors: list[str] = []
+    if "$ref" in node:
+        # Applying the same schema node to the same value again, without consuming any of it, can
+        # never terminate: refuse the schema instead of recursing forever.
+        key = (id(node), path)
+        if key in _active:
+            raise SchemaError(f"{path}: cyclic $ref application through {node['$ref']!r}")
+        errors = validate_json_schema(value, _ref_target(node["$ref"], root), root, path, _active + (key,))
+        siblings = {k: v for k, v in node.items() if k != "$ref"}
+        if set(siblings) - ANNOTATION_KEYWORDS:
+            errors.extend(validate_json_schema(value, siblings, root, path, _active + (key,)))
+        return errors
+    errors = []
 
     if "const" in node and not _equal(value, node["const"]):
         return [f"{path}: expected const {node['const']!r}, got {value!r}"]
@@ -235,20 +351,22 @@ def validate_json_schema(value: Any, schema: Any, root: dict | None = None, path
             if "propertyNames" in node:
                 errors.extend(validate_json_schema(name, node["propertyNames"], root, f"{path}:name({name})"))
 
+    # These apply to the same value at the same location, so `_active` travels with them: a
+    # cycle through allOf, anyOf, oneOf, not or if/then/else is still a cycle.
     for subschema in node.get("allOf") or []:
-        errors.extend(validate_json_schema(value, subschema, root, path))
-    if "anyOf" in node and not any(not validate_json_schema(value, s, root, path) for s in node["anyOf"]):
+        errors.extend(validate_json_schema(value, subschema, root, path, _active))
+    if "anyOf" in node and not any(not validate_json_schema(value, s, root, path, _active) for s in node["anyOf"]):
         errors.append(f"{path}: value matches no branch of anyOf")
     if "oneOf" in node:
-        matched = sum(1 for s in node["oneOf"] if not validate_json_schema(value, s, root, path))
+        matched = sum(1 for s in node["oneOf"] if not validate_json_schema(value, s, root, path, _active))
         if matched != 1:
             errors.append(f"{path}: expected exactly one matching oneOf branch, matched {matched}")
-    if "not" in node and not validate_json_schema(value, node["not"], root, path):
+    if "not" in node and not validate_json_schema(value, node["not"], root, path, _active):
         errors.append(f"{path}: value must not match the 'not' subschema")
     if "if" in node:
-        branch = "then" if not validate_json_schema(value, node["if"], root, path) else "else"
+        branch = "then" if not validate_json_schema(value, node["if"], root, path, _active) else "else"
         if branch in node:
-            errors.extend(validate_json_schema(value, node[branch], root, path))
+            errors.extend(validate_json_schema(value, node[branch], root, path, _active))
     return errors
 
 
@@ -259,7 +377,7 @@ def validate_against_schema_file(data: Any, schema_path: str | Path) -> tuple[bo
     except (OSError, ValueError) as exc:
         return False, [f"schema unavailable at {schema_path}: {exc}"]
     try:
-        errors = validate_json_schema(data, schema, schema)
+        errors = validate_json_schema(data, schema)
     except SchemaError as exc:
         return False, [f"schema unusable: {exc}"]
     return not errors, errors

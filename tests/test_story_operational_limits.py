@@ -22,6 +22,12 @@ class OperationalLimitsTest(StoryCase):
         super().setUp()
         self.auth = self.authority(self.baseline_authority())
 
+    def open_child(self, auth: story.StoryAuthority, child_id: str) -> None:
+        auth.journal.append("child_derived", authority_id=auth.authority_id, child_batch_id=child_id,
+                            granted_model_calls=2)
+        auth.refold()
+        auth.record_child_open(child_id, branch="main", head_commit=self.git.head(), tree=self.git.tree())
+
     def test_max_consecutive_failures_halts_auto_story(self) -> None:
         """25. N child batches in a row without progress stop the Story for the operator.
 
@@ -29,10 +35,14 @@ class OperationalLimitsTest(StoryCase):
         stops the Story."""
         auth = self.authority(self.frozen_authority(authority_id="A010", max_child_batches=6))
         self.assertEqual(auth.payload["max_consecutive_failed_batches"], 2)
+        # Only an open child can fail (new -> derived -> open -> failed); the derivation itself is
+        # not what this counterfactual is about, so it is journaled directly.
+        self.open_child(auth, "B013")
         auth.record_child_failed("B013", reason="unrecoverable_harness_failure", detail="adapter never started")
         self.assertEqual(auth.state.consecutive_failures, 1)
         auth.assert_failure_streak()  # one failure is not yet the limit
 
+        self.open_child(auth, "B014")
         auth.record_child_failed("B014", reason="unrecoverable_harness_failure", detail="adapter never started")
         self.assertEqual(auth.state.consecutive_failures, 2)
         with self.assertRaises(story.HardStop) as raised:
@@ -58,6 +68,7 @@ class OperationalLimitsTest(StoryCase):
             authority=auth, child_batch_id="B013", action_items=[], previous_child_id=None,
             model_call_budget=4, governance_base_commit=commit, story_baseline_commit=commit)
         auth.record_child_derived(first, story.verify_derivation(auth, first))
+        auth.record_child_open("B013", branch="main", head_commit=commit, tree=tree)
         auth.record_child_closed(
             child_batch_id="B013", governance_base_commit=commit, checker_reviewed_commit=commit,
             checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,
@@ -108,6 +119,7 @@ class OperationalLimitsTest(StoryCase):
         self.assertEqual(active.exception.reason, "state_integrity")
         self.assertEqual(story.MAX_ACTIVE_CHILD_BATCHES, 1)
 
+        auth.record_child_open("B013", branch="main", head_commit=commit, tree=tree)
         auth.record_child_closed(
             child_batch_id="B013", governance_base_commit=commit, checker_reviewed_commit=commit,
             checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,
@@ -115,6 +127,7 @@ class OperationalLimitsTest(StoryCase):
         residual = [self.patch_item("R5")]
         second = proposal("B014", "B013", residual)
         auth.record_child_derived(second, story.verify_derivation(auth, second, action_items=residual))
+        auth.record_child_open("B014", branch="main", head_commit=commit, tree=tree)
         auth.record_child_closed(
             child_batch_id="B014", governance_base_commit=commit, checker_reviewed_commit=commit,
             checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,

@@ -1279,6 +1279,7 @@ class Runtime:
         os.environ["GIT_CONFIG_COUNT"] = str(max(hooks_count, slot + 1))
         self.git = Git(self.repo, self.config["git_executable"])
         self.authority = None
+        self.child_proposal = None
         self.barrier_report = None
         self.authority_mode = str(self.batch["authorization"].get("story_authority_mode", "direct_proposal"))
         barrier_dir = self.state_dir / "cognitive-barrier" if self.authority_mode == "AUTO_STORY" else None
@@ -1368,8 +1369,12 @@ class Runtime:
         if checkpoint:
             story_authority.verify_functional_checkpoint(self.repo, checkpoint)
 
+        self.child_proposal = proposal
         self.authority.refold()
         child_state = (self.authority.state.children.get(self.batch_id) or {}).get("state")
+        # T033: the protected paths hold before the child opens, and again before an open child
+        # resumes; a violation here is journaled as a hard stop and the child never opens.
+        self._assert_protected_paths("before child_open" if child_state == "derived" else "before resuming the child")
         if child_state == "derived":
             branch = self.git.current_branch() or self.config.get("base_branch", "")
             # The confirmed relation to the predecessor's closure is journaled with the open, so the
@@ -1383,6 +1388,35 @@ class Runtime:
                 f"child batch {self.batch_id} is {child_state or 'unknown'} under story authority "
                 f"{self.authority.authority_id}; only a derived child opens and only an open child resumes",
                 child_batch_id=self.batch_id, state=child_state or "")
+
+    def _assert_protected_paths(self, moment: str) -> None:
+        """T033 inside the AUTO_STORY lifecycle: root and child protected paths hold against the tree.
+
+        read_only is judged against the Story baseline the child was derived under, so a change
+        made in an earlier round, or by an earlier child of the lineage, still counts;
+        exact_file_hash and exact_set_snapshot judge the tree as it is now. A violation is journaled
+        on the Story Authority as a hard stop and raised; nothing downstream of it runs.
+        """
+        if self.authority is None:
+            return
+        if self.child_proposal is None:
+            self.authority.hard_stop("state_integrity",
+                                     f"{moment}: the child proposal was never bound; protected paths cannot be verified")
+        lineage = self.child_proposal.get("lineage") or {}
+        try:
+            story_authority.assert_protected_paths_intact(
+                self.repo, self.authority.payload,
+                child_protected_paths=self.child_proposal.get("protected_paths") or [],
+                baseline_commit=str(lineage.get("story_baseline_commit") or ""))
+        except story_authority.HardStop as stop:
+            self.authority.hard_stop(stop.reason, f"{moment}: {stop.detail}", moment=moment, **stop.evidence)
+
+    def _require_protected_paths(self, moment: str) -> None:
+        """The same verification inside a running batch, where a violation stops the batch."""
+        try:
+            self._assert_protected_paths(moment)
+        except story_authority.HardStop as stop:
+            raise StopBatch(stop.reason, stop.detail) from stop
 
     def acquire(self) -> None:
         if self._lease is not None:
@@ -1848,6 +1882,9 @@ class Runtime:
             record.round = round_no
             self.unit_state(uid, "running", "", phase="implement", round=round_no)
             outcome = self.implement(unit, round_no, feedback)
+            # T033: whatever the Maker returned, the tree it left is checked before any containment,
+            # gate, review or commit can act on it.
+            self._require_protected_paths(f"after the Maker of {uid} round {round_no}")
             if outcome == "retry":
                 record.round -= 1
                 continue
@@ -2138,7 +2175,8 @@ class Runtime:
             if record.tree and tree != record.tree:
                 raise UnitPark("awaiting_operator", f"working tree {tree[:12]} differs from the reviewed tree {record.tree[:12]}; nothing committed",
                                decision={"options": ["retry", "skip"]})
-            message = f"{uid}: {unit.title}\n\nbatch: {self.batch_id}\nspec_revision: {unit.spec_revision}\ntree: {tree}"
+            self._require_protected_paths(f"before the commit of {uid}")
+            message = f"{uid}:{unit.title}\n\nbatch: {self.batch_id}\nspec_revision: {unit.spec_revision}\ntree: {tree}"
 
             def commit(intent: dict) -> dict:
                 self.git.run("add", "-A", "--", ".")

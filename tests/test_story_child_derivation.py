@@ -117,6 +117,7 @@ class ChildDerivationTest(StoryCase):
         first = self.base_child(auth)
         proof = story.verify_derivation(auth, first)
         auth.record_child_derived(first, proof)
+        auth.record_child_open("B013", branch="main", head_commit=self.governance_base, tree=self.git.tree())
         auth.record_child_closed(
             child_batch_id="B013", governance_base_commit=self.governance_base,
             checker_reviewed_commit=self.governance_base, checker_reviewed_tree=self.git.tree(),

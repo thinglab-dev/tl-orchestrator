@@ -205,20 +205,66 @@ class ProtectedPathContainmentTest(StoryCase):
 
     @contextlib.contextmanager
     def filesystem_spy(self):
-        """Record every path the validator stats, reads, walks or dereferences."""
+        """Record the absolute path behind every access the validator makes: stat, open, read,
+        list, walk or dereference, by pathname or through a descriptor.
+
+        A name used relative to a directory descriptor is recorded as the path it designates under
+        that descriptor, and an access through a descriptor the spy never saw opened is recorded as
+        unattributable, which fails the containment assertion rather than being ignored.
+        """
         touched: list[str] = []
+        opened: dict[int, str] = {}
+
+        def where(target, dir_fd=None) -> str:
+            if isinstance(target, int):
+                return opened.get(target, f"<unattributable descriptor {target}>")
+            if dir_fd is not None:
+                base = opened.get(dir_fd, f"<unattributable descriptor {dir_fd}>")
+                return os.path.normpath(os.path.join(base, os.fspath(target)))
+            return os.path.abspath(os.fspath(target))
 
         def spy(original):
-            def wrapper(target, *args, **kwargs):
-                touched.append(os.fspath(target))
+            def wrapper(target=".", *args, **kwargs):
+                touched.append(where(target, kwargs.get("dir_fd")))
                 return original(target, *args, **kwargs)
+            return wrapper
+
+        def spy_open(original):
+            def wrapper(target, *args, **kwargs):
+                path = where(target, kwargs.get("dir_fd"))
+                touched.append(path)
+                descriptor = original(target, *args, **kwargs)
+                opened[descriptor] = path
+                return descriptor
+            return wrapper
+
+        def spy_dup(original):
+            def wrapper(descriptor):
+                duplicate = original(descriptor)
+                opened[duplicate] = where(descriptor)
+                return duplicate
+            return wrapper
+
+        def spy_close(original):
+            def wrapper(descriptor):
+                opened.pop(descriptor, None)
+                return original(descriptor)
+            return wrapper
+
+        def spy_path(original):
+            def wrapper(self_path, *args, **kwargs):
+                touched.append(os.path.abspath(os.fspath(self_path)))
+                return original(self_path, *args, **kwargs)
             return wrapper
 
         with contextlib.ExitStack() as stack:
             for name in ("is_symlink", "is_file", "is_dir", "read_bytes", "lstat", "stat"):
-                stack.enter_context(mock.patch.object(Path, name, spy(getattr(Path, name))))
-            for name in ("walk", "readlink", "lstat", "stat"):
+                stack.enter_context(mock.patch.object(Path, name, spy_path(getattr(Path, name))))
+            for name in ("walk", "readlink", "lstat", "stat", "listdir", "scandir", "fstat", "read"):
                 stack.enter_context(mock.patch.object(plan_validator.os, name, spy(getattr(os, name))))
+            stack.enter_context(mock.patch.object(plan_validator.os, "open", spy_open(os.open)))
+            stack.enter_context(mock.patch.object(plan_validator.os, "dup", spy_dup(os.dup)))
+            stack.enter_context(mock.patch.object(plan_validator.os, "close", spy_close(os.close)))
             yield touched
 
     def assert_nothing_outside_touched(self, touched: list[str]) -> None:
@@ -313,18 +359,22 @@ class ProtectedPathContainmentTest(StoryCase):
                       OSError(5, "Input/output error", str(self.root / "docs/ARCH.md"))):
             for item in (reference, single):
                 with self.subTest(type(error).__name__, policy=item["policy"]):
-                    with mock.patch.object(Path, "read_bytes", side_effect=error):
+                    # Bytes are read only through the descriptor opened without following links.
+                    with mock.patch.object(plan_validator.os, "read", side_effect=error) as read:
                         violations = verify(self.root, [item])
+                    self.assertTrue(read.called, "the injected fault was never reached")
                     self.assertEqual([v["violation"] for v in violations], ["protected_path_unreadable"])
                     self.assertEqual(violations[0]["path"], str(self.root / "docs/ARCH.md"))
                     self.assertIn(type(error).__name__, violations[0]["detail"])
                     self.assertIn(error.strerror, violations[0]["detail"])
 
         # An unreadable directory is not a silently shorter snapshot.
-        with mock.patch.object(plan_validator.os, "walk",
-                               side_effect=PermissionError(13, "Permission denied", str(self.root / "docs"))):
+        with mock.patch.object(plan_validator.os, "listdir",
+                               side_effect=PermissionError(13, "Permission denied", str(self.root / "docs"))) as listing:
             violations = verify(self.root, [reference])
+        self.assertTrue(listing.called, "the injected fault was never reached")
         self.assertEqual([v["violation"] for v in violations], ["protected_path_unreadable"])
+        self.assertEqual(violations[0]["path"], str(self.root / "docs"))
         if hasattr(os, "geteuid") and os.geteuid() != 0:
             private = self.root / "docs" / "private"
             private.mkdir()
@@ -336,7 +386,7 @@ class ProtectedPathContainmentTest(StoryCase):
 
         # Through the Story Authority the violation is a hard stop that carries the detail.
         payload = {"protected_paths": [single]}
-        with mock.patch.object(Path, "read_bytes", side_effect=PermissionError(13, "Permission denied")):
+        with mock.patch.object(plan_validator.os, "read", side_effect=PermissionError(13, "Permission denied")):
             with self.assertRaises(story.HardStop) as raised:
                 story.assert_protected_paths_intact(self.root, payload)
         self.assertEqual(raised.exception.reason, "protected_path_violation")
@@ -387,6 +437,177 @@ class ProtectedPathContainmentTest(StoryCase):
             story.verify_derivation(auth, proposal)
         self.assertEqual(raised.exception.reason, "protected_path_violation")
         self.assertIn("protected_path_pattern_invalid", raised.exception.detail)
+
+    # ---- R12: read_only proves filesystem containment too --------------------------------
+
+    def test_read_only_through_a_symlinked_directory_is_refused_without_external_access(self) -> None:
+        if not can_symlink(self.root):
+            self.skipTest("this platform does not allow creating symlinks")
+        os.symlink(self.outside, self.root / "linked")
+        self.git.commit_all("track the link itself")
+        self.assertTrue((self.root / "linked" / "sentinel.txt").is_file(), "the link does reach the sentinel")
+        read_only = [{"pattern": "linked/sentinel.txt", "policy": "read_only"}]
+        # Git sees only the link inode, so a change behind it is not a change git can report.
+        self.assertEqual(plan_validator.git_changed_paths(self.root), [])
+        for dirty in ([], None):
+            with self.subTest(dirty_paths=dirty), self.filesystem_spy() as touched:
+                violations = verify(self.root, read_only, dirty_paths=dirty)
+            self.assert_nothing_outside_touched(touched)
+            self.assertEqual([v["violation"] for v in violations], ["protected_path_pattern_invalid"])
+            self.assertEqual(violations[0]["policy"], "read_only")
+            self.assertIn("'linked' is a symlink", violations[0]["detail"])
+        with self.assertRaises(story.HardStop) as raised:
+            story.assert_protected_paths_intact(self.root, {"protected_paths": read_only}, dirty_paths=[])
+        self.assertEqual(raised.exception.reason, "protected_path_violation")
+        # The link as the final component is repository content git does track; it is not refused.
+        self.assertEqual(verify(self.root, [{"pattern": "linked", "policy": "read_only"}], dirty_paths=[]), [])
+
+    # ---- R10: no window between the containment check and the read -----------------------
+
+    def swap_on_access(self, trigger, swap):
+        """Run `swap` once, at the first filesystem access `trigger(name, kind)` selects.
+
+        Wraps every stat, open, walk and scan primitive, by pathname or by descriptor, so the swap
+        happens at the same logical point whatever implementation is under test: after the
+        verifier has looked at a component and before it uses what that component names.
+        """
+        fired: list[str] = []
+
+        def hook(kind, original):
+            def wrapper(target=".", *args, **kwargs):
+                name = os.fspath(target) if not isinstance(target, int) else ""
+                if not fired and name and trigger(name, kind):
+                    fired.append(f"{kind}:{name}")
+                    swap()
+                return original(target, *args, **kwargs)
+            return wrapper
+
+        stack = contextlib.ExitStack()
+        for kind in ("open", "stat", "lstat", "scandir", "listdir", "walk"):
+            stack.enter_context(mock.patch.object(plan_validator.os, kind, hook(kind, getattr(os, kind))))
+        for kind in ("is_symlink", "is_file", "is_dir", "read_bytes", "lstat", "stat"):
+            stack.enter_context(mock.patch.object(Path, kind, hook(kind, getattr(Path, kind))))
+        return stack, fired
+
+    def test_intermediate_swapped_for_an_external_symlink_is_never_followed(self) -> None:
+        """An attacker keeps the pristine bytes outside, tampers the protected file, and swaps the
+        checked intermediate directory for a link to the pristine copy between check and use."""
+        if not can_symlink(self.root):
+            self.skipTest("this platform does not allow creating symlinks")
+        pristine = (self.root / "docs" / "ARCH.md").read_bytes()
+        expected = plan_validator.sha256_hex(pristine)
+        decoy = self.outside / "decoy"
+        decoy.mkdir()
+        (decoy / "ARCH.md").write_bytes(pristine)
+        tampered = b"tampered protected content\n"
+        (self.root / "docs" / "ARCH.md").write_bytes(tampered)
+        held = self.root / "held-docs"
+
+        def swap() -> None:
+            os.rename(self.root / "docs", held)
+            os.symlink(decoy, self.root / "docs")
+
+        def restore() -> None:
+            if (self.root / "docs").is_symlink():
+                os.unlink(self.root / "docs")
+            if held.exists():
+                os.rename(held, self.root / "docs")
+
+        item = {"pattern": "docs/ARCH.md", "policy": "exact_file_hash", "sha256": expected}
+        # Two windows: right before the final component is used, and right before the intermediate
+        # directory itself is used. Neither may reach the decoy or report the pristine hash.
+        windows = {
+            "after_intermediate_check": lambda name, kind: os.path.basename(name) == "ARCH.md",
+            "before_intermediate_use": lambda name, kind: os.path.basename(name) == "docs" and kind == "open",
+        }
+        for window, trigger in windows.items():
+            with self.subTest(window):
+                self.addCleanup(restore)
+                with self.filesystem_spy() as touched:
+                    stack, fired = self.swap_on_access(trigger, swap)
+                    with stack:
+                        violations = verify(self.root, [item], dirty_paths=[])
+                restore()
+                self.assertTrue(fired, f"the swap never happened in window {window}")
+                self.assert_nothing_outside_touched(touched)
+                self.assertTrue(violations, "a swap must never verify as intact")
+                observed = {v.get("observed") for v in violations}
+                self.assertNotIn(expected, observed, "the pristine external bytes were read")
+                if window == "after_intermediate_check":
+                    # The directory descriptor already held is what is read: the tampered bytes.
+                    self.assertEqual([v["violation"] for v in violations], ["protected_file_hash_mismatch"])
+                    self.assertEqual(violations[0]["observed"], plan_validator.sha256_hex(tampered))
+                else:
+                    self.assertEqual([v["violation"] for v in violations], ["protected_path_pattern_invalid"])
+                    self.assertIn("'docs' is a symlink", violations[0]["detail"])
+
+    def test_directory_swapped_during_a_snapshot_walk_is_never_descended(self) -> None:
+        if not can_symlink(self.root):
+            self.skipTest("this platform does not allow creating symlinks")
+        self.write("docs/sub/NOTE.md", "inside note\n")
+        reference = {"pattern": "docs", "policy": "exact_set_snapshot", "snapshot": snapshot_set(self.root, "docs")}
+        decoy = self.outside / "decoy-sub"
+        decoy.mkdir()
+        (decoy / "NOTE.md").write_text("inside note\n", encoding="utf-8")
+        held = self.root / "held-sub"
+
+        def swap() -> None:
+            os.rename(self.root / "docs" / "sub", held)
+            os.symlink(decoy, self.root / "docs" / "sub")
+
+        def trigger(name: str, kind: str) -> bool:
+            # The use of the subdirectory, after the walk has already classified it as a directory.
+            return kind in {"open", "scandir", "walk"} and os.path.basename(name.rstrip("/")) == "sub"
+
+        with self.filesystem_spy() as touched:
+            stack, fired = self.swap_on_access(trigger, swap)
+            with stack:
+                violations = verify(self.root, [reference], dirty_paths=[])
+        self.assertTrue(fired, "the swap never happened")
+        self.assert_nothing_outside_touched(touched)
+        self.assertEqual([v["violation"] for v in violations], ["protected_path_unreadable"])
+        self.assertEqual(violations[0]["path"], str(self.root / "docs" / "sub"))
+        # With the link now in place, a snapshot records it as an entry and never descends into it.
+        entries = {e["path"]: e["type"] for e in snapshot_set(self.root, "docs")["entries"]}
+        self.assertEqual(entries, {"docs/ARCH.md": "file", "docs/sub": "symlink"})
+
+    def test_verification_never_reads_by_pathname(self) -> None:
+        """Every byte is read through a descriptor: pathname primitives are never needed."""
+        forbidden = AssertionError("a protected path was accessed by pathname")
+        items = [{"pattern": "docs", "policy": "exact_set_snapshot", "snapshot": snapshot_set(self.root, "docs")},
+                 {"pattern": "docs/ARCH.md", "policy": "exact_file_hash",
+                  "sha256": plan_validator.sha256_hex((self.root / "docs/ARCH.md").read_bytes())},
+                 {"pattern": "docs", "policy": "read_only"}]
+        with contextlib.ExitStack() as stack:
+            for name in ("is_symlink", "is_file", "is_dir", "read_bytes", "read_text", "open", "exists"):
+                stack.enter_context(mock.patch.object(Path, name, side_effect=forbidden))
+            stack.enter_context(mock.patch.object(plan_validator.os, "walk", side_effect=forbidden))
+            self.assertEqual(verify(self.root, items, dirty_paths=[]), [])
+            self.assertEqual(snapshot_set(self.root, "docs"), items[0]["snapshot"])
+        self.write("docs/ARCH.md", "changed\n")
+        self.assertEqual({v["violation"] for v in verify(self.root, items, dirty_paths=["docs/ARCH.md"])},
+                         {"protected_set_entry_modified", "protected_file_hash_mismatch",
+                          "protected_read_only_mutated"})
+
+    def test_platform_without_descriptor_traversal_fails_closed(self) -> None:
+        items = [{"pattern": "docs", "policy": "read_only"},
+                 {"pattern": "docs/ARCH.md", "policy": "exact_file_hash",
+                  "sha256": plan_validator.sha256_hex((self.root / "docs/ARCH.md").read_bytes())},
+                 {"pattern": "docs", "policy": "exact_set_snapshot", "snapshot": snapshot_set(self.root, "docs")}]
+        with mock.patch.object(plan_validator, "_DESCRIPTOR_TRAVERSAL", False):
+            with self.filesystem_spy() as touched:
+                violations = verify(self.root, items, dirty_paths=[])
+                with self.assertRaises(plan_validator.ProtectedPathContainmentUnavailable):
+                    snapshot_set(self.root, "docs")
+            with self.assertRaises(story.HardStop) as raised:
+                story.assert_protected_paths_intact(self.root, {"protected_paths": items}, dirty_paths=[])
+        self.assertEqual([v["violation"] for v in violations],
+                         [plan_validator.PROTECTED_PATH_CONTAINMENT_UNAVAILABLE] * 3)
+        self.assertEqual([v["policy"] for v in violations], ["read_only", "exact_file_hash", "exact_set_snapshot"])
+        self.assertEqual(raised.exception.reason, "protected_path_violation")
+        # Nothing inside the tree was opened or read: only the root was resolved.
+        root = str(self.root)
+        self.assertEqual([path for path in touched if path != root and os.path.commonpath([root, path]) == root], [])
 
 
 if __name__ == "__main__":

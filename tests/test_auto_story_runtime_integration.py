@@ -53,8 +53,15 @@ class AutoStoryRuntimeTest(unittest.TestCase):
     # ---- scaffolding --------------------------------------------------------------------
 
     def auto_story_fixture(self, *, budget: int = 8, max_rework: int = 2, max_calls: int = 8,
-                           limits: dict | None = None) -> Fixture:
-        fx = Fixture(self.root, units=1, max_calls=max_calls, max_rework=max_rework, limits=limits)
+                           limits: dict | None = None, seed: dict | None = None, protected_paths=None,
+                           root: Path | None = None) -> Fixture:
+        """`seed` files are committed with the frozen authority; `protected_paths` is a list, or a
+        callable given the repository that returns one (so hashes and snapshots see the seed)."""
+        fx = Fixture(root or self.root, units=1, max_calls=max_calls, max_rework=max_rework, limits=limits)
+        for relative, content in (seed or {}).items():
+            (fx.repo / relative).parent.mkdir(parents=True, exist_ok=True)
+            (fx.repo / relative).write_text(content, encoding="utf-8")
+        protected = protected_paths(fx.repo) if callable(protected_paths) else list(protected_paths or [])
         spec_sha = hashlib.sha256(SPEC_A.encode()).hexdigest()
         payload = story.build_authority_payload(
             authority_id="A001", work_ref="T001", authorized_spec_revision=spec_sha[:16],
@@ -65,7 +72,7 @@ class AutoStoryRuntimeTest(unittest.TestCase):
             allowed_effects={"local_write": True, "local_commit": True, "local_merge": True,
                              "pull_request": False, "push": False, "tag": False, "release": False,
                              "merge": False},
-            protected_paths=[], global_model_call_budget=budget, max_child_batches=2,
+            protected_paths=protected, global_model_call_budget=budget, max_child_batches=2,
             max_consecutive_failed_batches=2, wall_clock_deadline="2027-01-01T00:00:00Z",
             hard_stops=["scope_expansion", "model_call_budget_exhausted", "state_integrity"])
         envelope = story.freeze_authority(
@@ -373,6 +380,133 @@ class AutoStoryRuntimeTest(unittest.TestCase):
         self.assertEqual(authority.state.consecutive_failures, streak)
         terminal = [e for e in authority.journal.read()[0] if e["kind"] in {"child_closed", "child_failed"}]
         self.assertEqual(len(terminal), 1)
+
+    # ---- R13: protected paths inside the AUTO_STORY lifecycle -----------------------------
+
+    FROZEN = {"pkg/frozen/a.txt": "frozen content\n"}
+    GREET = {"pkg/greet.py": "def greet():\n    return 'hi'\n"}
+    # policy -> (the change that violates it, the violation it must produce)
+    TAMPERING = {
+        "read_only": ({"pkg/frozen/a.txt": "rewritten\n"}, "protected_read_only_mutated"),
+        "exact_file_hash": ({"pkg/frozen/a.txt": "rewritten\n"}, "protected_file_hash_mismatch"),
+        "exact_set_snapshot": ({"pkg/frozen/b.txt": "slipped in\n"}, "protected_set_entry_added"),
+    }
+
+    @staticmethod
+    def protected(policy: str):
+        if policy == "read_only":
+            return lambda repo: [{"pattern": "pkg/frozen", "policy": "read_only"}]
+        if policy == "exact_file_hash":
+            return lambda repo: [{"pattern": "pkg/frozen/a.txt", "policy": "exact_file_hash",
+                                  "sha256": story.sha256_hex((repo / "pkg/frozen/a.txt").read_bytes())}]
+        return lambda repo: [{"pattern": "pkg/frozen", "policy": "exact_set_snapshot",
+                              "snapshot": story.snapshot_set(repo, "pkg/frozen")}]
+
+    def protected_fixture(self, policy: str) -> Fixture:
+        root = self.root / policy
+        root.mkdir()
+        return self.auto_story_fixture(seed=self.FROZEN, protected_paths=self.protected(policy), root=root)
+
+    def batch_steps(self, fx: Fixture) -> list[tuple[str, str]]:
+        path = fx.state_dir / "journal.jsonl"
+        if not path.is_file():
+            return []
+        return [(e.get("effect_class", ""), (e.get("intent") or {}).get("type", ""))
+                for e in fx.journal() if e.get("kind") == "step_intent"]
+
+    def test_maker_violating_each_protected_policy_stops_before_gates_review_and_commit(self) -> None:
+        for policy, (tamper, violation) in self.TAMPERING.items():
+            with self.subTest(policy):
+                fx = self.protected_fixture(policy)
+                fx.script("maker", [{"files": {**self.GREET, **tamper}}])
+                fx.script("checker", CHECKER_OK)
+                commits_before = git(fx.repo, "rev-list", "--all", "--count")
+
+                self.assertEqual(fx.runtime().run(), "stopped")
+                fold = fx.fold()
+                self.assertEqual(fold.stop_reason, "protected_path_violation")
+                self.assertEqual(fold.model_calls_done, 1, "only the Maker ran; no Checker was dispatched")
+                steps = self.batch_steps(fx)
+                self.assertIn(("model_call", "maker"), steps)
+                for forbidden in ("gate", "checker", "commit"):
+                    self.assertNotIn(forbidden, {kind for _effect, kind in steps}, f"{policy}: {forbidden} ran")
+                self.assertEqual(git(fx.repo, "rev-list", "--all", "--count"), commits_before, "nothing was committed")
+
+                authority = self.authority(fx)
+                authority.refold()
+                self.assertEqual(authority.state.child_state("B001"), "failed")
+                self.assertEqual(authority.state.children["B001"]["failure"]["reason"], "protected_path_violation")
+                stop = authority.state.hard_stops[-1]
+                self.assertEqual(stop["reason"], "protected_path_violation")
+                self.assertIn("after the Maker of T001 round 1", stop["detail"])
+                self.assertIn(violation, [v["violation"] for v in stop["evidence"]["violations"]])
+                self.assertEqual(authority.state.consumed_calls, 1)
+
+                # The failed child is terminal: running it again binds nothing and dispatches nothing.
+                with self.assertRaises(tl_runtime.Refusal):
+                    fx.runtime().run()
+                self.assertEqual(fx.fold().model_calls_done, 1)
+
+    def test_protected_paths_are_verified_before_the_child_opens(self) -> None:
+        """A change committed after the Story baseline leaves HEAD clean, and is still a violation."""
+        for policy, (tamper, violation) in self.TAMPERING.items():
+            with self.subTest(policy):
+                fx = self.protected_fixture(policy)
+                fx.script("maker", MAKER_OK)
+                fx.script("checker", CHECKER_OK)
+                for relative, content in tamper.items():
+                    (fx.repo / relative).write_text(content, encoding="utf-8")
+                git(fx.repo, "add", "-A")
+                git(fx.repo, "commit", "-q", "-m", "change a protected path after the Story baseline")
+                self.assertEqual(git(fx.repo, "status", "--porcelain"), "")
+
+                with self.assertRaises(tl_runtime.Refusal) as refused:
+                    fx.runtime().run()
+                self.assertIn("protected_path_violation", str(refused.exception))
+                self.assertIn("before child_open", str(refused.exception))
+                self.assertIn(violation, str(refused.exception))
+
+                authority = self.authority(fx)
+                authority.refold()
+                self.assertEqual(authority.state.child_state("B001"), "derived", "the child never opened")
+                kinds = [e["kind"] for e in authority.journal.read()[0]]
+                self.assertNotIn("child_open", kinds)
+                self.assertNotIn("model_call_reserved", kinds)
+                self.assertEqual(authority.state.hard_stops[-1]["reason"], "protected_path_violation")
+                self.assertEqual(self.batch_steps(fx), [])
+
+    def test_intact_protected_paths_let_the_child_complete(self) -> None:
+        for policy in self.TAMPERING:
+            with self.subTest(policy):
+                fx = self.protected_fixture(policy)
+                fx.script("maker", [{"files": self.GREET}])
+                fx.script("checker", CHECKER_OK)
+                self.assertEqual(fx.runtime().run(), "done")
+                authority = self.authority(fx)
+                authority.refold()
+                self.assertEqual(authority.state.child_state("B001"), "closed")
+                self.assertEqual(authority.state.hard_stops, [])
+
+    # ---- R11: a forged child lifecycle is refused at bind ---------------------------------
+
+    def test_forged_child_lifecycle_refuses_bind_without_any_event_or_dispatch(self) -> None:
+        fx = self.auto_story_fixture()
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", CHECKER_OK)
+        forger = self.authority(fx)
+        forger.journal.fold()  # position the writer at the tail so the hash chain stays intact
+        forger.journal.append(
+            "child_closed", authority_id="A001", child_batch_id="B001", checker_verdict="approved",
+            unresolved_action_items=[], unresolved_action_items_digest="", made_progress=True)
+        self.assertEqual(forger.journal.fold().invalid_lines, 0)
+        before = forger.journal.path.read_bytes()
+
+        with self.assertRaises(tl_runtime.Refusal) as refused:
+            fx.runtime().run()
+        self.assertIn("state_integrity", str(refused.exception))
+        self.assertIn("new -> derived -> open -> closed|failed", str(refused.exception))
+        self.assertEqual(forger.journal.path.read_bytes(), before, "nothing was appended")
+        self.assertEqual(self.batch_steps(fx), [], "nothing was dispatched")
 
     # ---- §5 retrocompatibility ------------------------------------------------------------
 

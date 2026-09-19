@@ -19,6 +19,7 @@ a schema can never rely on semantics this validator silently skips.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -400,70 +401,212 @@ def normalize_protected_pattern(pattern: Any) -> str:
     return normalized or "."
 
 
-def _contained_target(root: Path, pattern: Any) -> tuple[str, Path]:
-    """Join a validated pattern onto `root` and prove the result stays inside it.
+PROTECTED_PATH_CONTAINMENT_UNAVAILABLE = "protected_path_containment_unavailable"
 
-    `root` must already be resolved. Lexical containment is checked first; then every
-    intermediate component is inspected with lstat, walking down from the root, so a symlinked
-    directory that would redirect the final component outside the repository is refused before
-    anything behind it is read.
-    """
-    normalized = normalize_protected_pattern(pattern)
+
+class ProtectedPathContainmentUnavailable(OSError):
+    """The platform offers no descriptor-relative, no-follow traversal, so containment cannot be proven."""
+
+
+# Every access below the repository root is made through a directory descriptor, one component
+# at a time, with O_NOFOLLOW. Nothing is ever re-resolved by pathname after it was checked, so a
+# component swapped for a symlink between the check and the use is refused by the kernel on the
+# open itself instead of being followed. Evaluated once at import: without every primitive there
+# is no atomic guarantee, and verification refuses rather than falling back to pathnames.
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+_DESCRIPTOR_TRAVERSAL = bool(
+    _O_NOFOLLOW and _O_DIRECTORY
+    and os.open in os.supports_dir_fd and os.stat in os.supports_dir_fd
+    and os.readlink in os.supports_dir_fd and os.stat in os.supports_follow_symlinks
+    and os.listdir in os.supports_fd)
+_DIRECTORY_FLAGS = os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+# O_NONBLOCK: a FIFO planted in place of a file must not hang the verifier before fstat refuses it.
+_FILE_FLAGS = (os.O_RDONLY | _O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+               | getattr(os, "O_NOCTTY", 0))
+
+
+def _located(error: OSError, display: str) -> OSError:
+    """The same error, carrying the repository path it concerns rather than a bare component name."""
+    return type(error)(error.errno, error.strerror or str(error), display)
+
+
+class _ContainedTree:
+    """Descriptor-relative, no-follow access to one resolved repository root."""
+
+    def __init__(self, root: Path):
+        if not _DESCRIPTOR_TRAVERSAL:
+            raise ProtectedPathContainmentUnavailable(
+                getattr(errno, "ENOTSUP", errno.EINVAL), "this platform offers no descriptor-relative no-follow traversal "
+                               "(O_NOFOLLOW, O_DIRECTORY, dir_fd); containment cannot be proven", str(root))
+        self.root = root
+        try:
+            self.fd = os.open(str(root), _DIRECTORY_FLAGS)
+        except OSError as error:
+            raise _located(error, str(root)) from error
+
+    def __enter__(self) -> "_ContainedTree":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        os.close(self.fd)
+
+    def display(self, relative: str) -> str:
+        return str(self.root / relative) if relative else str(self.root)
+
+    @staticmethod
+    def lstat_at(directory: int, name: str) -> os.stat_result | None:
+        try:
+            return os.stat(name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+
+    def open_directory_at(self, directory: int, name: str, relative: str) -> int:
+        try:
+            return os.open(name, _DIRECTORY_FLAGS, dir_fd=directory)
+        except OSError as error:
+            raise _located(error, self.display(relative)) from error
+
+    def open_parent(self, pattern: Any, components: list[str]) -> int | None:
+        """A descriptor on the directory holding the last component, or None if it does not exist.
+
+        Each intermediate component is opened relative to the descriptor of the one before it,
+        with O_DIRECTORY and O_NOFOLLOW: a symlink there fails the open itself, so there is no
+        window in which a checked directory can be swapped for a link the next step would follow.
+        The lstat after a failed open only classifies the refusal; it never authorizes anything.
+        """
+        current = os.dup(self.fd)
+        try:
+            for index, name in enumerate(components[:-1]):
+                walked = "/".join(components[:index + 1])
+                try:
+                    child = os.open(name, _DIRECTORY_FLAGS, dir_fd=current)
+                except FileNotFoundError:
+                    return None
+                except OSError as error:
+                    info = self.lstat_at(current, name)
+                    if info is not None and stat.S_ISLNK(info.st_mode):
+                        raise ProtectedPathError(
+                            pattern, f"intermediate component {walked!r} is a symlink; containment in the "
+                                     "repository cannot be proven") from error
+                    if info is None or not stat.S_ISDIR(info.st_mode):
+                        return None  # nothing can exist below a missing component or a file
+                    raise _located(error, self.display(walked)) from error
+                os.close(current)
+                current = child
+            opened, current = current, -1
+            return opened
+        finally:
+            if current != -1:
+                os.close(current)
+
+    def read_regular_at(self, directory: int, name: str, relative: str) -> bytes:
+        """The bytes of a regular file, read through a descriptor opened without following links."""
+        display = self.display(relative)
+        try:
+            handle = os.open(name, _FILE_FLAGS, dir_fd=directory)
+        except OSError as error:
+            raise _located(error, display) from error
+        try:
+            if not stat.S_ISREG(os.fstat(handle).st_mode):
+                raise OSError(errno.EINVAL, "not a regular file when opened", display)
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(handle, 1 << 20)
+                if not chunk:
+                    return b"".join(chunks)
+                chunks.append(chunk)
+        except OSError as error:
+            raise _located(error, display) from error
+        finally:
+            os.close(handle)
+
+    def entry_at(self, directory: int, name: str, relative: str) -> dict[str, Any]:
+        """One snapshot entry: path, type, size, sha256. A symlink is hashed by its target text."""
+        info = self.lstat_at(directory, name)
+        if info is None:
+            raise FileNotFoundError(errno.ENOENT, "vanished while the snapshot was taken", self.display(relative))
+        if stat.S_ISLNK(info.st_mode):
+            try:
+                link = os.readlink(name, dir_fd=directory).encode("utf-8", "surrogateescape")
+            except OSError as error:
+                raise _located(error, self.display(relative)) from error
+            return {"path": relative, "type": "symlink", "size": len(link), "sha256": sha256_hex(link)}
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError(errno.EINVAL, "neither a regular file nor a symlink", self.display(relative))
+        data = self.read_regular_at(directory, name, relative)
+        return {"path": relative, "type": "file", "size": len(data), "sha256": sha256_hex(data)}
+
+    def walk_at(self, directory: int, relative: str, entries: list[dict[str, Any]]) -> None:
+        # An unreadable directory is an error, never a silently shorter snapshot.
+        try:
+            names = sorted(os.listdir(directory))
+        except OSError as error:
+            raise _located(error, self.display(relative)) from error
+        for name in names:
+            below = f"{relative}/{name}" if relative else name
+            info = self.lstat_at(directory, name)
+            if info is not None and stat.S_ISDIR(info.st_mode):
+                # Opened with O_NOFOLLOW: a directory swapped for a symlink after the lstat is an
+                # error here, never a tree outside the repository to descend into.
+                child = self.open_directory_at(directory, name, below)
+                try:
+                    self.walk_at(child, below, entries)
+                finally:
+                    os.close(child)
+            else:
+                # A symlinked directory is an entry in its own right, never a tree to descend into.
+                entries.append(self.entry_at(directory, name, below))
+
+    def snapshot(self, pattern: Any, normalized: str) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        if normalized == ".":
+            self.walk_at(self.fd, "", entries)
+            return entries
+        components = normalized.split("/")
+        parent = self.open_parent(pattern, components)
+        if parent is None:
+            return entries
+        try:
+            info = self.lstat_at(parent, components[-1])
+            if info is None:
+                return entries
+            if stat.S_ISDIR(info.st_mode):
+                child = self.open_directory_at(parent, components[-1], normalized)
+                try:
+                    self.walk_at(child, normalized, entries)
+                finally:
+                    os.close(child)
+            else:
+                entries.append(self.entry_at(parent, components[-1], normalized))
+        finally:
+            os.close(parent)
+        return entries
+
+    def prove_contained(self, pattern: Any, normalized: str) -> None:
+        """Refuse a pattern whose intermediate components leave the tree, without reading anything."""
+        if normalized == ".":
+            return
+        parent = self.open_parent(pattern, normalized.split("/"))
+        if parent is not None:
+            os.close(parent)
+
+
+def _require_lexically_contained(root: Path, pattern: Any, normalized: str) -> None:
     if normalized == ".":
-        return normalized, root
-    components = normalized.split("/")
-    target = root.joinpath(*components)
+        return
+    target = root.joinpath(*normalized.split("/"))
     if os.path.commonpath([str(root), str(target)]) != str(root):
         raise ProtectedPathError(pattern, "pattern does not stay inside the repository root")
-    current = root
-    for name in components[:-1]:
-        current = current / name
-        try:
-            mode = current.lstat().st_mode
-        except (FileNotFoundError, NotADirectoryError):
-            break
-        if stat.S_ISLNK(mode):
-            raise ProtectedPathError(
-                pattern, f"intermediate component {current.relative_to(root).as_posix()!r} is a symlink; "
-                         "containment in the repository cannot be proven")
-    return normalized, target
-
-
-def _raise_walk_error(error: OSError) -> None:
-    raise error
-
-
-def _relative(root: Path, target: Path) -> str:
-    return target.relative_to(root).as_posix()
-
-
-def _entry_for(root: Path, target: Path) -> dict[str, Any]:
-    """One snapshot entry: path, type, size, sha256. A symlink is hashed by its target text."""
-    relative = _relative(root, target)
-    if target.is_symlink():
-        link = os.readlink(target).encode("utf-8")
-        return {"path": relative, "type": "symlink", "size": len(link), "sha256": sha256_hex(link)}
-    data = target.read_bytes()
-    return {"path": relative, "type": "file", "size": len(data), "sha256": sha256_hex(data)}
 
 
 def snapshot_set(root: str | Path, pattern: str) -> dict[str, Any]:
     """Reference snapshot of everything under `pattern`, stably ordered and digest-bound."""
     normalized = normalize_protected_pattern(pattern)
     root = Path(root).resolve()
-    normalized, target = _contained_target(root, pattern)
-    entries: list[dict[str, Any]] = []
-    if target.is_symlink() or target.is_file():
-        entries.append(_entry_for(root, target))
-    elif target.is_dir():
-        # An unreadable directory is an error, never a silently shorter snapshot.
-        for current, directories, files in os.walk(target, onerror=_raise_walk_error, followlinks=False):
-            here = Path(current)
-            linked = [name for name in directories if (here / name).is_symlink()]
-            for name in files + linked:
-                entries.append(_entry_for(root, here / name))
-            # A symlinked directory is an entry in its own right, never a tree to descend into.
-            directories[:] = sorted(name for name in directories if name not in linked)
+    _require_lexically_contained(root, pattern, normalized)
+    with _ContainedTree(root) as tree:
+        entries = tree.snapshot(pattern, normalized)
     entries.sort(key=lambda item: item["path"])
     return {"pattern": normalized, "entries": entries, "digest": digest_of(entries)}
 
@@ -472,6 +615,36 @@ def _covers(pattern: str, candidate: str) -> bool:
     normalized = Path(pattern).as_posix().strip("/")
     other = Path(candidate).as_posix().strip("/")
     return normalized in {"", "."} or other == normalized or other.startswith(normalized + "/")
+
+
+def _git_z(root: Path, *args: str) -> list[str] | None:
+    try:
+        record = subprocess.run(["git", *args], cwd=str(root), capture_output=True, text=True, check=False,
+                                timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if record.returncode != 0:
+        return None
+    return [token for token in record.stdout.split("\0") if token]
+
+
+def git_changed_paths(root: str | Path, baseline_commit: str | None = None) -> list[str] | None:
+    """Paths that differ from `baseline_commit` (or from HEAD), untracked ones included.
+
+    Against a baseline this covers what was committed since it as well as what is only in the
+    working tree, so a read_only path changed in an earlier round, or by an earlier child of the
+    same lineage, is still a change. None when git cannot answer: never an empty "no change".
+    """
+    root = Path(root)
+    if baseline_commit is None:
+        return _git_dirty_paths(root)
+    if not re.fullmatch(r"[0-9a-f]{40}", str(baseline_commit)):
+        return None
+    tracked = _git_z(root, "diff", "--name-only", "-z", "--no-renames", str(baseline_commit), "--")
+    untracked = _git_z(root, "ls-files", "--others", "--exclude-standard", "-z")
+    if tracked is None or untracked is None:
+        return None
+    return sorted(set(tracked) | set(untracked))
 
 
 def _git_dirty_paths(root: Path) -> list[str] | None:
@@ -519,12 +692,26 @@ def protected_pattern_violations(protected_paths: list[dict], **extra: Any) -> l
     return violations
 
 
+def _filesystem_violation(item: dict, error: OSError) -> dict:
+    pattern, policy = str(item.get("pattern", "")), item.get("policy")
+    if isinstance(error, ProtectedPathContainmentUnavailable):
+        return {"pattern": pattern, "policy": policy, "violation": PROTECTED_PATH_CONTAINMENT_UNAVAILABLE,
+                "detail": f"{type(error).__name__}: {error}"}
+    return {"pattern": pattern, "policy": policy, "violation": PROTECTED_PATH_UNREADABLE,
+            "path": error.filename if isinstance(error.filename, str) else pattern,
+            "detail": f"{type(error).__name__}: {error}"}
+
+
 def verify_protected_paths(root: str | Path, protected_paths: list[dict], *, dirty_paths: list[str] | None = None) -> list[dict]:
     """Verify each protected path against the tree. Returns structured violations (empty = intact).
 
     A pattern that is not provably inside the repository is refused before anything is joined
     onto the root, and a filesystem error while verifying is a violation carrying its detail:
-    neither can ever escape as an exception nor pass as an intact path.
+    neither can ever escape as an exception nor pass as an intact path. Containment is proven on
+    the filesystem for every policy, read_only included: a read_only pattern reached through a
+    symlinked directory designates something outside the repository that git cannot see change.
+    Every access goes through descriptor-relative, no-follow opens; on a platform without them
+    each pattern is a `protected_path_containment_unavailable` violation, never a pathname read.
     """
     violations: list[dict] = []
     valid: list[tuple[dict, str]] = []
@@ -533,52 +720,82 @@ def verify_protected_paths(root: str | Path, protected_paths: list[dict], *, dir
             valid.append((item, normalize_protected_pattern(item.get("pattern"))))
         except ProtectedPathError as error:
             violations.append(_invalid_pattern(item, error))
+    if not valid:
+        return violations
     root = Path(root).resolve()
-    read_only = [(item, normalized) for item, normalized in valid if item.get("policy") == "read_only"]
-    if read_only:
-        dirty = dirty_paths if dirty_paths is not None else _git_dirty_paths(root)
-        for item, normalized in read_only:
-            pattern = str(item.get("pattern", ""))
-            if dirty is None:
-                violations.append({"pattern": pattern, "policy": "read_only",
-                                   "violation": "protected_read_only_unverifiable",
-                                   "detail": "no baseline was supplied and git could not report the working tree"})
+    try:
+        tree = _ContainedTree(root)
+    except OSError as error:
+        return violations + [_filesystem_violation(item, error) for item, _normalized in valid]
+    with tree:
+        read_only: list[tuple[dict, str]] = []
+        for item, normalized in valid:
+            if item.get("policy") != "read_only":
                 continue
-            for path in [p for p in dirty if _covers(normalized, p)]:
-                violations.append({"pattern": pattern, "policy": "read_only",
-                                   "violation": "protected_read_only_mutated", "path": path})
+            try:
+                _require_lexically_contained(root, item.get("pattern"), normalized)
+                tree.prove_contained(item.get("pattern"), normalized)
+            except ProtectedPathError as error:
+                violations.append(_invalid_pattern(item, error))
+                continue
+            except OSError as error:
+                violations.append(_filesystem_violation(item, error))
+                continue
+            read_only.append((item, normalized))
+        if read_only:
+            dirty = dirty_paths if dirty_paths is not None else _git_dirty_paths(root)
+            for item, normalized in read_only:
+                pattern = str(item.get("pattern", ""))
+                if dirty is None:
+                    violations.append({"pattern": pattern, "policy": "read_only",
+                                       "violation": "protected_read_only_unverifiable",
+                                       "detail": "no baseline was supplied and git could not report the working tree"})
+                    continue
+                for path in [p for p in dirty if _covers(normalized, p)]:
+                    violations.append({"pattern": pattern, "policy": "read_only",
+                                       "violation": "protected_read_only_mutated", "path": path})
 
-    for item, _normalized in valid:
-        policy = item.get("policy")
-        if policy not in ("exact_file_hash", "exact_set_snapshot"):
-            continue
-        pattern = str(item.get("pattern", ""))
-        try:
-            violations.extend(_verify_exact_policy(root, item, pattern, policy))
-        except ProtectedPathError as error:
-            violations.append(_invalid_pattern(item, error))
-        except OSError as error:
-            violations.append({"pattern": pattern, "policy": policy, "violation": PROTECTED_PATH_UNREADABLE,
-                               "path": error.filename if isinstance(error.filename, str) else pattern,
-                               "detail": f"{type(error).__name__}: {error}"})
+        for item, normalized in valid:
+            policy = item.get("policy")
+            if policy not in ("exact_file_hash", "exact_set_snapshot"):
+                continue
+            pattern = str(item.get("pattern", ""))
+            try:
+                _require_lexically_contained(root, item.get("pattern"), normalized)
+                violations.extend(_verify_exact_policy(tree, item, pattern, normalized, policy))
+            except ProtectedPathError as error:
+                violations.append(_invalid_pattern(item, error))
+            except OSError as error:
+                violations.append(_filesystem_violation(item, error))
     return violations
 
 
-def _verify_exact_policy(root: Path, item: dict, pattern: str, policy: str) -> list[dict]:
+def _verify_exact_policy(tree: _ContainedTree, item: dict, pattern: str, normalized: str, policy: str) -> list[dict]:
     violations: list[dict] = []
     if policy == "exact_file_hash":
-        _normalized, target = _contained_target(root, pattern)
         expected = str(item.get("sha256", ""))
-        if target.is_symlink():
-            violations.append({"pattern": pattern, "policy": policy, "path": pattern,
-                               "violation": "protected_file_type_changed",
-                               "expected": "file", "observed": "symlink"})
-            return violations
-        if not target.is_file():
+        components = [] if normalized == "." else normalized.split("/")
+        parent = tree.open_parent(pattern, components) if components else None
+        if parent is None:
             violations.append({"pattern": pattern, "policy": policy, "path": pattern,
                                "violation": "protected_path_missing"})
             return violations
-        observed = sha256_hex(target.read_bytes())
+        try:
+            info = tree.lstat_at(parent, components[-1])
+            if info is not None and stat.S_ISLNK(info.st_mode):
+                violations.append({"pattern": pattern, "policy": policy, "path": pattern,
+                                   "violation": "protected_file_type_changed",
+                                   "expected": "file", "observed": "symlink"})
+                return violations
+            if info is None or not stat.S_ISREG(info.st_mode):
+                violations.append({"pattern": pattern, "policy": policy, "path": pattern,
+                                   "violation": "protected_path_missing"})
+                return violations
+            # Read through the descriptor opened with O_NOFOLLOW under the parent descriptor, not
+            # by pathname: a swap after the lstat is an unreadable violation, never a followed link.
+            observed = sha256_hex(tree.read_regular_at(parent, components[-1], normalized))
+        finally:
+            os.close(parent)
         if observed != expected:
             violations.append({"pattern": pattern, "policy": policy, "path": pattern,
                                "violation": "protected_file_hash_mismatch",
@@ -588,7 +805,7 @@ def _verify_exact_policy(root: Path, item: dict, pattern: str, policy: str) -> l
     reference = item.get("snapshot") or {}
     declared_entries = [e for e in reference.get("entries", []) if isinstance(e, dict) and "path" in e]
     expected_entries = {entry["path"]: entry for entry in declared_entries}
-    observed_entries = {entry["path"]: entry for entry in snapshot_set(root, pattern)["entries"]}
+    observed_entries = {entry["path"]: entry for entry in tree.snapshot(pattern, normalized)}
     for path in sorted(set(observed_entries) - set(expected_entries)):
         violations.append({"pattern": pattern, "policy": policy, "path": path,
                            "violation": "protected_set_entry_added",

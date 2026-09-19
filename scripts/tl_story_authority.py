@@ -52,6 +52,7 @@ try:  # scripts/ on sys.path (how the runtime loads its siblings)
         assert_protected_paths_monotonic,
         canonical_json,
         digest_of,
+        git_changed_paths,
         protected_pattern_violations,
         sha256_hex,
         snapshot_set,
@@ -65,6 +66,7 @@ except ImportError:  # executed from the repository root
         assert_protected_paths_monotonic,
         canonical_json,
         digest_of,
+        git_changed_paths,
         protected_pattern_violations,
         sha256_hex,
         snapshot_set,
@@ -131,6 +133,16 @@ JOURNAL_EVENTS = (
     "hard_stop",
     "authority_closed",
 )
+# The child lifecycle is a closed state machine: new -> derived -> open -> closed | failed, and a
+# terminal state is final. Each child event names the one state it may leave; anything else in the
+# journal is a history this module never writes, so folding it fails closed.
+CHILD_TRANSITIONS = {
+    "child_derived": ("new", "derived"),
+    "child_open": ("derived", "open"),
+    "child_closed": ("open", "closed"),
+    "child_failed": ("open", "failed"),
+}
+CHILD_TERMINAL_STATES = frozenset({"closed", "failed"})
 ATTEMPT_STATES = ("reserved", "consumed", "released", "ambiguous")
 # `ambiguous` is charged: a call whose outcome cannot be proven may have reached the provider.
 CHARGED_ATTEMPT_STATES = frozenset({"consumed", "ambiguous"})
@@ -392,6 +404,21 @@ def load_authority(path: str | Path) -> dict:
 
 # --------------------------------------------------------------------------- journal
 
+def _child_transition_violation(state: "AuthorityState", event: dict) -> dict | None:
+    """The reason `event` is not a legal step of its child's lifecycle, or None when it is."""
+    kind = event["kind"]
+    expected, _target = CHILD_TRANSITIONS[kind]
+    child_id = event.get("child_batch_id")
+    if not isinstance(child_id, str) or not child_id:
+        return {"seq": event.get("seq"), "kind": kind, "child_batch_id": child_id,
+                "detail": "child event names no child_batch_id"}
+    current = state.child_state(child_id)
+    if current == expected:
+        return None
+    return {"seq": event.get("seq"), "kind": kind, "child_batch_id": child_id, "from": current,
+            "expected": expected}
+
+
 class AuthorityJournal:
     """Append-only JSONL, one writer, write-ahead, fsynced, hash-chained."""
 
@@ -451,6 +478,13 @@ class AuthorityJournal:
             seq = max(seq, int(event.get("seq", 0)))
             state.events += 1
             kind = event["kind"]
+            if kind in CHILD_TRANSITIONS:
+                violation = _child_transition_violation(state, event)
+                if violation is not None:
+                    # Never applied: a refused transition does not become state, and the violation
+                    # itself makes every consumer of this fold fail closed.
+                    state.lifecycle_violations.append(violation)
+                    continue
             if kind == "authority_open":
                 state.opened = True
                 state.opened_at = event.get("at", "")
@@ -537,6 +571,20 @@ class AuthorityState:
     close_state: str = ""
     close_reason: str = ""
     invalid_lines: int = 0
+    lifecycle_violations: list[dict] = field(default_factory=list)
+
+    def child_state(self, child_batch_id: str) -> str:
+        return (self.children.get(child_batch_id) or {}).get("state") or "new"
+
+    def integrity_failure(self) -> str:
+        """Why this history cannot be trusted, or "" when it can."""
+        problems: list[str] = []
+        if self.invalid_lines:
+            problems.append(f"authority journal has {self.invalid_lines} invalid line(s); the hash chain is broken")
+        if self.lifecycle_violations:
+            problems.append("authority journal records child transition(s) outside new -> derived -> open -> "
+                            f"closed|failed: {canonical_json(self.lifecycle_violations)}")
+        return "; ".join(problems)
 
     @property
     def consumed_calls(self) -> int:
@@ -602,11 +650,6 @@ class StoryAuthority:
                 f"coordinator_conflict: another runtime holds the lease for story authority {self.authority_id}", 5)
         self._lease = handle
         self.refold()
-        if self.state.invalid_lines:
-            raise HardStop(
-                "state_integrity",
-                f"authority journal has {self.state.invalid_lines} invalid line(s); the hash chain is broken",
-                authority_id=self.authority_id)
         if not self.state.opened:
             self.journal.append(
                 "authority_open", authority_id=self.authority_id, work_ref=self.payload["work_ref"],
@@ -633,8 +676,34 @@ class StoryAuthority:
         self.release()
 
     def refold(self) -> AuthorityState:
-        self.state = self.journal.fold()
+        """Rebuild the state from the journal, refusing a history this module could not have written.
+
+        A broken hash chain or a child transition outside the lifecycle is a hard stop for every
+        caller — acquire, load, bind, reserve, derive, record — and nothing is appended to it.
+        """
+        state = self.journal.fold()
+        failure = state.integrity_failure()
+        if failure:
+            raise HardStop("state_integrity", failure, authority_id=self.authority_id,
+                           invalid_lines=state.invalid_lines, lifecycle_violations=state.lifecycle_violations)
+        self.state = state
         return self.state
+
+    def _require_child_transition(self, kind: str, child_batch_id: Any) -> None:
+        """Refuse, without journaling anything, a child event its current state does not allow."""
+        expected, target = CHILD_TRANSITIONS[kind]
+        if not isinstance(child_batch_id, str) or not child_batch_id:
+            raise HardStop("state_integrity", f"child_lifecycle: {kind} names no child_batch_id",
+                           event=kind, child_batch_id=child_batch_id)
+        current = self.state.child_state(child_batch_id)
+        if current != expected:
+            terminal = " and a terminal state is final" if current in CHILD_TERMINAL_STATES else ""
+            raise HardStop(
+                "state_integrity",
+                f"child_lifecycle: {kind} moves child batch {child_batch_id} from {expected} to {target}, but under "
+                f"story authority {self.authority_id} it is {current}; a child moves new -> derived -> open -> "
+                f"closed|failed{terminal}",
+                event=kind, child_batch_id=child_batch_id, state=current, expected=expected)
 
     def _require_lease(self) -> None:
         if self._lease is None:
@@ -977,6 +1046,7 @@ class StoryAuthority:
                           lineage: dict | None = None) -> dict:
         self._require_lease()
         self._require_open()
+        self._require_child_transition("child_open", child_batch_id)
         event = self.journal.append(
             "child_open", authority_id=self.authority_id, child_batch_id=child_batch_id, branch=branch,
             head_commit=head_commit, tree=tree, **({"lineage": lineage} if lineage else {}))
@@ -1000,6 +1070,7 @@ class StoryAuthority:
         """Persist the functional lineage of a closing child, merged or not."""
         self._require_lease()
         self._require_open()
+        self._require_child_transition("child_closed", child_batch_id)
         for name, value in (("governance_base_commit", governance_base_commit),
                             ("checker_reviewed_commit", checker_reviewed_commit),
                             ("functional_checkpoint_commit", functional_checkpoint_commit)):
@@ -1025,6 +1096,8 @@ class StoryAuthority:
 
     def record_child_failed(self, child_batch_id: str, *, reason: str, detail: str = "") -> dict:
         self._require_lease()
+        self.refold()
+        self._require_child_transition("child_failed", child_batch_id)
         event = self.journal.append(
             "child_failed", authority_id=self.authority_id, child_batch_id=child_batch_id, reason=reason,
             detail=detail[:400])
@@ -1044,6 +1117,7 @@ class StoryAuthority:
     def hard_stop(self, reason: str, detail: str = "", **evidence: Any) -> None:
         """Journal the stop and raise. AUTO_STORY never recovers from a hard stop on its own."""
         if self._lease is not None:
+            self.refold()  # an untrustworthy history is refused, never appended to
             self.journal.append("hard_stop", authority_id=self.authority_id, reason=reason, detail=detail[:400],
                                 evidence=evidence)
             self.refold()
@@ -1776,9 +1850,41 @@ def cumulative_review_range(story_baseline_commit: str, integration_candidate_co
     return f"{story_baseline_commit}..{integration_candidate_commit}"
 
 
-def assert_protected_paths_intact(repo: str | Path, payload: dict, *, dirty_paths: list[str] | None = None) -> list[dict]:
-    """Verify the authority's protected paths against the tree. Any violation is a hard stop."""
-    violations = verify_protected_paths(repo, payload.get("protected_paths") or [], dirty_paths=dirty_paths)
+def assert_protected_paths_intact(
+    repo: str | Path,
+    payload: dict,
+    *,
+    dirty_paths: list[str] | None = None,
+    child_protected_paths: Iterable[dict] = (),
+    baseline_commit: str | None = None,
+) -> list[dict]:
+    """Verify the authority's protected paths against the tree. Any violation is a hard stop.
+
+    `child_protected_paths` adds what a derived child declared on top of the root (monotonicity
+    means it can only add or repeat). With `baseline_commit`, read_only is judged against that
+    commit rather than HEAD, so a change committed in an earlier round or by an earlier child of
+    the lineage is still a change; if git cannot answer for that baseline the path is
+    unverifiable, never assumed untouched. exact_file_hash and exact_set_snapshot always judge
+    the tree as it is now.
+    """
+    protected = list(payload.get("protected_paths") or [])
+    seen = {canonical_json(item) for item in protected if isinstance(item, dict)}
+    for item in child_protected_paths or ():
+        if isinstance(item, dict) and canonical_json(item) not in seen:
+            seen.add(canonical_json(item))
+            protected.append(item)
+    unverifiable: list[dict] = []
+    read_only = [item for item in protected if isinstance(item, dict) and item.get("policy") == "read_only"]
+    if dirty_paths is None and baseline_commit is not None and read_only:
+        dirty_paths = git_changed_paths(repo, baseline_commit)
+        if dirty_paths is None:
+            unverifiable = [{"pattern": str(item.get("pattern", "")), "policy": "read_only",
+                             "violation": "protected_read_only_unverifiable",
+                             "detail": f"git could not report the changes since baseline {baseline_commit!r}"}
+                            for item in read_only]
+            # Containment and the exact policies are still verified; only the change set is unknown.
+            dirty_paths = []
+    violations = unverifiable + verify_protected_paths(repo, protected, dirty_paths=dirty_paths)
     if violations:
         raise HardStop("protected_path_violation", canonical_json(violations), violations=violations)
     return violations

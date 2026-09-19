@@ -842,7 +842,7 @@ class StoryAuthority:
             raise HardStop("state_integrity", f"the {what} of child batch {child_batch_id} is not an object")
         return payload
 
-    def load_child_derivation(self, child_batch_id: str) -> tuple[dict, dict]:
+    def load_child_derivation(self, child_batch_id: str, *, spec_paths: Iterable[str] = ()) -> tuple[dict, dict]:
         """Recover the canonical child proposal and its derivation proof, re-digesting both.
 
         A digest a batch declares is worth nothing unless the object it digests can be produced
@@ -885,8 +885,11 @@ class StoryAuthority:
 
         # Revalidate the persisted proposal independently against the root authority envelope.
         # A persisted proposal must be a strict, valid subset of the root envelope regardless
-        # of whether hashes matched.
-        assert_child_proposal_within_envelope(proposal, self.payload, self.state, self)
+        # of whether hashes matched, and a rework child must still reproduce the residual
+        # findings its predecessor closed with.
+        assert_child_proposal_within_envelope(
+            proposal, self.payload, self.state, self, proof=proof, derivation=derivation,
+            spec_paths=[*(proof.get("spec_paths") or []), *spec_paths])
 
         return proposal, proof
 
@@ -896,7 +899,8 @@ class StoryAuthority:
         child_id = proposal["child_batch_id"]
 
         # Validate proposal and proof before persisting or journaling.
-        assert_child_proposal_within_envelope(proposal, self.payload, self.state, self)
+        assert_child_proposal_within_envelope(proposal, self.payload, self.state, self, proof=proof,
+                                              spec_paths=proof.get("spec_paths") or ())
 
         proposal_digest = digest_of(proposal)
         if proof.get("child_proposal_digest") != proposal_digest:
@@ -910,6 +914,9 @@ class StoryAuthority:
         if recomputed != proof.get("derivation_proof_digest"):
             self.hard_stop("state_integrity",
                            f"the derivation proof of {child_id} has invalid digest {proof.get('derivation_proof_digest')}, expected {recomputed}")
+        # Last gate before anything is written: an id is derived once, and what was persisted for
+        # it is never overwritten.
+        self.assert_child_batch_id_unused(child_id)
 
         # The digests below are only verifiable if the objects survive: persist them in canonical
         # form so a later run can re-read and re-hash them instead of trusting a hex string.
@@ -931,12 +938,37 @@ class StoryAuthority:
         self.write_status()
         return event
 
-    def record_child_open(self, child_batch_id: str, *, branch: str, head_commit: str, tree: str) -> dict:
+    def assert_child_batch_id_unused(self, child_batch_id: str) -> None:
+        """A child_batch_id is derived exactly once, whatever state it reached afterwards.
+
+        Re-deriving an id would overwrite the proposal and proof its digests were taken over,
+        and would let a reused id slip past max_child_batches and the lineage it already has.
+        """
+        self.refold()
+        known = self.state.children.get(child_batch_id)
+        if known is not None:
+            self.hard_stop(
+                "state_integrity",
+                f"child batch {child_batch_id} was already derived under story authority {self.authority_id} "
+                f"(state {known.get('state') or 'unknown'}); a child_batch_id is derived once and its proposal "
+                "and proof are never rewritten",
+                child_batch_id=child_batch_id, state=known.get("state", ""))
+        persisted = [path.name for path in (self.child_proposal_path(child_batch_id),
+                                            self.child_proof_path(child_batch_id)) if path.exists()]
+        if persisted:
+            self.hard_stop(
+                "state_integrity",
+                f"child batch {child_batch_id} already has persisted derivation artifacts {persisted}; "
+                "they are never overwritten",
+                child_batch_id=child_batch_id, persisted=persisted)
+
+    def record_child_open(self, child_batch_id: str, *, branch: str, head_commit: str, tree: str,
+                          lineage: dict | None = None) -> dict:
         self._require_lease()
         self._require_open()
         event = self.journal.append(
             "child_open", authority_id=self.authority_id, child_batch_id=child_batch_id, branch=branch,
-            head_commit=head_commit, tree=tree)
+            head_commit=head_commit, tree=tree, **({"lineage": lineage} if lineage else {}))
         self.refold()
         self.write_status()
         return event
@@ -962,8 +994,10 @@ class StoryAuthority:
                             ("functional_checkpoint_commit", functional_checkpoint_commit)):
             if not _COMMIT_RE.match(str(value)):
                 raise Refusal(f"{name} must be a full 40 character commit sha, got {value!r}")
-        digest = unresolved_digest if unresolved_digest is not None else unresolved_action_items_digest(
-            unresolved_action_items or [])
+        # The canonical residual findings are persisted with their digest, so the next child can be
+        # rechecked against the findings themselves rather than against a hex string.
+        residual = canonical_residual_items(unresolved_action_items or [])
+        digest = unresolved_digest if unresolved_digest is not None else unresolved_action_items_digest(residual)
         inherited = ((self.state.children.get(child_batch_id) or {}).get("derivation") or {}).get(
             "functional_parent_checkpoint") or {}
         made_progress = checker_reviewed_tree != inherited.get("tree")
@@ -973,7 +1007,7 @@ class StoryAuthority:
             checker_reviewed_tree=checker_reviewed_tree,
             functional_checkpoint_commit=functional_checkpoint_commit,
             functional_checkpoint_tree=functional_checkpoint_tree, checker_verdict=checker_verdict,
-            unresolved_action_items_digest=digest, made_progress=made_progress)
+            unresolved_action_items=residual, unresolved_action_items_digest=digest, made_progress=made_progress)
         self.refold()
         self.write_status()
         return event
@@ -1092,6 +1126,97 @@ def unresolved_action_items_digest(items: Iterable[dict]) -> str:
           "required_action": str(item.get("required_action", ""))} for item in items),
         key=lambda entry: entry["id"])
     return digest_of(normalized)
+
+
+def canonical_residual_items(items: Iterable[dict]) -> list[dict]:
+    """The residual findings a closing child hands to its successor, in the form the journal keeps.
+
+    Carries every field derivation_eligibility reads, so the patch-only decision can be recomputed
+    from the journal alone; digests to the same value as the raw items.
+    """
+    canonical: list[dict] = []
+    for item in items:
+        entry = {"id": str(item.get("id", "")), "category": str(item.get("category", "")),
+                 "target_role": str(item.get("target_role", "")), "location": str(item.get("location", "")),
+                 "required_action": str(item.get("required_action", ""))}
+        for optional in ("severity", "scope_status", "spec_status"):
+            if item.get(optional) is not None:
+                entry[optional] = str(item[optional])
+        if item.get("derivation_blockers"):
+            entry["derivation_blockers"] = sorted(str(flag) for flag in item["derivation_blockers"])
+        canonical.append(entry)
+    return sorted(canonical, key=lambda entry: entry["id"])
+
+
+def _eligibility_stop_reason(blockers: list[dict]) -> str:
+    return next((b["reason"] for b in blockers if b["reason"] in DERIVATION_HARD_STOP_REASONS), blockers[0]["reason"])
+
+
+def assert_residual_lineage(
+    proposal: dict,
+    state: Any,
+    payload: dict,
+    *,
+    spec_paths: Iterable[str] = (),
+    proof: dict | None = None,
+    derivation: dict | None = None,
+) -> dict:
+    """Prove a rework child is derived from exactly the residual findings its predecessor closed with.
+
+    Applies to every child that names a parent_child_batch_id. The canonical findings persisted in
+    the parent's closure are mandatory and non-empty, must reproduce the closure digest, must be
+    strictly patch-only when recomputed here, and the child's derived_from_action_items, its proof
+    and its child_derived event must all carry that same digest. Raises HardStop otherwise.
+    Returns the lineage evidence that was confirmed.
+    """
+    child_id = str(proposal.get("child_batch_id", ""))
+    parent = proposal.get("parent_child_batch_id")
+    if not parent:
+        return {}
+    closure = state.closure_of(parent) if state is not None else None
+    if closure is None:
+        raise HardStop("state_integrity",
+                       f"residual_lineage: child batch {parent!r} has not closed; there are no residual findings "
+                       f"to derive {child_id} from")
+    closure_digest = str(closure.get("unresolved_action_items_digest") or "")
+    closure_items = closure.get("unresolved_action_items")
+    if not isinstance(closure_items, list) or not closure_items:
+        raise HardStop("state_integrity",
+                       f"residual_lineage: the closure of {parent} recorded no canonical residual action items; "
+                       f"rework child {child_id} has nothing it can be derived from",
+                       parent_child_batch_id=parent)
+    if unresolved_action_items_digest(closure_items) != closure_digest:
+        raise HardStop("state_integrity",
+                       f"residual_lineage: the residual action items journaled at the closure of {parent} do not "
+                       f"reproduce its unresolved_action_items_digest {closure_digest}",
+                       parent_child_batch_id=parent)
+    declared = proposal.get("derived_from_action_items")
+    if not isinstance(declared, list) or not declared:
+        raise HardStop("state_integrity",
+                       f"residual_lineage: child {child_id} continues {parent} but declares no "
+                       "derived_from_action_items",
+                       parent_child_batch_id=parent)
+    for source, items in (("closure", closure_items), ("proposal", declared)):
+        eligible, blockers = derivation_eligibility(items, payload, spec_paths)
+        if not eligible:
+            raise HardStop(_eligibility_stop_reason(blockers),
+                           f"residual_lineage: patch_only_findings ({source}): {canonical_json(blockers)}",
+                           blockers=blockers)
+    declared_digest = unresolved_action_items_digest(declared)
+    if declared_digest != closure_digest:
+        raise HardStop("state_integrity",
+                       f"residual_lineage: the residual findings differ from the ones recorded when the parent "
+                       f"closed ({declared_digest} != {closure_digest})",
+                       declared=declared_digest, recorded=closure_digest)
+    for source, record in (("derivation proof", proof), ("child_derived event", derivation)):
+        if record is not None and record.get("unresolved_action_items_digest") != closure_digest:
+            raise HardStop("state_integrity",
+                           f"residual_lineage: the {source} of {child_id} carries unresolved_action_items_digest "
+                           f"{record.get('unresolved_action_items_digest')!r} but the closure of {parent} recorded "
+                           f"{closure_digest}",
+                           declared=record.get("unresolved_action_items_digest"), recorded=closure_digest)
+    return {"parent_child_batch_id": parent, "unresolved_action_items_digest": closure_digest,
+            "residual_action_item_ids": [str(item.get("id", "")) for item in closure_items]}
 
 
 def _scope_paths(scope: dict) -> list[str]:
@@ -1265,15 +1390,18 @@ def assert_child_proposal_within_envelope(
     authority: Any = None,
     *,
     now: str | None = None,
-) -> None:
+    proof: dict | None = None,
+    derivation: dict | None = None,
+    spec_paths: Iterable[str] = (),
+) -> dict:
     """Prove a child proposal is a strict, verifiable subset of the authorized root envelope.
 
     Revalidates schema, authority binding, spec immutability, scope containment, forbidden path
     monotonicity, protected paths monotonicity, allowed effects subset, budget ceiling, deadline,
     and (when state is provided) authority lifecycle, child limits, streak, predecessor closure,
-    and functional checkpoint inheritance.
+    functional checkpoint inheritance and residual lineage (see assert_residual_lineage).
 
-    Raises HardStop on any violation.
+    Raises HardStop on any violation. Returns the residual lineage evidence it confirmed.
     """
     def _fail(reason: str, detail: str, **evidence: Any) -> None:
         if authority is not None and hasattr(authority, "hard_stop"):
@@ -1391,6 +1519,11 @@ def assert_child_proposal_within_envelope(
                       f"the child must start exactly at the unmerged commit the previous Checker reviewed "
                       f"({expected_checkpoint['commit'][:12]}), got {(proposal.get('functional_parent_checkpoint') or {}).get('commit', 'none')}",
                       expected=expected_checkpoint, observed=proposal.get("functional_parent_checkpoint"))
+            try:
+                return assert_residual_lineage(proposal, state, payload, spec_paths=spec_paths, proof=proof,
+                                               derivation=derivation)
+            except HardStop as stop:
+                _fail(stop.reason, stop.detail, **stop.evidence)
         else:
             if child_id in state.children:
                 all_ids = list(state.children.keys())
@@ -1405,6 +1538,7 @@ def assert_child_proposal_within_envelope(
             if proposal.get("functional_parent_checkpoint") is not None:
                 _fail("state_integrity",
                       "the first child under an authority inherits no functional checkpoint")
+    return {}
 
 
 def verify_derivation(
@@ -1439,6 +1573,15 @@ def verify_derivation(
 
     check("authority_open", not state.closed, "authority_missing_or_ambiguous",
           f"authority already closed as {state.close_state}")
+
+    child_id = child_proposal["child_batch_id"]
+    persisted = [path.name for path in (authority.child_proposal_path(child_id), authority.child_proof_path(child_id))
+                 if path.exists()]
+    check("child_batch_id_unused", child_id not in state.children and not persisted, "state_integrity",
+          f"child batch {child_id} was already derived under story authority {authority.authority_id} "
+          f"(state {(state.children.get(child_id) or {}).get('state') or 'none'}, persisted {persisted}); "
+          "a child_batch_id is derived once and never re-derived",
+          child_batch_id=child_id)
 
     check("spec_immutable",
           child_proposal["authorized_spec_sha256"] == payload["authorized_spec_sha256"]
@@ -1507,6 +1650,10 @@ def verify_derivation(
               known=sorted(state.children))
         check("parent_child_batch_closed", state.closure_of(previous_id) is not None, "state_integrity",
               f"child batch {previous_id!r} has not closed; its reviewed commit does not exist yet")
+        # A rework child exists only because of residual findings; it cannot omit them.
+        check("residual_action_items_supplied", action_items is not None, "state_integrity",
+              f"child {child_proposal['child_batch_id']} continues {previous_id!r} but no residual action items "
+              "were supplied to derive it from")
     else:
         existing_children = [cid for cid in state.children if cid != child_proposal["child_batch_id"]]
         check("first_child_has_no_predecessor", len(existing_children) == 0, "state_integrity",
@@ -1516,7 +1663,7 @@ def verify_derivation(
     if action_items is not None:
         eligible, blockers = derivation_eligibility(action_items, payload, spec_paths)
         if not eligible:
-            reason = next((b["reason"] for b in blockers if b["reason"] in DERIVATION_HARD_STOP_REASONS), blockers[0]["reason"])
+            reason = _eligibility_stop_reason(blockers)
             checks.append({"check": "patch_only_findings", "result": "fail"})
             authority.hard_stop(reason, f"patch_only_findings: {canonical_json(blockers)}", blockers=blockers)
         checks.append({"check": "patch_only_findings", "result": "pass"})
@@ -1538,6 +1685,12 @@ def verify_derivation(
             check("unresolved_items_match_closure",
                   previous_closure.get("unresolved_action_items_digest") == unresolved_digest,
                   "state_integrity", "the residual findings differ from the ones recorded when the parent closed")
+        try:
+            assert_residual_lineage(child_proposal, state, payload, spec_paths=spec_paths)
+            checks.append({"check": "residual_lineage", "result": "pass"})
+        except HardStop as stop:
+            checks.append({"check": "residual_lineage", "result": "fail"})
+            authority.hard_stop(stop.reason, stop.detail, check="residual_lineage", **stop.evidence)
     else:
         check("first_child_has_no_checkpoint", child_proposal.get("functional_parent_checkpoint") is None,
               "state_integrity", "the first child under an authority inherits no functional checkpoint")
@@ -1560,6 +1713,8 @@ def verify_derivation(
         "child_proposal_digest": digest_of(child_proposal),
         "functional_parent_checkpoint": child_proposal.get("functional_parent_checkpoint"),
         "unresolved_action_items_digest": unresolved_digest,
+        # Recorded so persistence and bind recompute spec_status against the same specification.
+        "spec_paths": sorted({Path(str(path)).as_posix() for path in spec_paths}),
         "granted_model_calls": granted,
         "checks": checks,
     }

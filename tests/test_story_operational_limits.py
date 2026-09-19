@@ -3,7 +3,15 @@
 
 from __future__ import annotations
 
+import sys
 import unittest
+from pathlib import Path
+
+_TESTS_DIR = Path(__file__).resolve().parent
+_SCRIPTS_DIR = _TESTS_DIR.parent / "scripts"
+for _p in (_TESTS_DIR, _SCRIPTS_DIR):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from story_authority_support import StoryCase, story
 
@@ -86,10 +94,11 @@ class OperationalLimitsTest(StoryCase):
         auth = self.authority(self.frozen_authority(authority_id="A007"))
         commit, tree = self.git.head(), self.git.tree()
 
-        def proposal(child_id: str, previous_child_id: str | None = None) -> dict:
+        def proposal(child_id: str, previous_child_id: str | None = None, action_items=()) -> dict:
             return story.derive_child_proposal(
-                authority=auth, child_batch_id=child_id, action_items=[], previous_child_id=previous_child_id,
-                model_call_budget=2, governance_base_commit=commit, story_baseline_commit=commit)
+                authority=auth, child_batch_id=child_id, action_items=list(action_items),
+                previous_child_id=previous_child_id, model_call_budget=2, governance_base_commit=commit,
+                story_baseline_commit=commit)
 
         first = proposal("B013")
         auth.record_child_derived(first, story.verify_derivation(auth, first))
@@ -103,8 +112,9 @@ class OperationalLimitsTest(StoryCase):
             child_batch_id="B013", governance_base_commit=commit, checker_reviewed_commit=commit,
             checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,
             checker_verdict="changes_requested", unresolved_action_items=[self.patch_item("R5")])
-        second = proposal("B014", "B013")
-        auth.record_child_derived(second, story.verify_derivation(auth, second))
+        residual = [self.patch_item("R5")]
+        second = proposal("B014", "B013", residual)
+        auth.record_child_derived(second, story.verify_derivation(auth, second, action_items=residual))
         auth.record_child_closed(
             child_batch_id="B014", governance_base_commit=commit, checker_reviewed_commit=commit,
             checker_reviewed_tree=tree, functional_checkpoint_commit=commit, functional_checkpoint_tree=tree,

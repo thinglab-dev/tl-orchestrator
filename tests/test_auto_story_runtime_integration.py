@@ -17,6 +17,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+_TESTS_DIR = Path(__file__).resolve().parent
+_SCRIPTS_DIR = _TESTS_DIR.parent / "scripts"
+for _p in (_TESTS_DIR, _SCRIPTS_DIR):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
 from story_authority_support import story
 
 import tl_runtime  # noqa: E402
@@ -358,7 +364,11 @@ class AutoStoryRuntimeTest(unittest.TestCase):
         terminal = [e for e in authority.journal.read()[0] if e["kind"] in {"child_closed", "child_failed"}]
         self.assertEqual(len(terminal), 1)
 
-        fx.runtime().run()
+        # R9: the terminal child is never rebound, so the re-run is refused before any work.
+        with self.assertRaises(tl_runtime.Refusal) as refused:
+            fx.runtime().run()
+        self.assertIn("state_integrity", str(refused.exception))
+        self.assertIn("never reopened or rebound", str(refused.exception))
         authority.state = authority.journal.fold()
         self.assertEqual(authority.state.consecutive_failures, streak)
         terminal = [e for e in authority.journal.read()[0] if e["kind"] in {"child_closed", "child_failed"}]

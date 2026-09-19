@@ -1320,7 +1320,24 @@ class Runtime:
         # The authority journal is the source of truth. A batch-supplied digest or an arbitrary
         # proposal file beside the batch is not authority. Recover the objects that were actually
         # derived, re-hash them, and then bind the executable batch to that exact proposal.
-        proposal, proof = self.authority.load_child_derivation(self.batch_id)
+        self.authority.refold()
+        child_state = (self.authority.state.children.get(self.batch_id) or {}).get("state")
+        if child_state in {"closed", "failed"}:
+            # A terminal child is historical evidence. Rebinding it would let the runtime spend the
+            # Story budget again under a closure the next child may already have been derived from.
+            self.authority.hard_stop(
+                "state_integrity",
+                f"child batch {self.batch_id} is already {child_state} under story authority "
+                f"{self.authority.authority_id}; a terminal child is never reopened or rebound",
+                child_batch_id=self.batch_id, state=child_state)
+        # The unit specifications are what the runtime itself knows the Story's spec to be, so a
+        # residual finding pointing at one of them is recomputed as a spec change here too.
+        spec_paths = []
+        for unit in self.units.values():
+            with contextlib.suppress(ValueError):
+                spec_paths.append(unit.spec_path.resolve().relative_to(self.repo.resolve()).as_posix())
+        proposal, proof = self.authority.load_child_derivation(self.batch_id, spec_paths=spec_paths)
+        derivation = self.authority.state.children[self.batch_id]["derivation"]
         auth = self.batch["authorization"]
 
         if auth["child_proposal_digest"] != story_authority.digest_of(proposal):
@@ -1330,9 +1347,10 @@ class Runtime:
 
         # Independent revalidation of containment, effects, budget, predecessor/closure,
         # and checkpoint against the root authority envelope before binding.
-        story_authority.assert_child_proposal_within_envelope(
+        lineage = story_authority.assert_child_proposal_within_envelope(
             proposal=proposal, payload=self.authority.payload,
-            state=self.authority.state, authority=self.authority)
+            state=self.authority.state, authority=self.authority, proof=proof, derivation=derivation,
+            spec_paths=[*(proof.get("spec_paths") or []), *spec_paths])
 
         story_authority.assert_batch_matches_child_proposal(
             batch=self.batch, units=self.units.values(), proposal=proposal, payload=self.authority.payload)
@@ -1350,11 +1368,21 @@ class Runtime:
         if checkpoint:
             story_authority.verify_functional_checkpoint(self.repo, checkpoint)
 
+        self.authority.refold()
         child_state = (self.authority.state.children.get(self.batch_id) or {}).get("state")
-        if child_state not in {"open", "closed", "failed"}:
+        if child_state == "derived":
             branch = self.git.current_branch() or self.config.get("base_branch", "")
+            # The confirmed relation to the predecessor's closure is journaled with the open, so the
+            # lineage this child was bound under survives as evidence next to it.
             self.authority.record_child_open(
-                self.batch_id, branch=branch, head_commit=self.git.head(), tree=self.git.tree())
+                self.batch_id, branch=branch, head_commit=self.git.head(), tree=self.git.tree(),
+                lineage=lineage or None)
+        elif child_state != "open":
+            self.authority.hard_stop(
+                "state_integrity",
+                f"child batch {self.batch_id} is {child_state or 'unknown'} under story authority "
+                f"{self.authority.authority_id}; only a derived child opens and only an open child resumes",
+                child_batch_id=self.batch_id, state=child_state or "")
 
     def acquire(self) -> None:
         if self._lease is not None:

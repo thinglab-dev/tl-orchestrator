@@ -1320,7 +1320,11 @@ class Runtime:
         # The authority journal is the source of truth. A batch-supplied digest or an arbitrary
         # proposal file beside the batch is not authority. Recover the objects that were actually
         # derived, re-hash them, and then bind the executable batch to that exact proposal.
-        proposal, proof = self.authority.load_child_derivation(self.batch_id)
+        # The unit specs are where a residual finding would be a specification change, so patch-only
+        # eligibility is recomputed against them here too, not only against the paths the proof names.
+        spec_paths = sorted({Path(os.path.relpath(unit.spec_path, self.repo)).as_posix()
+                             for unit in self.units.values()})
+        proposal, proof = self.authority.load_child_derivation(self.batch_id, spec_paths=spec_paths)
         auth = self.batch["authorization"]
 
         if auth["child_proposal_digest"] != story_authority.digest_of(proposal):
@@ -1328,11 +1332,14 @@ class Runtime:
         if auth["derivation_proof_digest"] != proof["derivation_proof_digest"]:
             raise Refusal("authority_missing_or_ambiguous: derivation proof digest does not match the authority journal", 2)
 
-        # Independent revalidation of containment, effects, budget, predecessor/closure,
-        # and checkpoint against the root authority envelope before binding.
+        # Independent revalidation of containment, effects, budget, predecessor/closure, checkpoint
+        # and, for a rework child, the residual findings lineage against the root authority
+        # envelope before binding. Nothing below may open a child this does not accept.
+        derivation = (self.authority.state.children.get(self.batch_id) or {}).get("derivation")
         story_authority.assert_child_proposal_within_envelope(
             proposal=proposal, payload=self.authority.payload,
-            state=self.authority.state, authority=self.authority)
+            state=self.authority.state, authority=self.authority, proof=proof, derivation=derivation,
+            spec_paths=[*story_authority.proof_spec_paths(proof), *spec_paths])
 
         story_authority.assert_batch_matches_child_proposal(
             batch=self.batch, units=self.units.values(), proposal=proposal, payload=self.authority.payload)

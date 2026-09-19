@@ -47,8 +47,8 @@ class AutoStoryRuntimeTest(unittest.TestCase):
     # ---- scaffolding --------------------------------------------------------------------
 
     def auto_story_fixture(self, *, budget: int = 8, max_rework: int = 2, max_calls: int = 8,
-                           limits: dict | None = None) -> Fixture:
-        fx = Fixture(self.root, units=1, max_calls=max_calls, max_rework=max_rework, limits=limits)
+                           limits: dict | None = None, root: Path | None = None) -> Fixture:
+        fx = Fixture(root or self.root, units=1, max_calls=max_calls, max_rework=max_rework, limits=limits)
         spec_sha = hashlib.sha256(SPEC_A.encode()).hexdigest()
         payload = story.build_authority_payload(
             authority_id="A001", work_ref="T001", authorized_spec_revision=spec_sha[:16],
@@ -90,6 +90,70 @@ class AutoStoryRuntimeTest(unittest.TestCase):
 
     def authority(self, fx: Fixture) -> story.StoryAuthority:
         return story.StoryAuthority(self.envelope, fx.repo / story.RUNTIME_AUTHORITY_DIR / "A001", repo=fx.repo)
+
+    def rework_child_fixture(self, name: str, residual: list[dict], *, declared_items=..., proof_digest=...,
+                             journal_digest=...) -> Fixture:
+        """B001 closes with `residual` at HEAD; B002 continues it and is persisted and journaled
+        directly, past record_child_derived, so only the Runtime bind stands between it and
+        child_open. The keyword overrides forge one part of the lineage at a time."""
+        root = self.root / name
+        root.mkdir()
+        fx = self.auto_story_fixture(root=root)
+        head = git(fx.repo, "rev-parse", "HEAD")
+        tree = git(fx.repo, "rev-parse", "HEAD^{tree}")
+        with self.authority(fx) as auth:
+            auth.record_child_closed(
+                child_batch_id="B001", governance_base_commit=head, checker_reviewed_commit=head,
+                checker_reviewed_tree=tree, functional_checkpoint_commit=head, functional_checkpoint_tree=tree,
+                checker_verdict="changes_requested", unresolved_action_items=residual)
+            closure_digest = auth.state.closure_of("B001")["unresolved_action_items_digest"]
+            proposal = story.derive_child_proposal(
+                authority=auth, child_batch_id="B002", action_items=residual, previous_child_id="B001",
+                model_call_budget=8, governance_base_commit=head, story_baseline_commit=head)
+            if declared_items is not ...:
+                proposal["derived_from_action_items"] = declared_items
+            parent = auth.state.children["B001"]["derivation"]
+            proof = {
+                "schema_version": 1, "authority_id": "A001", "work_ref": "T001", "child_batch_id": "B002",
+                "parent_child_batch_id": "B001", "root_authority_digest": auth.root_digest,
+                "parent_authority_digest": parent["derivation_proof_digest"],
+                "parent_batch_digest": parent["child_proposal_digest"],
+                "child_proposal_digest": story.digest_of(proposal),
+                "functional_parent_checkpoint": proposal["functional_parent_checkpoint"],
+                "unresolved_action_items_digest": closure_digest if proof_digest is ... else proof_digest,
+                "spec_paths": [], "granted_model_calls": 8, "checks": [],
+            }
+            proof["derivation_proof_digest"] = story.digest_of(proof)
+            (auth.runtime_dir / "proposals").mkdir(parents=True, exist_ok=True)
+            auth.child_proposal_path("B002").write_text(json.dumps(proposal), encoding="utf-8")
+            auth.child_proof_path("B002").write_text(json.dumps(proof), encoding="utf-8")
+            auth.journal.append(
+                "child_derived", authority_id="A001", child_batch_id="B002", parent_child_batch_id="B001",
+                root_authority_digest=proof["root_authority_digest"],
+                parent_authority_digest=proof["parent_authority_digest"],
+                parent_batch_digest=proof["parent_batch_digest"],
+                child_proposal_digest=proof["child_proposal_digest"],
+                derivation_proof_digest=proof["derivation_proof_digest"], granted_model_calls=8,
+                functional_parent_checkpoint=proposal["functional_parent_checkpoint"],
+                unresolved_action_items_digest=(proof["unresolved_action_items_digest"] if journal_digest is ...
+                                                else journal_digest))
+        fx.batch["id"] = "B002"
+        fx.batch["authorization"].update({"child_proposal_digest": proof["child_proposal_digest"],
+                                          "derivation_proof_digest": proof["derivation_proof_digest"]})
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+        return fx
+
+    def assert_bind_refused(self, fx: Fixture, reason: str, fragment: str) -> None:
+        with self.assertRaises(tl_runtime.Refusal) as raised:
+            fx.runtime().acquire()
+        self.assertIsInstance(raised.exception.__cause__, story.HardStop, str(raised.exception))
+        self.assertEqual(raised.exception.__cause__.reason, reason, raised.exception.__cause__.detail)
+        self.assertIn(fragment, raised.exception.__cause__.detail)
+        authority = self.authority(fx)
+        authority.state = authority.journal.fold()
+        self.assertEqual(authority.state.children["B002"]["state"], "derived")
+        self.assertNotIn("child_open", [e["kind"] for e in authority.journal.read()[0]
+                                        if e.get("child_batch_id") == "B002"])
 
     # ---- §2.12 one charge, two ledgers ---------------------------------------------------
 
@@ -363,6 +427,84 @@ class AutoStoryRuntimeTest(unittest.TestCase):
         self.assertEqual(authority.state.consecutive_failures, streak)
         terminal = [e for e in authority.journal.read()[0] if e["kind"] in {"child_closed", "child_failed"}]
         self.assertEqual(len(terminal), 1)
+
+    # ---- R8: the Runtime bind re-proves the residual lineage before child_open -------------
+
+    def test_runtime_bind_opens_an_honest_rework_child(self) -> None:
+        """Control for the refusals below: the same forged-free lineage binds and opens."""
+        fx = self.rework_child_fixture("honest", [PATCH_ITEM])
+        runtime = fx.runtime()
+        runtime.acquire()
+        runtime.release()
+        authority = self.authority(fx)
+        authority.state = authority.journal.fold()
+        self.assertEqual(authority.state.children["B002"]["state"], "open")
+
+    def test_runtime_bind_refuses_rework_child_without_canonical_residual(self) -> None:
+        cases = {
+            # (residual at closure, forged overrides, reason, detail fragment)
+            "none": ([PATCH_ITEM], {"declared_items": None}, "state_integrity", "schema"),
+            "empty_declared": ([PATCH_ITEM], {"declared_items": []}, "state_integrity",
+                               "declares no residual finding"),
+            "empty_closure": ([], {"declared_items": []}, "state_integrity", "residual_findings_present"),
+            "human": ([dict(PATCH_ITEM, target_role="human")], {}, "human", "patch_only_findings"),
+            "bad_spec": ([dict(PATCH_ITEM, category="bad_spec")], {}, "bad_spec", "patch_only_findings"),
+            "proof_digest": ([PATCH_ITEM], {"proof_digest": "0" * 64}, "state_integrity",
+                             "proof unresolved_action_items_digest"),
+            "journal_digest": ([PATCH_ITEM], {"journal_digest": "0" * 64}, "state_integrity",
+                               "journaled unresolved_action_items_digest"),
+            "swapped_items": ([PATCH_ITEM], {"declared_items": [
+                {"id": "R9", "category": "patch", "target_role": "maker", "location": "pkg/greet.py:1",
+                 "required_action": "something else", "severity": "medium"}]},
+                "state_integrity", "differ from the ones recorded"),
+        }
+        for name, (residual, forged, reason, fragment) in cases.items():
+            with self.subTest(case=name):
+                fx = self.rework_child_fixture(name, residual, **forged)
+                self.assert_bind_refused(fx, reason, fragment)
+
+    # ---- R9: a terminal child is neither re-derived nor rebound ------------------------------
+
+    def test_closed_child_cannot_be_rederived_and_rebound_by_the_runtime(self) -> None:
+        fx = self.auto_story_fixture(budget=6, max_rework=1, max_calls=6, limits={"stagnation_rounds": 6})
+        fx.script("maker", MAKER_OK)
+        fx.script("checker", [{"verdict": "changes_requested", "action_items": [PATCH_ITEM]}])
+        self.assertEqual(fx.runtime().run(), "blocked")
+        authority = self.authority(fx)
+        blobs = {path.name: path.read_bytes() for path in (authority.runtime_dir / "proposals").glob("*.json")}
+        authority.state = authority.journal.fold()
+        self.assertEqual(authority.state.children["B001"]["state"], "closed")
+        lineage = [e for e in authority.journal.read()[0] if e["kind"].startswith("child_")]
+
+        # A rewritten proposal for the same id, with a proof that digests correctly, is refused.
+        with authority:
+            original, original_proof = authority.load_child_derivation("B001")
+            rewritten = dict(original, model_call_budget=original["model_call_budget"] - 1)
+            self.assertNotEqual(story.digest_of(rewritten), story.digest_of(original))
+            proof = dict(original_proof, child_proposal_digest=story.digest_of(rewritten),
+                         granted_model_calls=rewritten["model_call_budget"])
+            proof.pop("derivation_proof_digest")
+            proof["derivation_proof_digest"] = story.digest_of(proof)
+            with self.assertRaises(story.HardStop) as raised:
+                authority.record_child_derived(rewritten, proof)
+            self.assertEqual(raised.exception.reason, "state_integrity")
+            self.assertIn("already derived", raised.exception.detail)
+
+        # Rebinding the batch to the refused derivation fails; the child stays terminal.
+        batch = json.loads(fx.batch_path.read_text(encoding="utf-8"))
+        batch["authorization"].update({"child_proposal_digest": proof["child_proposal_digest"],
+                                       "derivation_proof_digest": proof["derivation_proof_digest"]})
+        fx.batch_path.write_text(json.dumps(batch), encoding="utf-8")
+        with self.assertRaises(tl_runtime.Refusal) as rebind:
+            fx.runtime().acquire()
+        self.assertIn("authority_missing_or_ambiguous", str(rebind.exception))
+
+        authority.state = authority.journal.fold()
+        self.assertEqual(authority.state.children["B001"]["state"], "closed")
+        self.assertEqual([e for e in authority.journal.read()[0] if e["kind"].startswith("child_")], lineage)
+        self.assertEqual({path.name: path.read_bytes()
+                          for path in (authority.runtime_dir / "proposals").glob("*.json")}, blobs)
+        self.assertEqual(len(authority.state.derived), 1)
 
     # ---- §5 retrocompatibility ------------------------------------------------------------
 

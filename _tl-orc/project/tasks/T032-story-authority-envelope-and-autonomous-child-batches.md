@@ -14,7 +14,7 @@ spec_author: orchestrator
 spec_revision: 1
 rework_round: 0
 affects_context: []
-effective_authors: [anthropic]
+effective_authors: [anthropic, openai]
 checker_independence: required
 content_paths: [scripts/tl_story_authority.py, scripts/tl_runtime.py, scripts/tl_job.py, schemas/story-authority-envelope.schema.json, schemas/story-child-proposal.schema.json, schemas/batch.schema.json, schemas/review-result.schema.json, docs/RUNTIME.md, docs/WORK_MODEL.md, docs/EXECUTION_PROTOCOL.md, prompts/orchestrator.md, tests/story_authority_support.py, tests/test_auto_story_replay.py, tests/test_auto_story_runtime_integration.py, tests/test_story_authority_digest.py, tests/test_story_child_derivation.py, tests/test_story_functional_lineage.py, tests/test_story_global_accounting.py, tests/test_story_protected_paths.py, tests/test_story_operational_limits.py, tests/test_story_cognitive_barrier.py, tests/fixtures/auto_story_b013_b014/README.md, distribution-manifest.json, CHANGELOG.md, README.md, SKILL.md, docs/PROJECT_CONFIGURATION.md, _tl-orc/project/STATUS.md]
 

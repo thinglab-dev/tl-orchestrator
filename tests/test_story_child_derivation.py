@@ -345,26 +345,44 @@ class ChildDerivationTest(StoryCase):
         self.assertEqual(raised.exception.reason, "state_integrity")
         self.assertIn("differ from the ones recorded", raised.exception.detail)
 
+        auth2 = self.authority(envelope=self.frozen_authority(authority_id="A002"))
+        self._setup_closed_predecessor(auth2, residual_items=[self.patch_item("R5")])
+
+        proposal2 = story.derive_child_proposal(
+            authority=auth2, child_batch_id="B014", action_items=forged_residual, previous_child_id="B013",
+            model_call_budget=2, governance_base_commit=self.governance_base,
+            story_baseline_commit=self.governance_base)
+
         dummy_proof = {
+            "schema_version": 1,
+            "authority_id": "A002",
+            "work_ref": proposal2["work_ref"],
             "child_batch_id": "B014",
-            "child_proposal_digest": story.digest_of(proposal),
+            "parent_child_batch_id": "B013",
+            "root_authority_digest": auth2.envelope["root_authority_digest"],
+            "parent_authority_digest": auth2.envelope["root_authority_digest"],
+            "parent_batch_digest": "",
+            "child_proposal_digest": story.digest_of(proposal2),
             "unresolved_action_items_digest": story.unresolved_action_items_digest(forged_residual),
+            "granted_model_calls": 2,
+            "functional_parent_checkpoint": proposal2["functional_parent_checkpoint"],
             "checks": [],
         }
         dummy_proof["derivation_proof_digest"] = self._proof_digest(dummy_proof)
         with self.assertRaises(story.HardStop) as raised_rec:
-            auth.record_child_derived(proposal, dummy_proof)
+            auth2.record_child_derived(proposal2, dummy_proof)
         self.assertEqual(raised_rec.exception.reason, "state_integrity")
+        self.assertIn("residual_lineage", raised_rec.exception.detail)
 
-        auth.refold()
-        self.assertNotIn("B014", auth.state.children)
-        self.assertFalse(auth.child_proposal_path("B014").exists())
-        self.assertFalse(auth.child_proof_path("B014").exists())
-        journal_events = auth.journal.read()[0]
+        auth2.refold()
+        self.assertNotIn("B014", auth2.state.children)
+        self.assertFalse(auth2.child_proposal_path("B014").exists())
+        self.assertFalse(auth2.child_proof_path("B014").exists())
+        journal_events = auth2.journal.read()[0]
         self.assertEqual([e for e in journal_events if e.get("child_batch_id") == "B014" and e["kind"] in {"child_derived", "child_open"}], [])
 
-    def test_rework_child_divergent_proof_digest_refused_at_persistence(self) -> None:
-        """A proof declaring forged proposal digest or residual items digest is refused at persistence."""
+    def test_rework_child_divergent_proof_digest_refused_at_persistence_proposal_digest(self) -> None:
+        """A proof declaring forged proposal digest is refused at persistence."""
         auth = self.authority()
         residual = [self.patch_item("R5")]
         self._setup_closed_predecessor(auth, residual_items=residual)
@@ -374,31 +392,43 @@ class ChildDerivationTest(StoryCase):
             story_baseline_commit=self.governance_base)
         valid_proof = story.verify_derivation(auth, proposal, action_items=residual, spec_paths=SPEC_PATHS)
 
-        # Vector A: proof with forged child_proposal_digest
         forged_proof_a = copy.deepcopy(valid_proof)
         forged_proof_a["child_proposal_digest"] = "0" * 64
         forged_proof_a["derivation_proof_digest"] = self._proof_digest(forged_proof_a)
         with self.assertRaises(story.HardStop) as raised_a:
             auth.record_child_derived(proposal, forged_proof_a)
         self.assertEqual(raised_a.exception.reason, "state_integrity")
+        self.assertIn("was taken over a different child proposal", raised_a.exception.detail)
 
-        # Vector B: proof with forged unresolved_action_items_digest
+        auth.refold()
+        self.assertNotIn("B014", auth.state.children)
+        self.assertFalse(auth.child_proposal_path("B014").exists())
+        self.assertFalse(auth.child_proof_path("B014").exists())
+
+    def test_rework_child_divergent_proof_digest_refused_at_persistence_residual_digest(self) -> None:
+        """A proof declaring forged residual items digest is refused at persistence."""
+        auth = self.authority()
+        residual = [self.patch_item("R5")]
+        self._setup_closed_predecessor(auth, residual_items=residual)
+        proposal = story.derive_child_proposal(
+            authority=auth, child_batch_id="B014", action_items=residual, previous_child_id="B013",
+            model_call_budget=2, governance_base_commit=self.governance_base,
+            story_baseline_commit=self.governance_base)
+        valid_proof = story.verify_derivation(auth, proposal, action_items=residual, spec_paths=SPEC_PATHS)
+
         forged_proof_b = copy.deepcopy(valid_proof)
         forged_proof_b["unresolved_action_items_digest"] = "1" * 64
         forged_proof_b["derivation_proof_digest"] = self._proof_digest(forged_proof_b)
         with self.assertRaises(story.HardStop) as raised_b:
             auth.record_child_derived(proposal, forged_proof_b)
         self.assertEqual(raised_b.exception.reason, "state_integrity")
+        self.assertIn("carries unresolved_action_items_digest", raised_b.exception.detail)
 
         auth.refold()
         self.assertNotIn("B014", auth.state.children)
-        self.assertFalse(auth.child_proposal_path("B014").exists())
-        self.assertFalse(auth.child_proof_path("B014").exists())
-        journal_events = auth.journal.read()[0]
-        self.assertEqual([e for e in journal_events if e.get("child_batch_id") == "B014" and e["kind"] in {"child_derived", "child_open"}], [])
 
-    def test_rework_child_forged_digest_closure_proof_proposal_refused_before_child_open(self) -> None:
-        """Forged or divergent digest between closure, proof, and proposal is refused before child_open; valid derivation not rewritten."""
+    def test_rework_child_forged_digest_proposal_refused_before_child_open(self) -> None:
+        """Forged proposal digest is refused before child_open."""
         auth = self.authority()
         residual = [self.patch_item("R5")]
         self._setup_closed_predecessor(auth, residual_items=residual)
@@ -409,13 +439,6 @@ class ChildDerivationTest(StoryCase):
         proof = story.verify_derivation(auth, proposal, action_items=residual, spec_paths=SPEC_PATHS)
         auth.record_child_derived(proposal, proof)
 
-        # Baseline: valid derivation exists and is persisted
-        auth.refold()
-        self.assertEqual(auth.state.children["B014"]["state"], "derived")
-        orig_proposal_bytes = auth.child_proposal_path("B014").read_bytes()
-        orig_proof_bytes = auth.child_proof_path("B014").read_bytes()
-        valid_derivation_record = copy.deepcopy(auth.state.children["B014"]["derivation"])
-
         # Vector 1: Tamper proposal blob on disk with divergent content (proposal digest divergence)
         tampered_proposal = copy.deepcopy(proposal)
         tampered_proposal["model_call_budget"] = 99
@@ -424,9 +447,21 @@ class ChildDerivationTest(StoryCase):
         with self.assertRaises(story.HardStop) as raised_prop:
             auth.load_child_derivation("B014", spec_paths=SPEC_PATHS)
         self.assertEqual(raised_prop.exception.reason, "state_integrity")
+        self.assertIn("digests to", raised_prop.exception.detail)
 
-        # Vector 2: Restore proposal blob, tamper proof blob on disk (proof digest divergence)
-        auth.child_proposal_path("B014").write_bytes(orig_proposal_bytes)
+    def test_rework_child_forged_digest_proof_refused_before_child_open(self) -> None:
+        """Forged proof digest is refused before child_open."""
+        auth = self.authority()
+        residual = [self.patch_item("R5")]
+        self._setup_closed_predecessor(auth, residual_items=residual)
+        proposal = story.derive_child_proposal(
+            authority=auth, child_batch_id="B014", action_items=residual, previous_child_id="B013",
+            model_call_budget=2, governance_base_commit=self.governance_base,
+            story_baseline_commit=self.governance_base)
+        proof = story.verify_derivation(auth, proposal, action_items=residual, spec_paths=SPEC_PATHS)
+        auth.record_child_derived(proposal, proof)
+
+        # Vector 2: Tamper proof blob on disk (proof digest divergence)
         tampered_proof = copy.deepcopy(proof)
         tampered_proof["unresolved_action_items_digest"] = "e" * 64
         auth.child_proof_path("B014").write_text(story.canonical_json(tampered_proof), encoding="utf-8")
@@ -434,19 +469,35 @@ class ChildDerivationTest(StoryCase):
         with self.assertRaises(story.HardStop) as raised_proof:
             auth.load_child_derivation("B014", spec_paths=SPEC_PATHS)
         self.assertEqual(raised_proof.exception.reason, "state_integrity")
+        self.assertIn("digests to", raised_proof.exception.detail)
+
+    def test_rework_child_forged_digest_closure_refused_before_child_open(self) -> None:
+        """Divergent closure digest is refused before child_open; valid derivation not rewritten."""
+        auth = self.authority()
+        residual = [self.patch_item("R5")]
+        self._setup_closed_predecessor(auth, residual_items=residual)
+        proposal = story.derive_child_proposal(
+            authority=auth, child_batch_id="B014", action_items=residual, previous_child_id="B013",
+            model_call_budget=2, governance_base_commit=self.governance_base,
+            story_baseline_commit=self.governance_base)
+        proof = story.verify_derivation(auth, proposal, action_items=residual, spec_paths=SPEC_PATHS)
+        auth.record_child_derived(proposal, proof)
+
+        auth.refold()
+        orig_proposal_bytes = auth.child_proposal_path("B014").read_bytes()
+        orig_proof_bytes = auth.child_proof_path("B014").read_bytes()
+        valid_derivation_record = copy.deepcopy(auth.state.children["B014"]["derivation"])
 
         # Vector 3: Closure digest diverges from proof and proposal
-        auth.child_proof_path("B014").write_bytes(orig_proof_bytes)
         state_closure = auth.state.children["B013"]["closure"]
         orig_closure_digest = state_closure["unresolved_action_items_digest"]
         state_closure["unresolved_action_items_digest"] = "d" * 64
-        # Checked without journaling (authority=None): a journaled stop would be terminal (R18) and
-        # this vector is only about the divergence being detected.
         with self.assertRaises(story.HardStop) as raised_closure:
             story.assert_child_proposal_within_envelope(
                 proposal, auth.payload, auth.state, None, proof=proof,
                 derivation=valid_derivation_record, spec_paths=SPEC_PATHS)
         self.assertEqual(raised_closure.exception.reason, "state_integrity")
+        self.assertIn("residual_lineage:", raised_closure.exception.detail)
         state_closure["unresolved_action_items_digest"] = orig_closure_digest
 
         # Invariants: no child_open was recorded; valid derivation was not rewritten
@@ -456,7 +507,6 @@ class ChildDerivationTest(StoryCase):
         open_events = [e for e in auth.journal.read()[0] if e["kind"] == "child_open" and e.get("child_batch_id") == "B014"]
         self.assertEqual(open_events, [])
 
-        # Verify immutability of valid blobs and successful canonical derivation load
         self.assertEqual(auth.child_proposal_path("B014").read_bytes(), orig_proposal_bytes)
         self.assertEqual(auth.child_proof_path("B014").read_bytes(), orig_proof_bytes)
         recovered_prop, recovered_proof = auth.load_child_derivation("B014", spec_paths=SPEC_PATHS)

@@ -1448,7 +1448,7 @@ class Runtime:
         for uid, record in fold.units.items():
             journaled += [(f"{uid}.commit", record.commit), (f"{uid}.base_commit", record.base_commit)]
             journaled += [(f"{uid}.checkpoint", commit) for commit in record.checkpoints]
-        
+
         has_progress = any(r.commit or r.checkpoints for r in fold.units.values())
         base_rev = self.git.rev(self.base_branch)
         proposal_base = (proposal.get("lineage") or {}).get("governance_base_commit")
@@ -2172,7 +2172,7 @@ class Runtime:
         resolved, items = self._resolve_pending_verification(items, gate_results)
         for item in resolved:
             self.note(f"{uid}: Checker item {item.get('id')} resolved by runtime evidence (gate already passed): {str(item.get('summary', ''))[:120]}")
-        
+
         record.findings = items
         self.unit_state(uid, record.state, record.reason, findings=items, tree=tree)
 
@@ -2554,7 +2554,7 @@ class Runtime:
                             return {"_status": "ambiguous", "merged": False, "queued": True, "detail": "gh pr merge returned success but gh pr view failed afterwards; verify and retry"}
                         if str(after.get("state", "")).upper() != "MERGED":
                             return {"_status": "ambiguous", "merged": False, "queued": True, "detail": f"gh pr merge returned success but the pull request is still {after.get('state')} (merge queue or delayed merge); verify and retry"}
-                        
+
                         term_head = after.get("headRefOid")
                         term_base = after.get("baseRefOid")
                         if not term_head or not term_base:

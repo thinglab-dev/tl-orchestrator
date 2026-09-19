@@ -2206,7 +2206,7 @@ def assert_child_proposal_within_envelope(
                 expected_baseline = (prev_proposal.get("lineage") or {}).get("story_baseline_commit")
                 if (proposal.get("lineage") or {}).get("story_baseline_commit") != expected_baseline:
                     _fail("state_integrity", "story_baseline_commit must not change between children")
-                
+
             try:
                 return assert_residual_lineage(proposal, state, payload, spec_paths=spec_paths, proof=proof,
                                                derivation=derivation)
@@ -2378,7 +2378,7 @@ def verify_derivation(
               f"the child must start exactly at the unmerged commit the previous Checker reviewed "
               f"({expected['commit'][:12]}), got {(child_proposal.get('functional_parent_checkpoint') or {}).get('commit', 'none')}",
               expected=expected, observed=child_proposal.get("functional_parent_checkpoint"))
-        
+
         prev_proposal, _ = authority.load_child_derivation(previous_id)
         expected_baseline = (prev_proposal.get("lineage") or {}).get("story_baseline_commit")
         check("story_baseline_inherited", (child_proposal.get("lineage") or {}).get("story_baseline_commit") == expected_baseline,

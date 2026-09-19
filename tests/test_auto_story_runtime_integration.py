@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -793,6 +792,164 @@ class AutoStoryRuntimeTest(unittest.TestCase):
         events = [e["kind"] for e in auth.journal.read()[0]]
         self.assertNotIn("child_open", events)
 
+
+
+
+
+    def test_auto_story_two_child_cumulative_review(self) -> None:
+        # A) Two-child + cumulative review
+        fx = self.auto_story_fixture(budget=8, max_rework=0, max_calls=8, limits={"stagnation_rounds": 6})
+
+        # Maker scripts: B001 cria pkg/A.txt; B002 cria pkg/B.txt
+        fx.script("maker", [
+            {"files": {"pkg/A.txt": "Hello A"}},
+            {"files": {"pkg/B.txt": "Hello B"}}
+        ])
+
+        # Checker: primeiro changes_requested com patch_item válido em pkg/B.txt:1; segundo approved.
+        patch_item_b = {
+            "id": "R1", "severity": "medium", "category": "patch", "target_role": "maker",
+            "location": "pkg/B.txt:1", "problem": "need B", "evidence": "no B", "required_action": "make B"
+        }
+        fx.script("checker", [
+            {"verdict": "changes_requested", "action_items": [patch_item_b]},
+            {"verdict": "approved", "action_items": []}
+        ])
+
+        rt = fx.runtime()
+        result = rt.run_story()
+        self.assertEqual(result, "done")
+        self.assertEqual(rt.story_runtime.batch_id, "B002")
+
+        auth = self.authority(fx)
+        auth.refold()
+        self.assertEqual(auth.state.child_state("B001"), "closed")
+        self.assertEqual(auth.state.closure_of("B001")["checker_verdict"], "changes_requested")
+        self.assertEqual(auth.state.child_state("B002"), "closed")
+        self.assertEqual(auth.state.closure_of("B002")["checker_verdict"], "approved")
+        self.assertEqual(auth.state.close_state, "done")
+
+        # O pack REAL do Checker de B002 está em rt.story_runtime.state_dir / packs.
+        # O pack final contém pkg/A.txt E pkg/B.txt e diff --git para ambos.
+
+        # Find the checker pack for B002
+        packs_dir = rt.story_runtime.state_dir / "packs"
+        checker_packs = list(packs_dir.glob("*checker*.md"))
+        self.assertTrue(len(checker_packs) >= 1)
+        # Use the last checker pack
+        checker_packs.sort()
+        pack_content = checker_packs[-1].read_text(encoding="utf-8")
+
+        self.assertIn("pkg/A.txt", pack_content)
+        self.assertIn("pkg/B.txt", pack_content)
+        self.assertIn("diff --git a/pkg/A.txt b/pkg/A.txt", pack_content)
+        self.assertIn("diff --git a/pkg/B.txt b/pkg/B.txt", pack_content)
+
+    def test_auto_story_resume_after_governance_branch(self) -> None:
+        # B) Resume após governance branch
+        fx = self.auto_story_fixture(budget=8, max_rework=0, max_calls=8, limits={"stagnation_rounds": 6})
+
+        fx.script("maker", [
+            {"files": {"pkg/A.txt": "Hello A"}},
+            {"files": {"pkg/B.txt": "Hello B"}}
+        ])
+
+        patch_item_b = {
+            "id": "R1", "severity": "medium", "category": "patch", "target_role": "maker",
+            "location": "pkg/B.txt:1", "problem": "need B", "evidence": "no B", "required_action": "make B"
+        }
+        fx.script("checker", [
+            {"verdict": "changes_requested", "action_items": [patch_item_b]},
+            {"verdict": "approved", "action_items": []}
+        ])
+
+        # Primeira instância runtime.run()
+        rt1 = fx.runtime()
+        result1 = rt1.run()
+        self.assertEqual(result1, "blocked")
+
+        # Deve deixar branch main
+        current_branch = git(fx.repo, "branch", "--show-current")
+        self.assertEqual(current_branch, "main")
+
+        # e B001 closed changes_requested
+        auth = self.authority(fx)
+        auth.refold()
+        self.assertEqual(auth.state.child_state("B001"), "closed")
+        self.assertEqual(auth.state.closure_of("B001")["checker_verdict"], "changes_requested")
+
+        # Nova instância fx.runtime().run_story() retorna done e deriva/executa B002 automaticamente
+        rt2 = fx.runtime()
+        result2 = rt2.run_story()
+        self.assertEqual(result2, "done")
+
+        # Valide B002 closed/approved e authority done
+        auth.refold()
+        self.assertEqual(auth.state.child_state("B002"), "closed")
+        self.assertEqual(auth.state.closure_of("B002")["checker_verdict"], "approved")
+        self.assertEqual(auth.state.close_state, "done")
+
+    def test_auto_story_crash_between_batch_state_terminal_and_child_closed(self) -> None:
+        # C) Crash entre batch_state terminal e child_closed
+        fx = self.auto_story_fixture(budget=8, max_rework=0, max_calls=8, limits={"stagnation_rounds": 6})
+
+        fx.script("maker", [{"files": {"pkg/A.txt": "Hello A"}}, {"files": {"pkg/B.txt": "Hello B"}}])
+        patch_item_b = {
+            "id": "R1", "severity": "medium", "category": "patch", "target_role": "maker",
+            "location": "pkg/B.txt:1", "problem": "need", "evidence": "no", "required_action": "do"
+        }
+        fx.script("checker", [
+            {"verdict": "changes_requested", "action_items": [patch_item_b]},
+            {"verdict": "approved", "action_items": []}
+        ])
+
+        root = fx.runtime()
+        s1 = root.run()
+        self.assertEqual(s1, "blocked")
+
+        successor, outcome = root.advance_story(s1)
+        self.assertEqual(successor.batch_id, "B002")
+
+        original_close_child = successor._close_child_batch
+        crashed = False
+        def monkeypatched_close_child(state: str) -> None:
+            nonlocal crashed
+            if not crashed:
+                crashed = True
+                raise RuntimeError('simulated crash')
+            original_close_child(state)
+
+        successor._close_child_batch = monkeypatched_close_child
+
+        with self.assertRaises(RuntimeError) as raised:
+            successor.run()
+        self.assertEqual(str(raised.exception), "simulated crash")
+        self.assertTrue(crashed)
+
+        # Confirme que batch journal está terminal/closed
+        successor.refold()
+        self.assertTrue(successor.fold.closed)
+        self.assertEqual(successor.fold.batch_state, "done")
+
+        # mas authority child ainda não tem closure terminal correspondente
+        auth = self.authority(fx)
+        auth.acquire()
+        auth.refold()
+        self.assertEqual(auth.state.child_state("B002"), "open")
+        self.assertIsNone(auth.state.closure_of("B002"))
+        auth.release()
+
+        # crie NOVA instância fx.runtime() sem patch e chame run_story()
+        rt2 = fx.runtime()
+        result = rt2.run_story()
+        self.assertEqual(result, "done")
+
+        # advance_story deriva B002 e a Story termina done
+        auth.refold()
+        self.assertEqual(auth.state.child_state("B001"), "closed")
+        self.assertEqual(auth.state.child_state("B002"), "closed")
+        self.assertEqual(auth.state.closure_of("B002")["checker_verdict"], "approved")
+        self.assertEqual(auth.state.close_state, "done")
 
 if __name__ == "__main__":
     unittest.main()

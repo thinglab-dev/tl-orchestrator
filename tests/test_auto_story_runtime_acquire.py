@@ -46,7 +46,7 @@ class RuntimeAcquireTest(unittest.TestCase):
         story.publish_authority(fx.repo, envelope)
         git(fx.repo, "add", "-A")
         git(fx.repo, "commit", "-q", "-m", "freeze")
-        
+
         with StoryAuthority.open_for(fx.repo, "A001") as auth:
             proposal = story.derive_child_proposal(
                 authority=auth, child_batch_id="B001", action_items=[], previous_child_id=None,
@@ -54,7 +54,7 @@ class RuntimeAcquireTest(unittest.TestCase):
                 story_baseline_commit=git(fx.repo, "rev-parse", "HEAD"))
             proof = story.verify_derivation(auth, proposal)
             auth.record_child_derived(proposal, proof)
-        
+
         fx.batch["authorization"].update({
             "story_authority_mode": "AUTO_STORY", "story_authority_id": "A001",
             "root_authority_digest": envelope["root_authority_digest"],
@@ -69,12 +69,12 @@ class RuntimeAcquireTest(unittest.TestCase):
         # write invalid journal line to trigger failure after bind
         (fx.state_dir).mkdir(parents=True, exist_ok=True)
         (fx.state_dir / "journal.jsonl").write_text("invalid json\n", encoding="utf-8")
-        
+
         rt1 = fx.runtime()
         with self.assertRaises(Refusal) as ctx:
             rt1.acquire()
         self.assertIn("unrecoverable_harness_failure_or_ambiguous_dispatch", str(ctx.exception))
-        
+
         # rt2 should be able to acquire because rt1 released locks
         (fx.state_dir / "journal.jsonl").write_text("", encoding="utf-8")
         rt2 = fx.runtime()
@@ -84,14 +84,13 @@ class RuntimeAcquireTest(unittest.TestCase):
     def test_acquire_releases_all_locks_on_bind_exception(self):
         fx = self.fixture()
         rt1 = fx.runtime()
-        
+
         from unittest import mock
         with mock.patch.object(Runtime, '_bind_and_verify_auto_story_child', side_effect=RuntimeError("mock bind error")):
             with self.assertRaisesRegex(RuntimeError, "mock bind error"):
                 rt1.acquire()
-                
+
         # rt2 should be able to acquire because rt1 released locks
         rt2 = fx.runtime()
         rt2.acquire()
         rt2.release()
-

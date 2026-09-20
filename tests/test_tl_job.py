@@ -33,6 +33,14 @@ import tl_job  # noqa: E402  - path is prepared above
 
 AUTHORIZATION = "story:T012/authorization:2026-09-11"
 
+# A delivered terminal receipt requires containment that can account for a child which
+# left the process group with ``setsid()``. Windows job objects supply that boundary and
+# Linux supplies it through child-subreaper plus /proc. macOS has neither primitive, so
+# its process-group transport may execute the unit but must never deliver a final receipt.
+# The pure classifier and refusal cases still run on every host below.
+FINAL_DELIVERY_SUPPORTED = os.name == "nt" or sys.platform.startswith("linux")
+FINAL_DELIVERY_ONLY = "final delivery needs whole-tree escaped-descendant accounting on this platform"
+
 
 class JobCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -52,6 +60,12 @@ class JobCase(unittest.TestCase):
             return
         deadline = time.monotonic() + limit
         for job in jobs.iterdir():
+            # Some path-validation cases deliberately create a bare directory to prove it
+            # does not become a job. Only a published claim can have a supervisor that needs
+            # draining; waiting 90 seconds for the synthetic directory turns that proof into
+            # an accidental suite timeout.
+            if not (job / "manifest.json").is_file():
+                continue
             while not (job / "result.json").exists() and time.monotonic() < deadline:
                 time.sleep(0.05)
         time.sleep(0.2)
@@ -176,6 +190,7 @@ class JobCase(unittest.TestCase):
         return 0
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class ReceiptLimitsTest(JobCase):
     def test_large_stdout_stays_on_disk_and_out_of_the_receipt(self) -> None:
         script = self.child(
@@ -251,6 +266,7 @@ class ReceiptLimitsTest(JobCase):
         json.dumps(cut)  # a broken codepoint would raise here
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class IdentityTest(JobCase):
     def effect_script(self, sleep: float = 0.0) -> Path:
         marker = (self.work / "effect.log").as_posix()
@@ -311,6 +327,7 @@ class IdentityTest(JobCase):
         self.assertEqual(self.effect_lines(), 1)
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class FailureTest(JobCase):
     def test_nonexistent_command_fails_explicitly_with_no_effects(self) -> None:
         missing = str(self.work / "there-is-no-such-binary")
@@ -403,6 +420,7 @@ class FailureTest(JobCase):
         self.assertIn("error", receipt)
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class InheritedResultTest(JobCase):
     """A result file speaks for a unit only when that unit is the one that wrote it."""
 
@@ -498,6 +516,7 @@ class UninspectableResultTest(JobCase):
         self.assertFalse(result["containment"]["unit_ran"])
         self.assertFalse(result["containment"]["established"])
 
+    @unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
     def test_the_same_arrangement_runs_the_command_when_the_path_is_inspectable(self) -> None:
         """The discrimination: the denial is what refuses, not the arrangement around it."""
         marker = self.work / "the-unit-ran"
@@ -649,6 +668,7 @@ class InputTest(JobCase):
         # The refusal comes before any write, so the reading commands answer the same way.
         self.every_command_refuses(outside)
 
+    @unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
     def test_an_anchors_link_that_stays_inside_the_state_directory_still_runs(self) -> None:
         """The discrimination: resolution refuses the escape without refusing a contained link."""
         real_anchors = self.state / "real-anchors"
@@ -659,6 +679,7 @@ class InputTest(JobCase):
         self.assertEqual(self.wait()[0], tl_job.EXIT_OK)
         self.assertEqual(sorted(p.name for p in real_anchors.iterdir()), ["T012.json"])
 
+    @unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
     def test_a_linked_state_tree_that_stays_inside_still_runs_once(self) -> None:
         """The resolution refuses the escape without breaking a contained link or idempotency."""
         real_jobs = self.state / "real-jobs"
@@ -823,6 +844,7 @@ class StatePathTest(JobCase):
             self.assertNotIsInstance(value, list)
         self.assertLess((self.job_dir() / "status.json").stat().st_size, 400)
 
+    @unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
     def test_terminal_result_appears_atomically(self) -> None:
         script = self.child("import time\ntime.sleep(1.0)\n" + self.write_result('json.dumps({"outcome": "delivered"})'))
         self.start(script)
@@ -876,6 +898,30 @@ time.sleep(120)
 """
 
 
+@unittest.skipIf(FINAL_DELIVERY_SUPPORTED, "this platform can account for escaped descendants")
+class UnsupportedContainmentTest(JobCase):
+    """A platform without escaped-descendant accounting never delivers the unit."""
+
+    def test_missing_accounting_makes_a_completed_unit_indeterminate(self) -> None:
+        marker = self.work / "the-unit-ran"
+        script = self.child(
+            'open(%r, "w", encoding="utf-8").write("ran")\n' % str(marker)
+            + self.write_result('json.dumps({"outcome": "delivered"})')
+        )
+        self.assertEqual(self.start(script)[0], tl_job.EXIT_OK)
+        code, result = self.wait()
+        self.assertEqual(code, tl_job.EXIT_INDETERMINATE)
+        self.assertEqual(result["state"], "exited")
+        self.assertEqual(result["effects"], "uncertain")
+        self.assertTrue(result["containment"]["established"])
+        self.assertTrue(result["containment"]["unit_ran"])
+        terminal = json.loads((self.job_dir() / "result.json").read_text(encoding="utf-8"))
+        self.assertFalse(tl_job.tree_accounted(terminal["containment"]))
+        self.assertIn("not proven ended", result["detail"])
+        self.assertTrue(marker.exists(), "the transport never executed the unit")
+
+
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class ContainmentTest(JobCase):
     """The unit owns a tree, not one process; ending the unit has to end the tree."""
 
@@ -979,7 +1025,10 @@ class SweepFailureTest(unittest.TestCase):
         return containment
 
     def posix_group(self) -> tl_job.PosixSessionContainment:
-        containment = tl_job.PosixSessionContainment()
+        # Exercise the sweep primitive in isolation. Constructing the real containment
+        # also enables Linux's subreaper, which is intentionally refused on macOS before a
+        # unit is spawned and is irrelevant to these signal-only probes.
+        containment = object.__new__(tl_job.PosixSessionContainment)
         containment.pgid = 424242
         containment.reaped = False
         return containment
@@ -1078,6 +1127,7 @@ class SweepFailureTest(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class SweepFailureReportTest(JobCase):
     def test_a_failed_sweep_recorded_on_disk_is_read_back_as_indeterminate(self) -> None:
         """The refusal survives the file boundary: `result` re-reads and re-classifies it."""
@@ -1129,6 +1179,7 @@ class UnprovenSweepTest(JobCase):
         with contextlib.suppress(Exception):
             os.kill(int(pid_file.read_text(encoding="utf-8").strip()), signal.SIGKILL)
 
+    @unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
     @unittest.skipIf(os.name == "nt", POSIX_ONLY)
     def test_a_unit_whose_tree_was_never_proven_ended_is_not_reported_as_delivered(self) -> None:
         self.child(SURVIVOR, name="survivor.py")
@@ -1347,6 +1398,7 @@ class EscapedDescendantTest(JobCase):
         self.assertEqual(receipt["effects"], "known", receipt)
         self.assertEqual(receipt["outcome"], "delivered", receipt)
 
+    @unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
     def test_a_record_without_accounting_is_read_back_as_indeterminate(self) -> None:
         """The refusal survives the file boundary, on any platform: `result` re-classifies it."""
         script = self.child(self.write_result('json.dumps({"outcome": "delivered"})'))
@@ -1406,6 +1458,7 @@ class EscapedDescendantTest(JobCase):
         self.assertIsNone(account.failure)
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class AdmissionEssayTest(JobCase):
     """Synthetic essay on admitted bytes and number of chief queries.
 
@@ -1521,6 +1574,7 @@ class StateComponentTypeTest(JobCase):
         self.assertEqual(sorted(p.name for p in (self.state / "jobs").iterdir()), [])
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class ReportAllowlistTest(JobCase):
     """`result` rebuilds its answer from an allowlist; it never forwards `result.json`."""
 
@@ -1656,6 +1710,7 @@ class ReportAllowlistTest(JobCase):
         self.assertNotIn(self.NARRATIVA, json.dumps(result, ensure_ascii=False))
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class SupervisorFailureTest(JobCase):
     """A supervisor that breaks after the spawn still ends the tree and still answers.
 
@@ -1859,6 +1914,7 @@ class SupervisorBoundaryTest(JobCase):
         self.assertNotIn("--job-dir", complaint.splitlines()[0], "the usage line still offers a job directory")
         self.assert_nothing_ran(outside)
 
+    @unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
     def test_a_real_claim_in_its_own_job_directory_still_runs(self) -> None:
         """The discrimination: the boundary refuses the cases above and not the legitimate one."""
         script = self.child(self.write_result('json.dumps({"outcome": "delivered"})'))
@@ -1876,6 +1932,7 @@ class SupervisorBoundaryTest(JobCase):
         self.assertEqual(result["effects"], "known")
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class FinishedUnitTest(JobCase):
     """A unit that already has a terminal result is never reopened.
 
@@ -2024,6 +2081,7 @@ class ClaimValidationTest(JobCase):
                 receipt = self.refused(*command)
                 self.assertIn("another unit", receipt["error"])
 
+    @unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
     def test_concurrent_starts_on_the_same_unit_leave_one_claim_and_one_receipt(self) -> None:
         """The discrimination: a real race still reuses the claim it finds, and runs once."""
         script = self.child(
@@ -2212,6 +2270,7 @@ class MalformedCeilingTest(JobCase):
                 self.assertEqual(caught.exception.state, "invalid_input")
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 @unittest.skipUnless(tl_job.LEASE_SUPPORTED, "without an exclusive lock no ending can be proven here")
 class ForgedTerminalResultTest(JobCase):
     """A unit can write the terminal file; it cannot make its own ending true.
@@ -2483,6 +2542,7 @@ open(os.environ["TL_JOB_RESULT"], "w", encoding="utf-8").write(
                 self.assertNotIn("outcome", receipt)
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class ReplacedLeaseTest(LiveUnitCase):
     """A live unit that puts another file behind `supervisor.lock` must not be read as ended.
 
@@ -2547,6 +2607,7 @@ class ReplacedLeaseTest(LiveUnitCase):
             self.assertEqual(code, tl_job.EXIT_OK, receipt)
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class RewrittenClaimTest(LiveUnitCase):
     """The same attack, one move stronger: the unit also rewrites the claim readers used.
 
@@ -2861,6 +2922,7 @@ class LeaseBindingTest(JobCase):
         self.assertIn("not the one `start` returned", refused["error"])
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class BindingAnchorTest(JobCase):
     """The binding as a record: where it is kept, when it is readable, who refuses without it.
 
@@ -3510,6 +3572,7 @@ class BusyLeaseSuperviseTest(JobCase):
         self.assertFalse((job_dir / "result.json").exists(), "the refused supervisor wrote a terminal result")
 
     @unittest.skipUnless(tl_job.LEASE_SUPPORTED, "no exclusive file lock exists on this platform")
+    @unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
     def test_the_same_invocation_runs_the_unit_once_the_lease_is_free(self) -> None:
         """The discrimination: the refusal is about the lease, not about the claim on disk."""
         job_dir = self.claim(self.unit_script())
@@ -3522,6 +3585,7 @@ class BusyLeaseSuperviseTest(JobCase):
         self.assertTrue((job_dir / "result.json").exists())
 
 
+@unittest.skipUnless(FINAL_DELIVERY_SUPPORTED, FINAL_DELIVERY_ONLY)
 class ClaimPublicationWindowTest(JobCase):
     """A claim that is landing is not a claim that is broken, and the two are told apart by time.
 

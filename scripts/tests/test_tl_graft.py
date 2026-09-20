@@ -30,7 +30,9 @@ GIT = tl_graft._which("git")
 
 
 def _tmp_root(case: unittest.TestCase, name: str = "proj") -> Path:
-    tmp = Path(tempfile.mkdtemp())
+    # macOS exposes /tmp through /private/tmp; mirror resolve_target_root() so path-safety
+    # tests exercise cache redirects, not the host OS temporary-directory alias.
+    tmp = Path(tempfile.mkdtemp()).resolve()
     case.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
     root = tmp / name
     root.mkdir()

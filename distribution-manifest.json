@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "package_version": "0.19.0",
-  "package_file_count": 55,
+  "package_file_count": 56,
   "package_files": [
     "README.md",
     "SKILL.md",
@@ -39,6 +39,7 @@
     "docs/WORKFLOW_QUALITY.md",
     "docs/RUNTIME.md",
     "scripts/tl_job.py",
+    "scripts/tl_orc.py",
     "scripts/tl_runtime.py",
     "scripts/tl_ci_slice.py",
     "scripts/tl_tools.py",

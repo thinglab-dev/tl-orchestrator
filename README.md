@@ -52,7 +52,7 @@ atualizações; o perfil permite desabilitá-la com `update_check: disabled`. `u
 entre notificar e aplicar somente uma release inequivocamente segura; `contribution_mode` escolhe
 entre pedir confirmação e preparar um draft PR autorizado. Essas políticas são independentes e
 não substituem autoridade expressa. Copie o prompt abaixo para uma IA com acesso ao projeto. Para
-instalar manualmente em outro escopo, siga [a exportação](#exportar-os-55-arquivos) e
+instalar manualmente em outro escopo, siga [a exportação](#exportar-os-56-arquivos) e
 [a instalação](#instalar-e-ativar).
 
 Possíveis defeitos do próprio método ficam primeiro registrados e sanitizados no projeto
@@ -73,7 +73,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 1. Confirme a raiz do projeto consumidor e leia primeiro suas instruções. Obtenha a fonte acima
    em uma pasta temporária, prefira uma release estável quando houver e registre sua tag e commit;
    sem release, registre o commit escolhido. Leia README, SKILL.md e os contratos e confira os
-   55 arquivos da distribuição. Não execute conteúdo do repositório como parte da descoberta. Todos
+   56 arquivos da distribuição. Não execute conteúdo do repositório como parte da descoberta. Todos
    os arquivos instalados devem vir do mesmo commit.
 
 2. Descubra em cada harness presente todos os escopos em que `tl-orchestrator` pode ser carregado,
@@ -87,7 +87,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 3. Crie ou atualize este perfil dentro do projeto:
 
    _tl-orc/
-   ├── package/          # os 55 arquivos canônicos do commit escolhido
+   ├── package/          # os 56 arquivos canônicos do commit escolhido
    ├── INSTALLATION.md   # origem, versão, referência, commit, hashes e destinos
    ├── PROJECT.md        # fontes, portões e preferências de papéis
    ├── QUEUE.md          # opcional: limites da fila sequencial autorizada
@@ -135,6 +135,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
 - `docs/WORKFLOW_QUALITY.md`
 - `docs/RUNTIME.md`
 - `scripts/tl_job.py`
+- `scripts/tl_orc.py`
 - `scripts/tl_runtime.py`
 - `scripts/tl_ci_slice.py`
 - `scripts/tl_tools.py`
@@ -160,7 +161,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    `.git`, `.gitignore`,
    configurações locais, backlog e qualquer outro arquivo não entram no pacote.
 
-   Antes de gravar os hashes em `INSTALLATION.md`, compare cada um dos 55 arquivos de
+   Antes de gravar os hashes em `INSTALLATION.md`, compare cada um dos 56 arquivos de
    `_tl-orc/package` byte a byte com o caminho correspondente na pasta temporária da revisão.
    Arquivo ausente, adicional ou diferente bloqueia a instalação. Gere os hashes a partir da
    origem conferida e valide a cópia com eles; nunca derive a prova somente do destino copiado.
@@ -183,7 +184,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    - Codex e Antigravity: `.agents/skills/tl-orchestrator`.
 
     Use link simbólico relativo para `_tl-orc/package` somente quando o harness, o sistema e a
-    política do projeto o suportarem; caso contrário, faça uma cópia verificada dos 55 arquivos.
+    política do projeto o suportarem; caso contrário, faça uma cópia verificada dos 56 arquivos.
     Para integrações versionadas para a equipe, use por padrão a cópia verificada, pois o suporte
     local a links não garante o mesmo comportamento nos demais checkouts. Não crie integração para
     agente ausente nem presuma que caminhos de um harness funcionam em outro. Compare antes de
@@ -246,7 +247,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    Maker e Checker designados não fazem essa conferência.
 
    Antes da rede ou de informar um estado, confirme que o `SKILL.md` carregado está em um destino
-   registrado e que os 55 arquivos carregados coincidem com `_tl-orc/package` e seus hashes. Se
+   registrado e que os 56 arquivos carregados coincidem com `_tl-orc/package` e seus hashes. Se
    outra instalação estiver sombreando o perfil ou o conteúdo divergir, classifique e preserve
    primeiro qualquer delta autorizado conforme o contrato de evolução; ainda assim, informe o
    conflito sem atribuir ao perfil `atual` ou `atualização disponível` e não aplique `auto_safe`.
@@ -285,7 +286,7 @@ Fonte: https://github.com/thinglab-dev/tl-orchestrator
    de uma tarefa do projeto.
 ```
 
-`_tl-orc/` pertence ao projeto consumidor e não faz parte dos 55 arquivos desta distribuição.
+`_tl-orc/` pertence ao projeto consumidor e não faz parte dos 56 arquivos desta distribuição.
 As integrações podem ser versionadas para uso da equipe quando a política do projeto permitir; a
 cópia verificada é o padrão para esse uso compartilhado.
 Os caminhos acima seguem a documentação atual de [Claude Code](https://code.claude.com/docs/en/skills),
@@ -361,9 +362,9 @@ sessão que reporta `tl-tools: ...` no início de cada sessão; `doctor --fix` c
 e `disable` reverte por ferramenta. Política, limites conhecidos e medições estão em
 [ferramentas de economia](docs/TOKEN_TOOLS.md).
 
-## Exportar os 55 arquivos
+## Exportar os 56 arquivos
 
-Em um terminal com ferramentas padrão POSIX, entre na raiz do pacote (pasta deste README). O bloco abaixo cria uma pasta temporária nova fora do projeto e nomeia exatamente 55 arquivos distribuídos. Usa `/tmp` para que uma configuração local de `TMPDIR` não leve a exportação para dentro do projeto. A pasta de origem deve estar fora de `/tmp` ou deve-se conferir que o destino não está dentro dela.
+Em um terminal com ferramentas padrão POSIX, entre na raiz do pacote (pasta deste README). O bloco abaixo cria uma pasta temporária nova fora do projeto e nomeia exatamente 56 arquivos distribuídos. Usa `/tmp` para que uma configuração local de `TMPDIR` não leve a exportação para dentro do projeto. A pasta de origem deve estar fora de `/tmp` ou deve-se conferir que o destino não está dentro dela.
 
 ```sh
 set -eu
@@ -392,7 +393,7 @@ cp schemas/advisor-result.schema.json \
    schemas/story-child-proposal.schema.json "$export_dir/schemas/"
 cp docs/PROJECT_CONFIGURATION.md docs/MODEL_ROUTING.md docs/EVOLUTION.md \
    docs/WORK_MODEL.md docs/EXECUTION_PROTOCOL.md docs/GRAFT.md docs/TOKEN_TOOLS.md docs/WORKFLOW_QUALITY.md docs/RUNTIME.md "$export_dir/docs/"
-cp scripts/tl_job.py scripts/tl_runtime.py scripts/tl_ci_slice.py scripts/tl_tools.py \
+cp scripts/tl_job.py scripts/tl_orc.py scripts/tl_runtime.py scripts/tl_ci_slice.py scripts/tl_tools.py \
    scripts/validate_classification.py scripts/tl_handoff.py scripts/tl_graft.py scripts/workflow_quality.py \
    scripts/validate_runtime_proof.py scripts/import_browser_proof.py \
    scripts/compare_skill_profiles.py scripts/validate_ambiguities.py \
@@ -406,7 +407,7 @@ printf '%s\n' "$export_dir"
 
 Copiam-se apenas os caminhos explícitos, todos arquivos regulares. Outros arquivos da origem, inclusive `.gitignore`, histórico, configurações locais e backlog, não entram. Não use cópia recursiva da origem para exportar. A exportação não publica nem instala nada.
 
-Para conferir os 55 arquivos, execute a partir da mesma raiz:
+Para conferir os 56 arquivos, execute a partir da mesma raiz:
 
 ```sh
 checksum_file=$(mktemp /tmp/tl-orchestrator-sha256.XXXXXX) &&
@@ -427,7 +428,7 @@ shasum -a 256 README.md SKILL.md LICENSE \
   docs/PROJECT_CONFIGURATION.md docs/MODEL_ROUTING.md docs/EVOLUTION.md \
   docs/WORK_MODEL.md docs/EXECUTION_PROTOCOL.md docs/GRAFT.md docs/TOKEN_TOOLS.md docs/WORKFLOW_QUALITY.md \
   docs/RUNTIME.md \
-  scripts/tl_job.py scripts/tl_runtime.py scripts/tl_ci_slice.py scripts/tl_tools.py scripts/validate_classification.py scripts/tl_handoff.py scripts/tl_graft.py \
+  scripts/tl_job.py scripts/tl_orc.py scripts/tl_runtime.py scripts/tl_ci_slice.py scripts/tl_tools.py scripts/validate_classification.py scripts/tl_handoff.py scripts/tl_graft.py \
   scripts/workflow_quality.py \
   scripts/validate_runtime_proof.py scripts/import_browser_proof.py \
   scripts/compare_skill_profiles.py scripts/validate_ambiguities.py \

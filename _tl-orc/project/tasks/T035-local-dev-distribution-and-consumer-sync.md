@@ -6,7 +6,7 @@ standalone: true
 method: native
 status: ready
 state_revision: 0
-depends_on: [T034]
+depends_on: []
 blocked_by: []
 origin: decisão do maintainer em 2026-09-20 para eliminar a dependência do GitHub ao sincronizar, na mesma máquina, consumers do TL-Orchestrator durante desenvolvimento local.
 decisions: []

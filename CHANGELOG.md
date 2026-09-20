@@ -10,6 +10,11 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 ### Adicionado
 
+- `tl-orc`, CLI local de biblioteca padrão para registrar consumidores, instalar launcher em
+  `~/.local/bin`, sincronizar cópias verificadas de um commit fonte limpo, verificar e executar
+  smoke somente leitura. O canal `local-dev` preserva origem HTTPS canônica, registra o commit
+  validado sem caminhos privados, migra perfis legados com tabelas de hashes e integrações, recusa
+  delta local e faz rollback por consumidor.
 - Handoff remoto determinístico (`scripts/tl_handoff.py`): preflight local de Codex sem chamada cognitiva, artefato privado com snapshot Git e ID opaco, transições fechadas `created → claimed → active → completed` ou retorno explícito, claim/replay/tamper/drift fail-closed e retomada local verificável. O fluxo remoto preferido mantém ChatGPT+RDC como Orchestrator+Planner, Codex como Maker/Rework e Checker independente; o repositório fonte também documenta integração owner-direct após gates, Checker e CI no SHA exato.
 
 ## [0.19.0] - 2026-09-17

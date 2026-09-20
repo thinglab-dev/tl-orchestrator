@@ -9,6 +9,19 @@ Nenhuma delas é um daemon, engine, heartbeat ou serviço residente. Elas só po
 uma ativação do Orquestrador, depois da leitura e validação do estado real. Classificador,
 Searcher, Planner, Maker e Checker designados diretamente não conduzem este fluxo.
 
+## Sincronização local de desenvolvimento
+
+Para uma mudança distribuível `fix` ou `feat` no repositório fonte, depois de existir commit
+identificado e os portões exigidos estarem verdes, o Orquestrador executa `tl-orc sync --all` e
+depois `tl-orc smoke --all` antes de declarar o fechamento local. Essa regra só usa um checkout
+fonte limpo e o commit validado; não é autorizada por hook cego de `git commit`, não sincroniza
+working tree dirty e não substitui a publicação GitHub/release para distribuição externa.
+
+O canal `local-dev` é adicional ao modo release. Ele conserva a origem HTTPS canônica no perfil do
+consumidor e registra o commit local validado sem gravar caminhos privados. `sync` recusa delta
+local do pacote e faz staging, conferência e rollback por consumidor; uma falha em um consumidor
+nunca vira sucesso dos demais. `verify` e `smoke` não escrevem no consumidor.
+
 ## Políticas independentes e autoridade
 
 `INSTALLATION.md` pode declarar, além de `update_check`:

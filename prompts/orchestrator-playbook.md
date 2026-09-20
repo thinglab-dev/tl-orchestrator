@@ -652,6 +652,11 @@ Um Deliverable só recebe `done` depois de verificar seus `integration_criteria`
 pendências abertas sem bloqueio. Quando a Task declarar `affects_context`, a atualização dos
 Feature Briefs afetados faz parte do fechamento.
 
+Para `fix` ou `feat` distribuível no repositório fonte, após o commit identificado e os portões
+exigidos verdes, execute explicitamente `tl-orc sync --all` e `tl-orc smoke --all` antes de
+declarar o fechamento local. A CLI recusa fonte dirty; nunca acople essa sincronização a hook
+cego de `git commit`, nem a use como publicação ou substituto de release.
+
 A revisão posterior é uma rodada nova `rNN`, em sessão nova, por família distinta de todas as
 `families_used`, sobre o alvo registrado quando recuperável, ou sobre o conteúdo atual com pendência
 substituta quando houver decisão registrada de substituição. Ela não autoriza corrigir uma Task

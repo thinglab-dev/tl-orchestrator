@@ -9,6 +9,15 @@ O protocolo é documental: vale com ou sem automação. O [supervisor opcional](
 apenas transporta uma execução já autorizada; ele não escolhe modelo, não inventa comando e não
 aprova entrega.
 
+## Sincronização de consumidores locais
+
+Depois de um `fix` ou `feat` distribuível no repositório fonte, commit identificado e portões
+exigidos verdes, o fechamento local inclui `tl-orc sync --all` seguido de `tl-orc smoke --all`.
+Esses comandos são uma operação explícita do Orquestrador, nunca um hook automático de commit:
+`sync` recusa fonte dirty e troca somente os destinos registrados com rollback local; `smoke` é
+somente leitura e não cria bytecode ou outros arquivos no consumidor. O canal local não publica,
+não acessa GitHub e não substitui a rotina de release.
+
 ## Orçamento de contexto do Orquestrador
 
 O custo dominante pode ser a quantidade de requisições que reenvia um contexto grande, não uma

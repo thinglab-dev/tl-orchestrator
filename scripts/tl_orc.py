@@ -227,6 +227,28 @@ def installation_path(consumer: Path) -> Path:
     return consumer / "_tl-orc/INSTALLATION.md"
 
 
+def assert_safe_consumer_path(consumer: Path, target: Path, *, allow_leaf_symlink: bool = False) -> None:
+    """Refuse redirected ancestors before reading, moving, or deleting consumer content."""
+    raw_root = consumer.expanduser().absolute()
+    root = consumer.expanduser().resolve()
+    target_abs = target.expanduser().absolute()
+    try:
+        relative = target_abs.relative_to(raw_root)
+    except ValueError:
+        try:
+            relative = target_abs.relative_to(root)
+        except ValueError as exc:
+            raise TlOrcError(f"consumer path escapes root: {target}") from exc
+    canonical_target = root / relative
+    current = canonical_target.parent if allow_leaf_symlink else canonical_target
+    while current != root:
+        if current.is_symlink():
+            raise TlOrcError(f"consumer path has redirected ancestor: {current}")
+        if root not in current.parents:
+            raise TlOrcError(f"consumer path escapes root: {target}")
+        current = current.parent
+
+
 def files_at(destination: Path) -> dict[str, str]:
     if not destination.exists():
         return {}
@@ -367,6 +389,7 @@ def assert_no_unauthorized_delta(
 
 
 def verify_integration_link(consumer: Path, target: Path) -> None:
+    assert_safe_consumer_path(consumer, target, allow_leaf_symlink=True)
     if not target.is_symlink():
         raise TlOrcError(f"expected integration link is not a symlink: {target}")
     package = (consumer / PACKAGE_DESTINATION).resolve()
@@ -380,7 +403,10 @@ def verify_integration_link(consumer: Path, target: Path) -> None:
 
 def selected_destinations(consumer: Path) -> list[Path]:
     """Return physical copies to replace; verified links remain in place."""
-    destinations = [consumer / PACKAGE_DESTINATION]
+    consumer = consumer.expanduser().resolve()
+    package = consumer / PACKAGE_DESTINATION
+    assert_safe_consumer_path(consumer, package)
+    destinations = [package]
     registered: set[str] = set()
     install = installation_path(consumer)
     if install.is_file():
@@ -390,6 +416,7 @@ def selected_destinations(consumer: Path) -> list[Path]:
         if target.is_symlink():
             verify_integration_link(consumer, target)
             continue
+        assert_safe_consumer_path(consumer, target)
         if target.exists() or relative.as_posix() in registered:
             destinations.append(target)
     return destinations
@@ -435,9 +462,11 @@ def installation_text(source: Source, destinations: Iterable[Path], consumer: Pa
 
 
 def replace_consumer(source: Source, consumer: Path) -> None:
+    consumer = consumer.expanduser().resolve()
+    if not consumer.is_dir():
+        raise TlOrcError(f"consumer root is not an existing directory: {consumer}")
     destinations = selected_destinations(consumer)
     assert_no_unauthorized_delta(consumer, destinations, source_root=source.root)
-    consumer.mkdir(parents=True, exist_ok=True)
     stage_root = Path(tempfile.mkdtemp(prefix=".tl-orc-stage-", dir=consumer))
     backup_root = Path(tempfile.mkdtemp(prefix=".tl-orc-backup-", dir=consumer))
     swapped: list[tuple[Path, Path | None]] = []
@@ -491,7 +520,11 @@ def replace_consumer(source: Source, consumer: Path) -> None:
 
 
 def verify_consumer(source: Source, consumer: Path) -> None:
+    consumer = consumer.expanduser().resolve()
+    if not consumer.is_dir():
+        raise TlOrcError(f"consumer root is not an existing directory: {consumer}")
     install = installation_path(consumer)
+    assert_safe_consumer_path(consumer, install)
     if not install.is_file():
         raise TlOrcError(f"missing {install}")
     header, hashes, registered = parse_installation(install)
@@ -511,6 +544,7 @@ def verify_consumer(source: Source, consumer: Path) -> None:
 
 
 def smoke_consumer(source: Source, consumer: Path) -> None:
+    consumer = consumer.expanduser().resolve()
     verify_consumer(source, consumer)
     package = consumer / PACKAGE_DESTINATION
     before = {path.relative_to(consumer).as_posix() for path in consumer.rglob("*")}
@@ -553,12 +587,15 @@ def consumer_entries(config: dict[str, object], names: list[str], all_consumers:
         raw = consumers.get(name)
         if not isinstance(raw, str):
             raise TlOrcError(f"consumer is not registered: {name}")
-        entries.append((name, Path(raw)))
+        root = Path(raw).expanduser().resolve()
+        if not root.is_dir():
+            raise TlOrcError(f"consumer root is not an existing directory: {root}")
+        entries.append((name, root))
     return entries
 
 
 def command_install_cli(args: argparse.Namespace, config: dict[str, object]) -> int:
-    source = validate_source(Path(args.source), require_clean=False)
+    source = validate_source(Path(args.source), require_clean=True)
     config["source_root"] = str(source.root)
     save_config(args.config_dir, config)
     bin_dir = Path(args.bin_dir).expanduser() if args.bin_dir else Path.home() / ".local/bin"
@@ -622,7 +659,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command in {"status", "consumers"}:
             print(json.dumps(config, indent=2, sort_keys=True))
             return 0
-        source = source_from_config(config, args.source, require_clean=args.command == "sync")
+        source = source_from_config(config, args.source, require_clean=True)
         entries = consumer_entries(config, args.names, args.all)
         failures = 0
         for name, consumer in entries:

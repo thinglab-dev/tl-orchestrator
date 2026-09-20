@@ -246,6 +246,30 @@ class TlOrcTest(unittest.TestCase):
         self.assertEqual(tl_orc.main(["--config-dir", str(self.config_dir), "sync", "--all"]), 1)
         self.assertTrue((package / "local.txt").exists())
 
+    def test_redirected_consumer_ancestor_is_refused_before_any_write(self) -> None:
+        consumer = self.base / "redirected"
+        consumer.mkdir()
+        outside = self.base / "outside"
+        outside.mkdir()
+        os.symlink(outside, consumer / "_tl-orc")
+        source = self.source_info()
+        with self.assertRaisesRegex(tl_orc.TlOrcError, "redirected ancestor"):
+            tl_orc.replace_consumer(source, consumer)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_verify_and_smoke_refuse_dirty_source_checkout(self) -> None:
+        consumer = self.base / "dirty-read-source"
+        consumer.mkdir()
+        source = self.source_info()
+        tl_orc.replace_consumer(source, consumer)
+        tl_orc.save_config(
+            self.config_dir,
+            {"format_version": 1, "source_root": str(self.source), "consumers": {"one": str(consumer)}},
+        )
+        (self.source / "README.md").write_text("dirty after install\n", encoding="utf-8")
+        self.assertEqual(tl_orc.main(["--config-dir", str(self.config_dir), "verify", "--all"]), 2)
+        self.assertEqual(tl_orc.main(["--config-dir", str(self.config_dir), "smoke", "--all"]), 2)
+
     def test_new_install_rollback_removes_new_installation_record(self) -> None:
         consumer = self.base / "new-rollback"
         consumer.mkdir()

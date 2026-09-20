@@ -8,6 +8,10 @@ Todas as mudanças relevantes deste projeto serão documentadas aqui.
 
 - Perfil global de despacho: Gemini/Agy permanece preferido para Classifier e Searcher; ChatGPT+RDC passa a ser a condução/Planner preferida quando o handoff remoto estiver habilitado; Planner local segue Codex → Claude → Agy; Maker segue Codex → Agy → Claude; Checker segue Claude → Agy → Codex após filtrar todas as famílias presentes em `effective_authors`. Quota esgotada percorre apenas fallbacks já autorizados e nunca reduz `checker_independence`.
 
+### Adicionado
+
+- Handoff remoto determinístico (`scripts/tl_handoff.py`): preflight local de Codex sem chamada cognitiva, artefato privado com snapshot Git e ID opaco, transições fechadas `created → claimed → active → completed` ou retorno explícito, claim/replay/tamper/drift fail-closed e retomada local verificável. O fluxo remoto preferido mantém ChatGPT+RDC como Orchestrator+Planner, Codex como Maker/Rework e Checker independente; o repositório fonte também documenta integração owner-direct após gates, Checker e CI no SHA exato.
+
 ## [0.19.0] - 2026-09-17
 
 ### Adicionado

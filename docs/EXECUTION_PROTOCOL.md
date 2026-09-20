@@ -26,6 +26,16 @@ leitura isolada. Por isso estas regras são verificáveis:
 Essas regras também delimitam ownership: salvo permissão manual explícita e específica, o
 Orquestrador não edita nem diagnostica o consumidor; despacha trabalho e lê recibos.
 
+## Handoff remoto de condução
+
+Quando o projeto habilitar `remote_handoff: enabled`, o condutor pode transferir a condução para
+ChatGPT+RDC pelo artefato privado de `scripts/tl_handoff.py`. O artefato não substitui a Task,
+spec, evidência, autorização nem o registro versionado do coordenador: é só uma prova compacta de
+snapshot e de ownership. O claim e a ativação falham fechados sob drift ou coordenador local ainda
+ativo. Chamadas cognitivas continuam sujeitas ao orçamento e ao despacho normal; o preflight local
+do Codex não é uma chamada cognitiva. Veja o protocolo completo no
+[modelo de trabalho](WORK_MODEL.md#handoff-remoto-chatgpt--rdc).
+
 ## Unidade de execução
 
 Uma **unidade** (`unit`) é um despacho com começo, critério de aceite e resultado terminal únicos.

@@ -615,6 +615,30 @@ DEFAULT_EFFICIENCY_ORDER: list[tuple[str, str, str]] = [
 ]
 
 
+def resolve_checker_candidates(
+    candidates: list[tuple[str, str, str]],
+    effective_authors: set[str],
+    unavailable_harnesses: set[str] | None = None,
+) -> tuple[str, str, str] | None:
+    """Return the first independent Checker candidate in the supplied policy order.
+
+    Availability only removes a candidate.  It never makes an author family eligible, which
+    keeps a Claude quota outage from weakening ``checker_independence: required``.  The helper is
+    deliberately model-agnostic: classification owns model/effort and this resolver owns the
+    mechanical family filter immediately before dispatch.
+    """
+    family_map = {"codex": "openai", "claude": "anthropic", "agy": "google"}
+    authors = {family.lower() for family in effective_authors}
+    unavailable = unavailable_harnesses or set()
+    for candidate in candidates:
+        harness = candidate[0]
+        family = family_map.get(harness)
+        if harness in unavailable or family is None or family in authors:
+            continue
+        return candidate
+    return None
+
+
 def resolve_minimum_sufficient(
     evaluations: list[dict[str, Any]],
     efficiency_order: list[tuple[str, str, str]] | None = None,

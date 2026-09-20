@@ -346,6 +346,39 @@ antes de qualquer outra escrita. Encerramento normal grava `released: true`. A i
 é a observada no harness; se ele não a expuser, o Orquestrador declara um identificador no início
 da sessão e o usa de forma consistente.
 
+### Handoff remoto ChatGPT + RDC
+
+O handoff remoto é opcional e não altera o comportamento de consumidores que não declaram
+`remote_handoff: enabled` nas preferências operacionais. Com ele habilitado, o Orquestrador executa
+o preflight local `scripts/tl_handoff.py availability --remote-enabled`. Ele chama somente
+`command -v codex` e `codex --version`; seus resultados fechados são `ready`, `missing`, `invalid`
+ou `unknown`, sem reserva de budget ou chamada cognitiva. **ChatGPT + RDC** só é uma opção quando
+o resultado é `ready`; **Continuar localmente** sempre permanece uma opção e recebe a razão da
+falha quando houver.
+
+`tl_handoff.py create` cria em `_tl-orc/runtime/remote-handoffs/` um artefato privado, ignorado por
+Git, com ID opaco, snapshot compacto (raiz e identidade Git, branch, HEAD e digest da árvore),
+`active_work_ref`, fase, papéis, famílias autoras e revisão do contexto. Ele não contém tokens,
+credenciais, variáveis de ambiente, logs ou histórico conversacional. Sua revisão imutável é
+digestada; o runtime falha fechado para campos inesperados, alteração, replay ou ID inválido.
+
+O estado é fechado: `created → claimed → active → completed`; de `created`, `claimed` ou `active`
+há somente o retorno explícito para `returned_to_local`. `claim` revalida o snapshot inteiro e
+Codex antes de gravar o claimant; dois claims usam lock exclusivo local e o segundo falha. Antes de
+`activate`, `release-local` exige `coordinator.released: true` no `STATUS.md`; assim o artefato
+registra um único owner (`local` ou `remote`) e nunca concede dois escritores. Drift de raiz,
+identidade Git, branch, HEAD ou árvore exige criar handoff novo ou retornar explicitamente, nunca
+normalização automática. `return-local` captura o snapshot de retorno; a ativação local usa
+`resume-local` para validá-lo e oferece somente retomar localmente ou criar nova transferência.
+
+No fluxo remoto preferido, ChatGPT+RDC conduz Orchestrator+Planner, Codex é Maker/Rework e o
+Checker é resolvido fora de `effective_authors`: Claude primeiro, Gemini/Agy como fallback
+independente, Codex por último quando elegível. Git, worktrees, testes, CI, GitHub, processos,
+leitura e empacotamento operados por ChatGPT/RDC não são autoria material; plano, spec, decisão
+arquitetural ou patch substantivo são OpenAI. Quota ou autenticação de Claude apenas tornam Claude
+indisponível; se OpenAI já produziu conteúdo, Gemini continua Checker e não é promovido a Maker se
+isso consumiria a única família independente.
+
 ### Versão do trabalho
 
 A Task registra três identificações separadas:

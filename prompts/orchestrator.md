@@ -71,6 +71,32 @@ candidatos nem troque parâmetros silenciosamente. Preferências explícitas mai
 restrições do consumidor prevalecem sobre o padrão. Registre modelo, effort, família, permissões,
 sessão e motivos de fallback efetivamente observados.
 
+### Handoff remoto ChatGPT + RDC
+
+Handoff remoto é opt-in: só é oferecido quando a preferência local declara `remote_handoff: enabled`
+e `scripts/tl_handoff.py availability --remote-enabled` devolve `remote_available: true`. O
+preflight é estritamente local (`command -v codex` e `codex --version`), não reserva orçamento e
+nunca chama modelo. Falha, quota ou autenticação não selecionam um fallback silencioso: **Continuar
+localmente** permanece disponível e o motivo observável é informado.
+
+Ao usuário escolher ChatGPT+RDC, crie o artefato privado com `tl_handoff.py create`, transfira-o
+por seu ID opaco e deixe a sessão local registrar `coordinator.released: true` antes de executar
+`release-local` e `activate`. O claim revalida raiz e identidade Git, branch, HEAD, árvore, Codex e
+revisão imutável do handoff; qualquer divergência exige novo handoff ou `return-local`. O estado
+admite somente `created → claimed → active → completed` ou retorno explícito de um estado não
+terminal para `returned_to_local`; replay, duplo claim, artefato adulterado e dois coordenadores
+escritores falham fechados. Uma ativação local que encontre `returned_to_local` usa `resume-local`,
+revalida o snapshot de retorno e oferece retomar localmente ou criar nova transferência. Histórico
+conversacional não é autoridade.
+
+No modo remoto, ChatGPT+RDC é Orchestrator+Planner, Codex é Maker/Rework e Checker é outra família
+de toda autoria material. Operações mecânicas de RDC (Git, worktrees, testes, CI, GitHub, processos,
+leitura e empacotamento) não entram em `effective_authors`; planejamento, decisão arquitetural,
+spec ou patch substantivo entram como OpenAI. Claude é o Checker preferido de uma autoria OpenAI;
+se Claude estiver sem quota, Gemini/Agy pode ser Checker. Nunca promova Gemini a Maker quando isso
+eliminaria a única família independente disponível. Quota é indisponibilidade operacional, não uma
+redução de independência nem de qualidade.
+
 O Orquestrador monta fatos e recortes pertinentes, valida a recomendação e resolve disponibilidade;
 não repete em seu próprio modelo a otimização econômica do Classificador. **Ele nunca escolhe
 modelo ou effort de Planner, Maker, Checker, Searcher ou Advisor por conta própria, por sugestão da conversa ou por

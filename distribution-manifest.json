@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "package_version": "0.19.0",
-  "package_file_count": 54,
+  "package_file_count": 55,
   "package_files": [
     "README.md",
     "SKILL.md",
@@ -43,6 +43,7 @@
     "scripts/tl_ci_slice.py",
     "scripts/tl_tools.py",
     "scripts/validate_classification.py",
+    "scripts/tl_handoff.py",
     "scripts/tl_graft.py",
     "scripts/workflow_quality.py",
     "scripts/validate_runtime_proof.py",

@@ -350,6 +350,15 @@ Calcule: `required_call_reserve = todas as chamadas obrigatórias ainda não con
    - A chamada a `gh pr merge` ou `git merge` para a branch base protegida (`main`) exige estritamente um envelope de autorização out-of-band confirmado (`AuthorityReceipt`) avaliado pelo primitive `MergeAuthorityGate` (`scripts/tl_merge_guard.py`).
    - Na ausência de autorização formal confirmada (modo `human_merge_only` ou falta de envelope válido), o Orquestrador/runtime DEVE interromper o fluxo automatizado e estacionar a unidade em `awaiting_operator` (ou parar com `STOP: external_effect_not_authorized`), nunca forçar merge unilateral.
 
+#### F. Integração owner-direct no repositório fonte (T034)
+
+Para mudança sob autoridade direta do maintainer no repositório fonte, uma PR é opcional: depois
+de Checker independente exigido, portões canônicos e CI verde no SHA exato do candidato, o
+maintainer pode integrar diretamente em `main` e confirmar o resultado. Contribuição externa,
+proteção da plataforma, pedido explícito de PR ou necessidade deliberada de discussão continuam
+exigindo a rota aplicável. Owner-direct não contorna branch protection, a validade do Checker, o
+vínculo do SHA nem autorização para efeitos externos.
+
 ### 6. Interrupções, Stop conditions e recuperação pós-crash
 
 1. Diante de qualquer uma das 18 stop conditions catalogadas em `docs/WORK_MODEL.md`, interrompa

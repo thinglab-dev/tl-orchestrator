@@ -2677,7 +2677,14 @@ def budgeted_model_dispatch(
             return False, f"unrecoverable_harness_failure: {exc}", batch
     else:
         try:
-            p = subprocess.run(cmd_list, cwd=cwd, capture_output=True, text=True, check=False)
+            p = subprocess.run(
+                cmd_list,
+                cwd=cwd,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
             exit_code, stdout, stderr = p.returncode, p.stdout, p.stderr
         except Exception as exc:
             _settle_charged("ambiguous", f"subprocess raised: {exc}")

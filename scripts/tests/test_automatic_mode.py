@@ -1258,6 +1258,26 @@ class TestAutomaticModeContract(unittest.TestCase):
         self.assertEqual(batch["budget"]["reserved_model_calls"], 0)
         self.assertIsNone(batch["budget"]["pending_call"])
 
+    def test_t027_budgeted_dispatch_closes_worker_stdin(self) -> None:
+        batch = copy.deepcopy(self.valid_batch_frontmatter)
+        batch["budget"]["max_model_calls"] = 2
+        batch["budget"]["consumed_model_calls"] = 0
+        batch["budget"]["reserved_model_calls"] = 0
+
+        ok, reason, detail = budgeted_model_dispatch(
+            batch,
+            role="checker",
+            phase="review",
+            call_id="call-stdin-eof",
+            harness_cmd=[sys.executable, "-c", "import sys; print(repr(sys.stdin.read()))"],
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(reason, "dispatch_complete")
+        self.assertEqual(detail["stdout"].strip(), "''")
+        self.assertEqual(batch["budget"]["consumed_model_calls"], 1)
+        self.assertIsNone(batch["budget"]["pending_call"])
+
     def test_t027_classifier_retry_counts_every_real_dispatch(self) -> None:
         batch = copy.deepcopy(self.valid_batch_frontmatter)
         batch["budget"]["max_model_calls"] = 12

@@ -379,6 +379,12 @@ arquitetural ou patch substantivo são OpenAI. Quota ou autenticação de Claude
 indisponível; se OpenAI já produziu conteúdo, Gemini continua Checker e não é promovido a Maker se
 isso consumiria a única família independente.
 
+O transporte remoto não cria uma exceção de despacho: ChatGPT/RDC pode operar Git, worktrees, testes e
+processos, mas não invoca `codex`, `claude` ou `agy/gemini` diretamente para trabalho cognitivo. Toda
+chamada de modelo continua passando por `budgeted_model_dispatch`/`tl_job.py`, com stdin fechado. Isso
+é requisito de liveness: uma CLI headless que herda o stdin do terminal pode ficar indefinidamente em
+espera por entrada/EOF e não constitui progresso nem indisponibilidade comprovada.
+
 ### Versão do trabalho
 
 A Task registra três identificações separadas:

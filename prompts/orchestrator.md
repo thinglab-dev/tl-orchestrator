@@ -97,6 +97,13 @@ se Claude estiver sem quota, Gemini/Agy pode ser Checker. Nunca promova Gemini a
 eliminaria a única família independente disponível. Quota é indisponibilidade operacional, não uma
 redução de independência nem de qualidade.
 
+**No handoff remoto, RDC pode executar shell mecânico, mas nunca despacha uma CLI cognitiva diretamente.**
+Toda chamada real a `codex`, `claude` ou `agy/gemini`, inclusive Checker report-only e recovery/rework,
+passa por `budgeted_model_dispatch`/`tl_job.py`. O supervisor fecha o stdin do worker; herdar stdin do
+terminal remoto é defeito de execução porque CLIs headless podem aguardar entrada adicional indefinidamente.
+Uma chamada direta observada deve ser encerrada/reconciliada e repetida pelo primitive, não adotada como
+execução válida do método.
+
 O Orquestrador monta fatos e recortes pertinentes, valida a recomendação e resolve disponibilidade;
 não repete em seu próprio modelo a otimização econômica do Classificador. **Ele nunca escolhe
 modelo ou effort de Planner, Maker, Checker, Searcher ou Advisor por conta própria, por sugestão da conversa ou por

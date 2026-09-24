@@ -94,3 +94,38 @@ class RuntimeAcquireTest(unittest.TestCase):
         rt2 = fx.runtime()
         rt2.acquire()
         rt2.release()
+
+    def test_acquire_releases_locks_on_keyboard_interrupt(self):
+        fx = self.fixture()
+        rt1 = fx.runtime()
+
+        from unittest import mock
+        captured_handle = None
+
+        def mock_fold(*args, **kwargs):
+            nonlocal captured_handle
+            captured_handle = rt1._lease
+            self.assertIsNotNone(captured_handle)
+            self.assertFalse(captured_handle.closed)
+            self.assertIsNotNone(rt1.authority._lease)
+            raise KeyboardInterrupt("mock sigint")
+
+        with mock.patch.object(rt1.authority, "release", wraps=rt1.authority.release) as spy_auth_release:
+            with mock.patch.object(rt1.journal, "fold", side_effect=mock_fold):
+                with self.assertRaises(KeyboardInterrupt):
+                    rt1.acquire()
+
+        self.assertIsNone(rt1._lease)
+        self.assertIsNotNone(captured_handle)
+        self.assertTrue(captured_handle.closed)
+        spy_auth_release.assert_called_once()
+        self.assertIsNone(rt1.authority._lease)
+
+        rt2 = fx.runtime()
+        rt2.acquire()
+        self.assertIsNotNone(rt2._lease)
+        self.assertFalse(rt2._lease.closed)
+        self.assertIsNotNone(rt2.authority._lease)
+        rt2.release()
+        self.assertIsNone(rt2._lease)
+        self.assertIsNone(rt2.authority._lease)

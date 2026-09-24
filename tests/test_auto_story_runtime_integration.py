@@ -889,6 +889,46 @@ class AutoStoryRuntimeTest(unittest.TestCase):
         self.assertEqual(auth.state.closure_of("B002")["checker_verdict"], "approved")
         self.assertEqual(auth.state.close_state, "done")
 
+    def test_auto_story_resume_retroceded_governance_refused(self) -> None:
+        fx = self.auto_story_fixture(budget=8, max_rework=0, max_calls=8, limits={"stagnation_rounds": 6})
+
+        # Advance governance (G)
+        Path(fx.repo, "pkg", "G.txt").write_text("G", encoding="utf-8")
+        git(fx.repo, "add", "pkg/G.txt")
+        git(fx.repo, "commit", "-m", "advance governance to G")
+        g_commit = git(fx.repo, "rev-parse", "HEAD")
+
+        # Propose and bind child based on G
+        auth = self.authority(fx)
+        auth.refold()
+        proposal = story.derive_child_proposal(
+            auth, "B001", [], None, 8, g_commit, g_commit)
+        proof = story.verify_derivation(auth, proposal)
+        with StoryAuthority.open_for(fx.repo, "A001") as w_auth:
+            w_auth.record_child_derived(proposal, proof)
+            w_auth.record_child_opened("B001", proof, g_commit, {})
+
+        fx.batch["authorization"].update({
+            "story_authority_mode": "AUTO_STORY", "story_authority_id": "A001",
+            "root_authority_digest": auth.payload["root_authority_digest"],
+            "child_proposal_digest": proof["child_proposal_digest"],
+            "derivation_proof_digest": proof["derivation_proof_digest"],
+        })
+        fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
+
+        rt = fx.runtime()
+        rt.acquire()
+        rt.journal.append("unit_state", unit="U1", state="running", reason="", data={"phase": "implement", "base_commit": g_commit, "commit": g_commit})
+        rt.release()
+
+        # Now reset base_branch to an ancestor of G
+        git(fx.repo, "reset", "--hard", "HEAD~1")
+
+        rt2 = fx.runtime()
+        with self.assertRaises(tl_runtime.StopBatch) as ctx:
+            rt2.acquire()
+        self.assertIn("resuming would continue a history this child never journaled", str(ctx.exception))
+
     def test_auto_story_crash_between_batch_state_terminal_and_child_closed(self) -> None:
         # C) Crash entre batch_state terminal e child_closed
         fx = self.auto_story_fixture(budget=8, max_rework=0, max_calls=8, limits={"stagnation_rounds": 6})

@@ -1456,7 +1456,8 @@ class Runtime:
         for name, commit in journaled:
             if commit and (not _COMMIT_RE.match(str(commit)) or not self._is_ancestor(origin, str(commit))):
                 if name == "HEAD" and has_progress and (str(commit) == base_rev or str(commit) == proposal_base):
-                    continue
+                    if proposal_base and self._is_ancestor(proposal_base, str(commit)):
+                        continue
                 refuse("unexpected_tree_state", f"{name} {str(commit)[:12]} does not descend from the opening commit "
                        f"{origin[:12]}; resuming would continue a history this child never journaled",
                        ref=name, commit=str(commit), opened_at=origin)
@@ -1497,11 +1498,11 @@ class Runtime:
         (self.state_dir / "artifacts").mkdir(exist_ok=True)
         (self.state_dir / "packs").mkdir(exist_ok=True)
         handle = open(self.state_dir / "lease.lock", "a+", encoding="utf-8")
-        if not tl_job.lock_exclusive(handle):
-            handle.close()
-            raise Refusal("coordinator_conflict: another runtime holds the lease for this batch", 5)
-        self._lease = handle
         try:
+            if not tl_job.lock_exclusive(handle):
+                handle.close()
+                raise Refusal("coordinator_conflict: another runtime holds the lease for this batch", 5)
+            self._lease = handle
             self.git.ensure_exclude()
             if self.authority is not None:
                 # One holder of the authority lease at a time: the global budget has a single writer.
@@ -1524,8 +1525,11 @@ class Runtime:
                                     budget={k: self.batch["budget"].get(k) for k in ("max_model_calls", "max_rework_rounds_per_unit")},
                                     roles={role: {k: cfg.get(k) for k in ("adapter", "model", "effort", "family")} for role, cfg in self.config["roles"].items()})
                 self.fold = self.journal.fold()
-        except Exception:
-            self.release()
+        except BaseException:
+            if self._lease is not None:
+                self.release()
+            else:
+                handle.close()
             raise
 
     def _story_branch(self) -> str:
@@ -1537,12 +1541,16 @@ class Runtime:
         return "" if branch == "HEAD" else branch
 
     def release(self) -> None:
-        if self.authority is not None:
-            self.authority.release()
-        if self._lease is not None:
-            tl_job.unlock_exclusive(self._lease)
-            self._lease.close()
-            self._lease = None
+        try:
+            if self.authority is not None:
+                self.authority.release()
+        finally:
+            if self._lease is not None:
+                lease, self._lease = self._lease, None
+                try:
+                    tl_job.unlock_exclusive(lease)
+                finally:
+                    lease.close()
 
     @property
     def base_branch(self) -> str:
@@ -1962,7 +1970,7 @@ class Runtime:
                 raise StopBatch(stop.reason if stop.reason in {"unexpected_tree_state"} else "unexpected_tree_state",
                                 f"{stop.reason}: {stop.detail}") from stop
         if record.phase == "prepare":
-            self.unit_state(uid, "running", "", phase="implement", branch=branch, base=base, commit=result.get("base_commit", ""), base_commit=result.get("base_commit", ""))
+            self.unit_state(uid, "running", "", phase="implement", branch=branch, base=base, base_commit=result.get("base_commit", ""))
 
     def rounds(self, unit: Unit) -> None:
         uid = unit.id

@@ -222,6 +222,12 @@ class SchemaSubsetValidatorTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("schema unavailable", errors[0])
 
+    def test_unsupported_keyword_in_unvisited_anyof_branch_is_refused(self) -> None:
+        schema = {"anyOf": [{}, {"type": "object", "unevaluatedProperties": False}]}
+        with self.assertRaises(plan_validator.SchemaError) as raised:
+            plan_validator.validate_json_schema({}, schema)
+        self.assertIn("unsupported schema keyword", str(raised.exception))
+
     def test_conditional_and_combinator_keywords_are_really_enforced(self) -> None:
         schema = {
             "type": "object",

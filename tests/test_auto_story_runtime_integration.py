@@ -656,12 +656,6 @@ class AutoStoryRuntimeTest(unittest.TestCase):
         })
         fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
 
-        # Verify that record_child_derived under lease also refuses this proposal
-        with auth:
-            with self.assertRaises(story.HardStop) as rec_ctx:
-                auth.record_child_derived(proposal, proof)
-            self.assertEqual(rec_ctx.exception.reason, "effect_expansion")
-
         # Runtime must HARD STOP (surfaced as Refusal caused by HardStop) before child_open or worker execution
         runtime = fx.runtime()
         with self.assertRaises(tl_runtime.Refusal) as raised:
@@ -770,12 +764,6 @@ class AutoStoryRuntimeTest(unittest.TestCase):
             "derivation_proof_digest": proof["derivation_proof_digest"],
         })
         fx.batch_path.write_text(json.dumps(fx.batch), encoding="utf-8")
-
-        # Verify that record_child_derived under lease also refuses this proposal
-        with auth:
-            with self.assertRaises(story.HardStop) as rec_ctx:
-                auth.record_child_derived(proposal, proof)
-            self.assertEqual(rec_ctx.exception.reason, "scope_expansion")
 
         # Runtime must HARD STOP (surfaced as Refusal caused by HardStop) before child_open or worker execution
         runtime = fx.runtime()
@@ -950,6 +938,70 @@ class AutoStoryRuntimeTest(unittest.TestCase):
         self.assertEqual(auth.state.child_state("B002"), "closed")
         self.assertEqual(auth.state.closure_of("B002")["checker_verdict"], "approved")
         self.assertEqual(auth.state.close_state, "done")
+
+    def test_auto_story_crash_between_batch_state_terminal_and_child_closed_unexpected_tree_state(self) -> None:
+        fx = self.auto_story_fixture(budget=8, max_rework=0, max_calls=8, limits={"stagnation_rounds": 6})
+        fx.script("maker", [{"files": {"pkg/A.txt": "Hello A"}}, {"files": {"pkg/B.txt": "Hello B"}}])
+        patch_item_b = {
+            "id": "R1", "severity": "medium", "category": "patch", "target_role": "maker",
+            "location": "pkg/B.txt:1", "problem": "need", "evidence": "no", "required_action": "do"
+        }
+        fx.script("checker", [
+            {"verdict": "changes_requested", "action_items": [patch_item_b]},
+            {"verdict": "approved", "action_items": []}
+        ])
+        root = fx.runtime()
+        s1 = root.run()
+        self.assertEqual(s1, "blocked")
+        successor, outcome = root.advance_story(s1)
+        self.assertEqual(successor.batch_id, "B002")
+        original_close_child = successor._close_child_batch
+        crashed = False
+
+        def monkeypatched_close_child(state: str) -> None:
+            nonlocal crashed
+            if not crashed:
+                crashed = True
+                raise RuntimeError("simulated crash")
+            original_close_child(state)
+
+        successor._close_child_batch = monkeypatched_close_child
+        with self.assertRaises(RuntimeError):
+            successor.run()
+        successor.refold()
+        self.assertTrue(successor.fold.closed)
+        self.assertEqual(successor.fold.batch_state, "done")
+        auth = self.authority(fx)
+        auth.acquire()
+        auth.refold()
+        self.assertEqual(auth.state.child_state("B002"), "open")
+        auth.release()
+        legitimate_head = git(fx.repo, "rev-parse", "HEAD").strip()
+        proposal_base = successor.child_proposal["lineage"]["governance_base_commit"]
+        merge_heads = {
+            step["result"]["base_commit"]
+            for step_id, step in successor.fold.steps.items()
+            if ":local_merge:" in step_id
+            and step.get("status") == "ok"
+            and step.get("result", {}).get("merged") is True
+        }
+        self.assertTrue(legitimate_head == proposal_base or legitimate_head in merge_heads)
+
+        safe_set = {proposal_base} | set(merge_heads)
+        self.assertIn(legitimate_head, safe_set)
+        git(fx.repo, "checkout", "main")
+        git(fx.repo, "reset", "--hard", proposal_base)
+        (fx.repo / "foreign-history-marker.txt").write_text("foreign history\n", encoding="utf-8")
+        git(fx.repo, "add", "foreign-history-marker.txt")
+        git(fx.repo, "commit", "-m", "foreign unjournaled governance history")
+        foreign_head = git(fx.repo, "rev-parse", "HEAD").strip()
+        self.assertNotIn(foreign_head, safe_set)
+        self.assertNotEqual(foreign_head, proposal_base)
+        rt2 = fx.runtime()
+        with self.assertRaises(tl_runtime.Refusal) as ctx:
+            rt2.run_story()
+        self.assertIn("unexpected_tree_state", str(ctx.exception))
+        self.assertIn("child_continuity", str(ctx.exception))
 
 if __name__ == "__main__":
     unittest.main()

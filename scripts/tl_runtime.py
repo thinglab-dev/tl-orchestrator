@@ -1449,13 +1449,32 @@ class Runtime:
             journaled += [(f"{uid}.commit", record.commit), (f"{uid}.base_commit", record.base_commit)]
             journaled += [(f"{uid}.checkpoint", commit) for commit in record.checkpoints]
 
-        has_progress = any(r.commit or r.checkpoints for r in fold.units.values())
-        base_rev = self.git.rev(self.base_branch)
+        has_progress = any(
+            bool(record.checkpoints)
+            or (
+                bool(record.commit)
+                and bool(_COMMIT_RE.match(str(record.commit)))
+                and str(record.commit) != origin
+                and str(record.commit) != str(record.base_commit)
+                and self._is_ancestor(origin, str(record.commit))
+            )
+            for record in fold.units.values()
+        )
+        safe_return_heads: set[str] = set()
         proposal_base = (proposal.get("lineage") or {}).get("governance_base_commit")
+        if proposal_base and _COMMIT_RE.match(str(proposal_base)):
+            safe_return_heads.add(str(proposal_base))
+        for step_id, step in fold.steps.items():
+            if ":local_merge:" not in str(step_id) or step.get("status") != "ok":
+                continue
+            result = step.get("result") or {}
+            base_commit = result.get("base_commit")
+            if result.get("merged") is True and base_commit and _COMMIT_RE.match(str(base_commit)):
+                safe_return_heads.add(str(base_commit))
 
         for name, commit in journaled:
             if commit and (not _COMMIT_RE.match(str(commit)) or not self._is_ancestor(origin, str(commit))):
-                if name == "HEAD" and has_progress and (str(commit) == base_rev or str(commit) == proposal_base):
+                if name == "HEAD" and has_progress and str(commit) in safe_return_heads:
                     continue
                 refuse("unexpected_tree_state", f"{name} {str(commit)[:12]} does not descend from the opening commit "
                        f"{origin[:12]}; resuming would continue a history this child never journaled",
@@ -1524,7 +1543,7 @@ class Runtime:
                                     budget={k: self.batch["budget"].get(k) for k in ("max_model_calls", "max_rework_rounds_per_unit")},
                                     roles={role: {k: cfg.get(k) for k in ("adapter", "model", "effort", "family")} for role, cfg in self.config["roles"].items()})
                 self.fold = self.journal.fold()
-        except Exception:
+        except BaseException:
             self.release()
             raise
 

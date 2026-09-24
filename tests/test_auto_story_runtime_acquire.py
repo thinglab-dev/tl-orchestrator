@@ -94,3 +94,20 @@ class RuntimeAcquireTest(unittest.TestCase):
         rt2 = fx.runtime()
         rt2.acquire()
         rt2.release()
+
+    def test_acquire_releases_all_locks_on_keyboard_interrupt(self):
+        fx = self.fixture()
+        rt1 = fx.runtime()
+
+        from unittest import mock
+        with mock.patch.object(rt1.journal, 'fold', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                rt1.acquire()
+
+        self.assertIsNone(rt1._lease)
+        self.assertIsNone(rt1.authority._lease)
+
+        # rt2 should be able to acquire because rt1 released locks
+        rt2 = fx.runtime()
+        rt2.acquire()
+        rt2.release()

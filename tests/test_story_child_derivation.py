@@ -125,6 +125,16 @@ class ChildDerivationTest(StoryCase):
         # "Not approved" alone never derives a child: an empty residual set is refused too.
         self.assertEqual(story.derivation_eligibility([], auth.payload, SPEC_PATHS)[0], False)
 
+    def test_finding_location_traversal_is_never_inside_parent_envelope(self) -> None:
+        auth = self.authority(self.frozen_authority(authority_id="A198"))
+        item = self.patch_item("R9", location="src/connector.py/../../secrets/key.txt:1")
+        eligible, blockers = story.derivation_eligibility([item], auth.payload, SPEC_PATHS)
+        self.assertFalse(eligible)
+        self.assertIn("scope_expansion", {blocker["reason"] for blocker in blockers})
+        self.assert_hard_stop(
+            auth, self.base_child(auth), "scope_expansion",
+            action_items=[item], spec_paths=SPEC_PATHS)
+
     def test_child_cannot_name_an_unknown_parent_to_skip_lineage(self) -> None:
         auth = self.authority()
         first = self.base_child(auth)

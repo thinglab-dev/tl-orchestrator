@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "verdict": "changes_requested",
+  "action_items": [
+    {
+      "id": "R6",
+      "severity": "high",
+      "category": "patch",
+      "target_role": "maker",
+      "location": "_tl-orc/project/evidence/T032-T033-r01/checker-briefing.md:2",
+      "problem": "O diff versiona um caminho local privado contendo o identificador do usuário (`/Users/albertiano/...`), contrariando CONTRIBUTING.md, que veda caminhos privados e dados pessoais no repositório fonte.",
+      "evidence": "A linha 2 do artefato adicionado contém o caminho absoluto; a busca no diff base..target localiza essa ocorrência adicionada.",
+      "required_action": "Sanitizar o briefing versionado, substituindo o caminho absoluto por uma referência neutra ao repositório, e conferir os artefatos T032/T033 rastreados para que não reste caminho local privado.",
+      "scope_status": "outside_parent_envelope",
+      "spec_status": "unchanged",
+      "derivation_blockers": [
+        "security",
+        "scope_expansion"
+      ]
+    },
+    {
+      "id": "R7",
+      "severity": "medium",
+      "category": "intent_gap",
+      "target_role": "human",
+      "location": ".github/workflows/validate.yml:14; _tl-orc/project/evidence/T032-T033-verification.md:34-40",
+      "problem": "verificacao_pendente: sob verification_scope=integration_boundary, não há na árvore uma prova recuperável que vincule a execução integral do canonical_full_gate ao SHA 44364ce95b0db2d0c409fdef69d4564188d1670d.",
+      "evidence": "A evidência versionada só referencia runs para 17d08a9 e 29fc59d. O briefing informa o run 35290129200, mas `gh run view 35290129200 --repo thinglab-dev/tl-orchestrator --json ...` não pôde recuperar o registro neste ambiente por falha de conexão à API.",
+      "required_action": "Recuperar e preservar evidência auditável do run 35290129200, incluindo head SHA 44364ce95b0db2d0c409fdef69d4564188d1670d, conclusão success e os quatro jobs canônicos; alternativamente, executar novamente o gate no SHA alvo e registrar o resultado.",
+      "scope_status": "unprovable",
+      "spec_status": "unchanged",
+      "derivation_blockers": [
+        "human"
+      ]
+    }
+  ],
+  "deferred": [
+    {
+      "summary": "Há colisão declarada de identidade T032 com a branch preexistente feat/t032-short-resume-protocol; a reconciliação é necessária antes de uma release estável, mas não altera a contenção funcional deste alvo.",
+      "evidence": "_tl-orc/project/evidence/T032-T033-verification.md, seção “Incompatibilidade de ambiente registrada”, registra a colisão e condiciona a release estável à reconciliação.",
+      "location": "_tl-orc/project/evidence/T032-T033-verification.md",
+      "severity": "medium"
+    }
+  ],
+  "rejected": [
+    {
+      "summary": "R5 não deixa bypass de autoridade no fluxo revisado: proposta persistida é revalidada contra envelope e estado sob lease antes de persistir e ao bind, antes de child_open.",
+      "evidence": "scripts/tl_story_authority.py:845-891 revalida o objeto persistido após recomputar digests; :893-931 valida antes de gravar/journalizar; scripts/tl_runtime.py:1318-1357 revalida sob lease antes de record_child_open. O validador cobre schema, escopo, efeitos, orçamento, predecessor, checkpoint e deadline em scripts/tl_story_authority.py:1261-1407.",
+      "location": "scripts/tl_story_authority.py:845-931; scripts/tl_runtime.py:1318-1357"
+    },
+    {
+      "summary": "As contraprovas R5 são materialmente falsificáveis nos dois ingressos exigidos e verificam parada antes de child_open.",
+      "evidence": "tests/test_auto_story_runtime_integration.py:393-509 e :511-624 persistem proposal/proof autodigeridos diretamente, exigem HardStop no record_child_derived, Refusal causada por HardStop no acquire e ausência de child_open no journal.",
+      "location": "tests/test_auto_story_runtime_integration.py:393-624"
+    },
+    {
+      "summary": "Não foi identificado novo TOCTOU de derivação, vazamento de recurso ou fallback permissivo no rework R5.",
+      "evidence": "A mutação child_derived e sua validação ocorrem sob StoryAuthority._lease; Runtime.acquire libera ambos os leases na exceção; o caminho novo usa recusas HardStop/Refusal e não adiciona timer, thread ou recurso persistente sem encerramento. audit_diff.py não reportou blocker.",
+      "location": "scripts/tl_story_authority.py:583-616; scripts/tl_runtime.py:1359-1400"
+    }
+  ]
+}

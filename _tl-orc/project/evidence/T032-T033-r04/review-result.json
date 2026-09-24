@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "verdict": "changes_requested",
+  "action_items": [
+    {
+      "id": "R7",
+      "severity": "medium",
+      "category": "intent_gap",
+      "target_role": "human",
+      "location": "_tl-orc/project/evidence/ci-run-35290129200.json:1; target commit 2cdfcc654b58de44046c11bee1d6093da50009f7",
+      "problem": "verificacao_pendente: o full gate canônico obrigatório não possui evidência versionada e recuperável vinculada ao SHA exato sob revisão. O único registro rastreado aponta para o ancestral 44364ce, não para 2cdfcc6.",
+      "evidence": "O blob rastreado registra headSha=44364ce95b0db2d0c409fdef69d4564188d1670d. O arquivo que registra headSha=2cdfcc654b58de44046c11bee1d6093da50009f7 existe apenas como untracked (_tl-orc/project/evidence/ci-run-35291396267.json) e git cat-file confirma sua ausência da árvore do target.",
+      "required_action": "Definir e preservar uma forma auditável, offline e durável de vincular o full gate ao SHA revisado, sem depender de arquivo local não rastreado; submeter nova revisão contra uma árvore que contenha a evidência aceita."
+    }
+  ],
+  "deferred": [
+    {
+      "summary": "A ausência total de caminhos privados não é verdadeira para toda a árvore, embora R6 esteja sanado no delta desta entrega. Há evidências históricas fora do escopo de T032/T033 com caminhos absolutos privados.",
+      "evidence": "Busca no alvo encontrou ocorrências preexistentes, por exemplo em _tl-orc/project/evidence/T012-support/r01/01-pilot-inputs/arm-a-history.md:39 e _tl-orc/project/evidence/T028-r01.md. Elas não foram adicionadas por origin/main..2cdfcc6; a decisão de saneamento histórico deve ser tratada separadamente.",
+      "location": "_tl-orc/project/evidence/T012-support/r01/01-pilot-inputs/arm-a-history.md:39",
+      "severity": "medium"
+    }
+  ],
+  "rejected": [
+    {
+      "summary": "R5 permanece sanado: não há bypass de autoridade por proposta persistida.",
+      "evidence": "scripts/tl_runtime.py:1318 reobtém proposta e prova do journal, revalida assert_child_proposal_within_envelope antes de assert_batch_matches_child_proposal e antes de record_child_open; tests/test_auto_story_runtime_integration.py:393 e :511 falsificam expansão persistida de efeito e escopo e exigem ausência de child_open."
+    },
+    {
+      "summary": "R6 está sanado para o artefato introduzido pela entrega.",
+      "evidence": "_tl-orc/project/evidence/T032-T033-r01/checker-briefing.md:2 usa referência neutra à worktree; a varredura das linhas adicionadas/modificadas de origin/main..2cdfcc6 não encontrou nome de usuário nem caminho pessoal."
+    },
+    {
+      "summary": "Não foi identificado novo defeito material de concorrência, recursos ou fail-closed na implementação T032/T033 além da lacuna probatória R7.",
+      "evidence": "A revisão estática de scripts/tl_story_authority.py, scripts/tl_runtime.py, scripts/validate_execution_plan.py e scripts/tl_job.py confirmou revalidação sob lease antes de child_open, parada fail-closed para expansão, e testes contrafactuais correspondentes; git diff --check origin/main..2cdfcc6 está limpo."
+    }
+  ]
+}

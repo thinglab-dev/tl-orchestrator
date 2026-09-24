@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "verdict": "changes_requested",
+  "action_items": [
+    {
+      "id": "R8",
+      "severity": "high",
+      "category": "patch",
+      "target_role": "maker",
+      "location": "scripts/tl_story_authority.py:1410; scripts/tl_story_authority.py:1515; scripts/tl_story_authority.py:893; scripts/tl_runtime.py:1318",
+      "problem": "A derivação de um filho de rework pode omitir os action_items residuais. Para qualquer filho com predecessor, verify_derivation() só aplica a elegibilidade patch-only e compara o digest dos achados quando action_items não é None; com None, gera uma prova válida com unresolved_action_items_digest vazio. record_child_derived() e o bind do Runtime verificam somente hashes, envelope e checkpoint, sem exigir nem recomputar o vínculo com os achados da closure anterior. Isso permite abrir um filho automático apesar de achados residuais não patch-only.",
+      "evidence": "verify_derivation aceita action_items=None (1414) e pula integralmente derivation_eligibility(), derived_from_findings e unresolved_items_match_closure quando action_items é None (1515-1540). record_child_derived() persiste a prova sem validar o digest de achados contra a closure (893-932), e Runtime._bind_and_verify_auto_story_child() não revalida essa condição (1318-1357). Os testes de contraprova passam action_items explicitamente; não cobrem continuação com action_items=None.",
+      "required_action": "Para filho com parent_child_batch_id, tornar obrigatórios os achados residuais canônicos da closure anterior; exigir conjunto não vazio, recalcular elegibilidade patch-only e o digest, e rejeitar divergência antes de persistir ou abrir o filho. Persistir ou recuperar a evidência necessária para que o bind também confirme essa relação. Adicionar contraprovas para action_items=None, conjunto vazio, achado human/bad_spec e digest forjado, todas sem child_derived/child_open.",
+      "scope_status": "inside_parent_envelope",
+      "spec_status": "unchanged",
+      "derivation_blockers": [
+        "security"
+      ]
+    },
+    {
+      "id": "R9",
+      "severity": "medium",
+      "category": "patch",
+      "target_role": "maker",
+      "location": "scripts/tl_story_authority.py:893; scripts/tl_story_authority.py:1357; scripts/tl_story_authority.py:1484",
+      "problem": "O mesmo child_batch_id pode ser derivado novamente. A revalidação trata um ID já presente como não aumentando child_count e record_child_derived() sobrescreve os blobs de proposta/prova e acrescenta outro child_derived. Isso permite contornar max_child_batches e substituir a derivação vinculada a um batch já aberto ou fechado.",
+      "evidence": "assert_child_proposal_within_envelope calcula child_count sem incrementar quando child_id já existe (1357-1362); verify_derivation faz o mesmo (1484-1486). record_child_derived não recusa ID existente antes de sobrescrever proposal/proof (893-929).",
+      "required_action": "Recusar como state_integrity todo child_batch_id previamente derivado, aberto, fechado ou falho; validar transições do journal como máquina de estados. Adicionar contraprovas para rederivação de filho ativo e fechado, comprovando que blobs, contagem e linhagem permanecem imutáveis.",
+      "scope_status": "inside_parent_envelope",
+      "spec_status": "unchanged",
+      "derivation_blockers": [
+        "security"
+      ]
+    }
+  ],
+  "deferred": [],
+  "rejected": [
+    {
+      "summary": "R7 de r04 está sanado como lacuna de rastreabilidade: a evidência offline do run canônico 35291396267 está versionada na árvore do alvo e registra success para 2cdfcc654b58de44046c11bee1d6093da50009f7.",
+      "evidence": "git cat-file -e a59ca155026cd920dd7f53a77822d8bcdfa87acb:_tl-orc/project/evidence/ci-run-35291396267.json teve sucesso; o blob registra headSha 2cdfcc654b58de44046c11bee1d6093da50009f7, conclusão success e os quatro passos canônicos verdes.",
+      "location": "_tl-orc/project/evidence/ci-run-35291396267.json",
+      "severity": "low"
+    },
+    {
+      "summary": "O reaproveitamento da prova do full gate é aplicável ao rework documental.",
+      "evidence": "2cdfcc6 é ancestral de a59ca15; o delta contém somente _tl-orc/project/evidence/T032-T033-verification.md e ci-run-35291396267.json, sem alterações em scripts, schemas, tests, prompts ou docs. WORK_MODEL.md §8 permite não reexecutar testes funcionais para rework exclusivamente documental/evidencial.",
+      "location": "docs/WORK_MODEL.md:508",
+      "severity": "low"
+    }
+  ]
+}
